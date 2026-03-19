@@ -461,8 +461,8 @@ mod windows_registry {
     use std::path::PathBuf;
 
     use winreg::{
-        enums::{HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ},
-        RegKey,
+        enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ},
+        RegKey, HKEY,
     };
 
     use crate::models::GameEntry;
