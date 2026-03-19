@@ -1,0 +1,42 @@
+/** Shared Tailwind utility class strings used across components. */
+
+export const CARD =
+  "border border-[rgba(165,185,255,0.12)] bg-[rgba(14,22,40,0.82)] rounded-3xl shadow-[0_24px_60px_rgba(4,10,22,0.24)] p-6";
+
+export const SEC_HDR =
+  "flex items-center justify-between gap-3 mb-[18px]";
+
+export const EYEBROW =
+  "mb-2 uppercase tracking-[0.16em] text-xs text-[#7dc9ff]";
+
+export const MUTED = "text-[#9aa8c7]";
+
+export const LABEL_SPAN = "text-[#c7d3f7] text-[0.92rem]";
+
+export const FORM_LABEL = "grid gap-2";
+
+export const FORM_GRID = "grid gap-[14px]";
+
+export const INPUT_ROW = "flex items-center justify-between gap-3";
+
+export const INPUT_CLS =
+  "w-full min-h-[46px] rounded-[14px] border border-[rgba(140,165,241,0.16)] bg-[rgba(7,12,23,0.84)] text-[#eef4ff] px-3.5 focus:outline-2 focus:outline-[rgba(122,180,255,0.35)] focus:outline-offset-[1px]";
+
+export const BTN =
+  "border-none cursor-pointer transition-[transform,opacity,background] duration-[0.18s] ease-in-out hover:-translate-y-px focus:outline-2 focus:outline-[rgba(122,180,255,0.35)] focus:outline-offset-1";
+
+export const PRIMARY_BTN =
+  `${BTN} w-full min-h-12 rounded-2xl bg-gradient-to-br from-[#6d7dff] to-[#55c5ff] text-[#05111f] font-bold`;
+
+export const SECONDARY_BTN =
+  `${BTN} min-h-[46px] px-4 rounded-2xl text-[#eaf3ff] bg-[rgba(86,133,255,0.16)]`;
+
+export const GHOST_BTN =
+  `${BTN} min-h-[46px] px-4 rounded-2xl text-[#eaf3ff] bg-[rgba(255,255,255,0.06)]`;
+
+const BADGE =
+  "inline-flex items-center justify-center px-3 py-1.5 rounded-2xl text-[0.85rem]";
+
+export const BADGE_ONLINE  = `${BADGE} bg-[rgba(67,201,142,0.14)] text-[#8bffc6]`;
+export const BADGE_OFFLINE = `${BADGE} bg-[rgba(255,168,111,0.12)] text-[#ffd0a4]`;
+export const SOFT_BADGE    = `${BADGE} bg-[rgba(102,126,255,0.14)] text-[#c8d2ff]`;
