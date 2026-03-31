@@ -344,15 +344,8 @@ fn send_response(stream: &mut std::net::TcpStream, body: &str) {
     let html = format!(
         r#"<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Save Game Sync</title>
-<meta http-equiv="refresh" content="2;url=http://localhost:1420/">
 <style>body{{font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#1a1a2e;color:#e0e0e0}}</style>
-</head><body>
-<div style="text-align:center">
-  <p>{body}</p>
-  <p style="font-size:0.85em;opacity:0.6">Redirecting back to the app…</p>
-</div>
-<script>setTimeout(()=>location.replace("http://localhost:1420/"),2000)</script>
-</body></html>"#
+</head><body><p>{body}</p></body></html>"#
     );
     let resp = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
