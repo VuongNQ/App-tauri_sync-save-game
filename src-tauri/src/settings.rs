@@ -46,28 +46,20 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
         return Err("Game name is required.".into());
     }
 
-    let launcher = payload
-        .launcher
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or("Manual")
-        .to_string();
-
-    let install_path = normalize_optional_path(payload.install_path);
     let base_id = format!("manual-{}", slugify(name));
     let id = ensure_unique_id(&state.games, base_id);
 
     let game = GameEntry {
         id,
         name: name.to_string(),
-        launcher,
-        install_path,
-        save_path: None,
-        source: "manual".into(),
-        confidence: "manual".into(),
-        is_manual: true,
-        is_available: true,
+        thumbnail: payload.thumbnail,
+        source: payload.source,
+        save_path: normalize_optional_path(payload.save_path),
+        track_changes: false,
+        auto_sync: false,
+        last_local_modified: None,
+        last_cloud_modified: None,
+        gdrive_folder_id: None,
     };
 
     state.games.push(game.clone());
@@ -80,7 +72,6 @@ pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
     let mut state = load_state(app)?;
     let normalized = GameEntry {
         save_path: normalize_optional_path(game.save_path),
-        install_path: normalize_optional_path(game.install_path),
         ..game
     };
 

@@ -1,7 +1,10 @@
-export { DASHBOARD_KEY } from "./keys";
+export { DASHBOARD_KEY, AUTH_STATUS_KEY } from "./keys";
 export {
   useAddGameMutation,
   useDashboardQuery,
-  useRefreshMutation,
-  useSavePathMutation,
+  useUpdateGameMutation,
 } from "./dashboard";
+export {
+  useAuthStatusQuery,
+  useLoginMutation,
+} from "./auth";

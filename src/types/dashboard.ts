@@ -1,37 +1,33 @@
-export type ConfidenceLevel = "manual" | "high" | "medium" | "low";
+export type GameSource = "steam" | "epic" | "emulator" | "manual";
 
-export interface GameItem {
+export interface GameEntry {
   id: string;
   name: string;
-  launcher: string;
-  installPath: string | null;
+  thumbnail: string | null;
+  source: GameSource;
   savePath: string | null;
-  source: string;
-  confidence: ConfidenceLevel | string;
-  isManual: boolean;
-  isAvailable: boolean;
-}
-
-export interface LauncherStatus {
-  id: string;
-  name: string;
-  detected: boolean;
-  gameCount: number;
-  details: string | null;
+  trackChanges: boolean;
+  autoSync: boolean;
+  lastLocalModified: string | null;
+  lastCloudModified: string | null;
+  gdriveFolderId: string | null;
 }
 
 export interface DashboardData {
-  games: GameItem[];
-  launchers: LauncherStatus[];
-  warnings: string[];
+  games: GameEntry[];
 }
 
 export interface AddGamePayload {
   name: string;
-  launcher: string | null;
-  installPath: string | null;
+  thumbnail: string | null;
+  source: GameSource;
+  savePath: string | null;
 }
 
-export interface UpsertGamePayload {
-  game: GameItem;
+export interface UpdateGamePayload {
+  game: GameEntry;
+}
+
+export interface AuthStatus {
+  authenticated: boolean;
 }

@@ -1,8 +1,7 @@
-/** Centralised React Query key registry.
- *
- * All keys are plain const arrays so they are easy to invalidate and type-safe
- * when passed to `useQueryClient().setQueryData` / `invalidateQueries`.
- */
+/** Centralised React Query key registry. */
 
 export const DASHBOARD_KEY = ["dashboard"] as const;
 export type DashboardKey = typeof DASHBOARD_KEY;
+
+export const AUTH_STATUS_KEY = ["auth-status"] as const;
+export type AuthStatusKey = typeof AUTH_STATUS_KEY;

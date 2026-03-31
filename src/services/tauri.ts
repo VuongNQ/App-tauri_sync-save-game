@@ -2,17 +2,14 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   AddGamePayload,
+  AuthStatus,
   DashboardData,
-  GameItem,
-  UpsertGamePayload,
+  GameEntry,
+  UpdateGamePayload,
 } from "../types/dashboard";
 
 export async function loadDashboard(): Promise<DashboardData> {
   return invoke<DashboardData>("load_dashboard");
-}
-
-export async function refreshDashboard(): Promise<DashboardData> {
-  return invoke<DashboardData>("refresh_dashboard");
 }
 
 export async function addManualGame(
@@ -21,9 +18,23 @@ export async function addManualGame(
   return invoke<DashboardData>("add_manual_game", { payload });
 }
 
-export async function updateGameSavePath(
-  game: GameItem,
+export async function updateGame(
+  game: GameEntry,
 ): Promise<DashboardData> {
-  const payload: UpsertGamePayload = { game };
-  return invoke<DashboardData>("update_game_save_path", { payload });
+  const payload: UpdateGamePayload = { game };
+  return invoke<DashboardData>("update_game", { payload });
+}
+
+// ── Auth stubs (backed by Rust OAuth once implemented) ────────────────────
+
+export async function checkAuthStatus(): Promise<AuthStatus> {
+  return invoke<AuthStatus>("check_auth_status");
+}
+
+export async function startOAuthLogin(): Promise<AuthStatus> {
+  return invoke<AuthStatus>("start_oauth_login");
+}
+
+export async function logout(): Promise<AuthStatus> {
+  return invoke<AuthStatus>("logout");
 }

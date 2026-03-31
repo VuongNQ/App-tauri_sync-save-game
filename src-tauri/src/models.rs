@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+// ── Dashboard ─────────────────────────────────────────────
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DashboardData {
     pub games: Vec<GameEntry>,
-    pub launchers: Vec<LauncherStatus>,
-    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,38 +13,47 @@ pub struct DashboardData {
 pub struct GameEntry {
     pub id: String,
     pub name: String,
-    pub launcher: String,
-    pub install_path: Option<String>,
-    pub save_path: Option<String>,
+    pub thumbnail: Option<String>,
     pub source: String,
-    pub confidence: String,
-    pub is_manual: bool,
-    pub is_available: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LauncherStatus {
-    pub id: String,
-    pub name: String,
-    pub detected: bool,
-    pub game_count: usize,
-    pub details: Option<String>,
+    pub save_path: Option<String>,
+    pub track_changes: bool,
+    pub auto_sync: bool,
+    pub last_local_modified: Option<String>,
+    pub last_cloud_modified: Option<String>,
+    pub gdrive_folder_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddGamePayload {
     pub name: String,
-    pub launcher: Option<String>,
-    pub install_path: Option<String>,
+    pub thumbnail: Option<String>,
+    pub source: String,
+    pub save_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UpsertGamePayload {
+pub struct UpdateGamePayload {
     pub game: GameEntry,
 }
+
+// ── Auth ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthStatus {
+    pub authenticated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthTokens {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: u64,
+}
+
+// ── Persistence ───────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
