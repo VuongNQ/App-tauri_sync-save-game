@@ -1,9 +1,10 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { useNavigate } from "react-router";
 
 import { useAddGameMutation } from "../queries";
-import type { AddGamePayload, DashboardData } from "../types/dashboard";
+import type { AddGamePayload, GameSource } from "../types/dashboard";
 import { norm, msg } from "../utils";
 import {
   CARD,
@@ -17,39 +18,52 @@ import {
   SECONDARY_BTN,
 } from "./styles";
 
-const DEFAULT_FORM: AddGamePayload = { name: "", launcher: null, installPath: null };
+const DEFAULT_FORM: AddGamePayload = {
+  name: "",
+  thumbnail: null,
+  source: "manual",
+  savePath: null,
+};
 
-interface Props {
-  /** Called with the id of the newly-added game so the parent can select it. */
-  onGameAdded: (data: DashboardData, addedName: string) => void;
-}
-
-export function AddGameCard({ onGameAdded }: Props) {
+export function AddGameCard() {
   const [form, setForm] = useState<AddGamePayload>(DEFAULT_FORM);
   const addMutation = useAddGameMutation();
+  const navigate = useNavigate();
 
-  async function handleBrowse() {
-    const p = await open({ directory: true, multiple: false, title: "Choose the game install folder" });
-    if (typeof p === "string") setForm((c) => ({ ...c, installPath: p }));
+  async function handleBrowseSave() {
+    const p = await open({ directory: true, multiple: false, title: "Choose the save game folder" });
+    if (typeof p === "string") setForm((c) => ({ ...c, savePath: p }));
+  }
+
+  async function handleBrowseThumbnail() {
+    const p = await open({
+      multiple: false,
+      title: "Choose a thumbnail image",
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+    });
+    if (typeof p === "string") setForm((c) => ({ ...c, thumbnail: p }));
   }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const payload: AddGamePayload = {
       name: form.name.trim(),
-      launcher: norm(form.launcher),
-      installPath: norm(form.installPath),
+      thumbnail: norm(form.thumbnail),
+      source: form.source,
+      savePath: norm(form.savePath),
     };
     const data = await addMutation.mutateAsync(payload);
-    onGameAdded(data, payload.name);
+    const added = data.games.find(
+      (g) => g.name.toLowerCase() === payload.name.toLowerCase(),
+    );
     setForm(DEFAULT_FORM);
+    if (added) navigate(`/game/${added.id}`);
   }
 
   return (
     <section className={CARD}>
       <div className={SEC_HDR}>
         <h2 className="m-0 text-lg font-semibold">Add game</h2>
-        <span className="text-[0.85rem]">Manual entry</span>
       </div>
 
       <form className={FORM_GRID} onSubmit={handleSubmit}>
@@ -65,30 +79,46 @@ export function AddGameCard({ onGameAdded }: Props) {
         </label>
 
         <label className={FORM_LABEL}>
-          <span className={LABEL_SPAN}>Launcher</span>
+          <span className={LABEL_SPAN}>Source</span>
           <select
             className={INPUT_CLS}
-            value={form.launcher ?? "Manual"}
-            onChange={(e) => setForm((c) => ({ ...c, launcher: e.currentTarget.value }))}
+            value={form.source}
+            onChange={(e) =>
+              setForm((c) => ({ ...c, source: e.currentTarget.value as GameSource }))
+            }
           >
-            <option value="Manual">Manual</option>
-            <option value="Steam">Steam</option>
-            <option value="Epic Games">Epic Games</option>
-            <option value="GOG Galaxy">GOG Galaxy</option>
-            <option value="Other">Other</option>
+            <option value="manual">Manual</option>
+            <option value="steam">Steam</option>
+            <option value="epic">Epic Games</option>
+            <option value="emulator">Emulator</option>
           </select>
         </label>
 
         <label className={FORM_LABEL}>
-          <span className={LABEL_SPAN}>Install folder</span>
+          <span className={LABEL_SPAN}>Thumbnail (URL or file)</span>
           <div className={INPUT_ROW}>
             <input
               className={INPUT_CLS}
-              value={form.installPath ?? ""}
-              onChange={(e) => setForm((c) => ({ ...c, installPath: e.currentTarget.value }))}
-              placeholder="Optional install path"
+              value={form.thumbnail ?? ""}
+              onChange={(e) => setForm((c) => ({ ...c, thumbnail: e.currentTarget.value }))}
+              placeholder="https://… or browse a local file"
             />
-            <button type="button" className={SECONDARY_BTN} onClick={handleBrowse}>
+            <button type="button" className={SECONDARY_BTN} onClick={handleBrowseThumbnail}>
+              Browse
+            </button>
+          </div>
+        </label>
+
+        <label className={FORM_LABEL}>
+          <span className={LABEL_SPAN}>Save game folder</span>
+          <div className={INPUT_ROW}>
+            <input
+              className={INPUT_CLS}
+              value={form.savePath ?? ""}
+              onChange={(e) => setForm((c) => ({ ...c, savePath: e.currentTarget.value }))}
+              placeholder="Choose the save game folder"
+            />
+            <button type="button" className={SECONDARY_BTN} onClick={handleBrowseSave}>
               Browse
             </button>
           </div>

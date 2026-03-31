@@ -37,6 +37,33 @@ export const GHOST_BTN =
 const BADGE =
   "inline-flex items-center justify-center px-3 py-1.5 rounded-2xl text-[0.85rem]";
 
-export const BADGE_ONLINE  = `${BADGE} bg-[rgba(67,201,142,0.14)] text-[#8bffc6]`;
-export const BADGE_OFFLINE = `${BADGE} bg-[rgba(255,168,111,0.12)] text-[#ffd0a4]`;
-export const SOFT_BADGE    = `${BADGE} bg-[rgba(102,126,255,0.14)] text-[#c8d2ff]`;
+export const SOFT_BADGE = `${BADGE} bg-[rgba(102,126,255,0.14)] text-[#c8d2ff]`;
+
+export const SOURCE_BADGE: Record<string, string> = {
+  steam:    `${BADGE} bg-[rgba(67,201,142,0.14)] text-[#8bffc6]`,
+  epic:     `${BADGE} bg-[rgba(102,126,255,0.14)] text-[#c8d2ff]`,
+  emulator: `${BADGE} bg-[rgba(255,196,91,0.14)] text-[#ffd98a]`,
+  manual:   `${BADGE} bg-[rgba(255,255,255,0.08)] text-[#c7d3f7]`,
+};
+
+// ── Toggle switch ─────────────────────────────────────────────────────────────
+
+export const TOGGLE_TRACK =
+  "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-2 focus:outline-[rgba(122,180,255,0.35)] focus:outline-offset-1";
+
+export const TOGGLE_TRACK_ON = `${TOGGLE_TRACK} bg-[#6d7dff]`;
+export const TOGGLE_TRACK_OFF = `${TOGGLE_TRACK} bg-[rgba(140,165,241,0.2)]`;
+
+export const TOGGLE_THUMB =
+  "pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out";
+
+export const TOGGLE_THUMB_ON = `${TOGGLE_THUMB} translate-x-5`;
+export const TOGGLE_THUMB_OFF = `${TOGGLE_THUMB} translate-x-0`;
+
+// ── Nav ───────────────────────────────────────────────────────────────────────
+
+export const NAV_LINK =
+  "flex items-center gap-3 px-4 py-3 rounded-2xl text-[#c7d3f7] transition-colors hover:bg-[rgba(86,133,255,0.12)]";
+
+export const NAV_LINK_ACTIVE =
+  "flex items-center gap-3 px-4 py-3 rounded-2xl text-white bg-[rgba(86,133,255,0.18)]";
