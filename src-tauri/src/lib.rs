@@ -3,6 +3,7 @@ mod gdrive_auth;
 mod models;
 mod settings;
 mod sync;
+mod tray;
 mod watcher;
 
 use std::sync::{Arc, Mutex};
@@ -158,6 +159,18 @@ pub fn run() {
             // Start watchers for games that have tracking enabled
             watcher::init_watchers(app.handle());
 
+            // Set up system tray icon and context menu
+            tray::setup_tray(app).map_err(|e| e.to_string())?;
+
+            // If "start minimised" is enabled, hide the main window
+            if let Ok(s) = settings::get_settings(app.handle()) {
+                if s.start_minimised {
+                    if let Some(win) = app.get_webview_window("main") {
+                        let _ = win.hide();
+                    }
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -177,6 +190,13 @@ pub fn run() {
             toggle_track_changes,
             toggle_auto_sync,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Hide the window instead of closing — app stays in system tray
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

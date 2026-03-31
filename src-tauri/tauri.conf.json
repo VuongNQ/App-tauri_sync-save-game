@@ -19,6 +19,10 @@
         "minHeight": 720
       }
     ],
+    "trayIcon": {
+      "iconPath": "icons/icon.png",
+      "tooltip": "Save Game Sync"
+    },
     "security": {
       "csp": "default-src 'self'; connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com http://127.0.0.1; img-src 'self' https://*.googleusercontent.com; style-src 'self' 'unsafe-inline'"
     }

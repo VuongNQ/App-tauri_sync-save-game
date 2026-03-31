@@ -97,8 +97,19 @@ pub fn get_settings(app: &AppHandle) -> Result<AppSettings, String> {
 
 pub fn update_settings(app: &AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
     let mut state = load_state(app)?;
+    let old_run_on_startup = state.settings.run_on_startup;
     state.settings = settings;
     save_state(app, &state)?;
+
+    // Register / unregister Windows startup when the flag changes
+    if state.settings.run_on_startup != old_run_on_startup {
+        if state.settings.run_on_startup {
+            register_startup()?;
+        } else {
+            unregister_startup()?;
+        }
+    }
+
     Ok(state.settings)
 }
 
@@ -163,4 +174,54 @@ fn ensure_unique_id(existing: &[GameEntry], base_id: String) -> String {
         }
         i += 1;
     }
+}
+
+// ── Windows startup registration ──────────────────────────
+
+const STARTUP_KEY_NAME: &str = "SaveGameSync";
+
+#[cfg(target_os = "windows")]
+fn register_startup() -> Result<(), String> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("Cannot resolve exe path: {e}"))?;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (run_key, _) = hkcu
+        .create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run")
+        .map_err(|e| format!("Cannot open Run registry key: {e}"))?;
+
+    run_key
+        .set_value(STARTUP_KEY_NAME, &exe_path.to_string_lossy().to_string())
+        .map_err(|e| format!("Cannot set startup registry value: {e}"))?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn unregister_startup() -> Result<(), String> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    if let Ok(run_key) = hkcu.open_subkey_with_flags(
+        r"Software\Microsoft\Windows\CurrentVersion\Run",
+        KEY_WRITE,
+    ) {
+        let _ = run_key.delete_value(STARTUP_KEY_NAME);
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn register_startup() -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn unregister_startup() -> Result<(), String> {
+    Ok(())
 }
