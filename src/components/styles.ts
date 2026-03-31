@@ -34,6 +34,9 @@ export const SECONDARY_BTN =
 export const GHOST_BTN =
   `${BTN} min-h-[46px] px-4 rounded-2xl text-[#eaf3ff] bg-[rgba(255,255,255,0.06)]`;
 
+export const DANGER_BTN =
+  `${BTN} w-full min-h-12 rounded-2xl bg-[rgba(255,60,60,0.16)] text-[#ff9e9e] font-bold hover:bg-[rgba(255,60,60,0.28)]`;
+
 const BADGE =
   "inline-flex items-center justify-center px-3 py-1.5 rounded-2xl text-[0.85rem]";
 

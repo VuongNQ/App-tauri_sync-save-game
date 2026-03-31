@@ -1,13 +1,32 @@
+import { useState } from "react";
 import { Link } from "react-router";
 
+import { useRemoveGameMutation } from "../queries";
 import type { GameEntry } from "../types/dashboard";
+import { ConfirmModal } from "./ConfirmModal";
 import { CARD, MUTED, SEC_HDR, SOURCE_BADGE, SOFT_BADGE } from "./styles";
 
 interface Props {
   games: GameEntry[];
+  invalidGameIds?: Set<string>;
 }
 
-export function GamesList({ games }: Props) {
+export function GamesList({ games, invalidGameIds }: Props) {
+  const removeMutation = useRemoveGameMutation();
+  const [removeTarget, setRemoveTarget] = useState<GameEntry | null>(null);
+
+  function handleRemoveClick(e: React.MouseEvent, game: GameEntry) {
+    e.preventDefault();
+    setRemoveTarget(game);
+  }
+
+  function handleConfirmRemove() {
+    if (removeTarget) {
+      removeMutation.mutate(removeTarget.id);
+      setRemoveTarget(null);
+    }
+  }
+
   return (
     <section className={CARD}>
       <div className={SEC_HDR}>
@@ -24,40 +43,73 @@ export function GamesList({ games }: Props) {
         ) : (
           games.map((g) => {
             const badge = SOURCE_BADGE[g.source] ?? SOFT_BADGE;
+            const isInvalid = invalidGameIds?.has(g.id) ?? false;
             return (
-              <Link
+              <div
                 key={g.id}
-                to={`/game/${g.id}`}
-                className="flex items-center gap-4 p-4 rounded-2xl text-inherit no-underline bg-[rgba(10,16,31,0.72)] border border-[rgba(154,177,255,0.08)] hover:border-[rgba(111,171,255,0.4)] transition-colors"
+                className={`flex items-center gap-4 p-4 rounded-2xl bg-[rgba(10,16,31,0.72)] border transition-colors ${
+                  isInvalid
+                    ? "border-[rgba(255,100,100,0.4)] hover:border-[rgba(255,100,100,0.6)]"
+                    : "border-[rgba(154,177,255,0.08)] hover:border-[rgba(111,171,255,0.4)]"
+                }`}
               >
-                {/* Thumbnail */}
-                <div className="w-12 h-12 shrink-0 rounded-xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
-                  {g.thumbnail ? (
-                    <img src={g.thumbnail} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-lg">
-                      🎮
-                    </div>
-                  )}
-                </div>
-
-                <div className="grid gap-1 min-w-0">
-                  <strong className="truncate">{g.name}</strong>
-                  <div className="flex items-center gap-2">
-                    <span className={badge}>{g.source}</span>
-                    {g.savePath && (
-                      <span className={`${MUTED} text-xs truncate`}>{g.savePath}</span>
+                <Link
+                  to={`/game/${g.id}`}
+                  className="flex items-center gap-4 flex-1 min-w-0 text-inherit no-underline"
+                >
+                  {/* Thumbnail */}
+                  <div className="w-12 h-12 shrink-0 rounded-xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
+                    {g.thumbnail ? (
+                      <img src={g.thumbnail} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-lg">
+                        🎮
+                      </div>
                     )}
                   </div>
-                  {g.description && (
-                    <p className={`${MUTED} m-0 text-xs truncate`}>{g.description}</p>
-                  )}
-                </div>
-              </Link>
+
+                  <div className="grid gap-1 min-w-0">
+                    <strong className="truncate">{g.name}</strong>
+                    <div className="flex items-center gap-2">
+                      <span className={badge}>{g.source}</span>
+                      {g.savePath && (
+                        <span className={`${MUTED} text-xs truncate`}>{g.savePath}</span>
+                      )}
+                    </div>
+                    {isInvalid && (
+                      <p className="m-0 text-xs text-[#ff9e9e] flex items-center gap-1">
+                        <span>⚠</span> Save path not found
+                      </p>
+                    )}
+                    {g.description && (
+                      <p className={`${MUTED} m-0 text-xs truncate`}>{g.description}</p>
+                    )}
+                  </div>
+                </Link>
+
+                {/* Remove button */}
+                <button
+                  type="button"
+                  title="Remove game"
+                  className="shrink-0 w-9 h-9 grid place-items-center rounded-xl border border-transparent text-[#9aa8c7] hover:text-[#ff9e9e] hover:bg-[rgba(255,80,80,0.12)] hover:border-[rgba(255,100,100,0.3)] transition-colors cursor-pointer bg-transparent"
+                  onClick={(e) => handleRemoveClick(e, g)}
+                >
+                  ✕
+                </button>
+              </div>
             );
           })
         )}
       </div>
+
+      <ConfirmModal
+        open={removeTarget !== null}
+        title="Remove game"
+        message={`Are you sure you want to remove "${removeTarget?.name}" from your library? This cannot be undone.`}
+        confirmLabel="Remove"
+        onConfirm={handleConfirmRemove}
+        onCancel={() => setRemoveTarget(null)}
+      />
     </section>
   );
 }

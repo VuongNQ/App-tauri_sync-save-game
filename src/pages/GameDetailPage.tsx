@@ -1,18 +1,23 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router";
+import { useParams, Link, useNavigate } from "react-router";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import {
   useDashboardQuery,
+  useRemoveGameMutation,
   useUpdateGameMutation,
   useGetSaveInfoMutation,
   useSyncGameMutation,
+  useValidatePathsQuery,
 } from "../queries";
 import type { GameEntry } from "../types/dashboard";
 import type { SaveInfo } from "../types/dashboard";
-import { norm, msg } from "../utils";
+import { getBrowseDefaultPath } from "../services/tauri";
+import { norm, msg, formatLocalTime } from "../utils";
+import { ConfirmModal } from "../components/ConfirmModal";
 import {
   CARD,
+  DANGER_BTN,
   EYEBROW,
   FORM_GRID,
   FORM_LABEL,
@@ -33,8 +38,11 @@ import {
 
 export function GameDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { data: dashboard } = useDashboardQuery();
   const updateMutation = useUpdateGameMutation();
+  const removeMutation = useRemoveGameMutation();
+  const [showRemoveModal, setShowRemoveModal] = useState(false);
 
   const game = dashboard?.games.find((g) => g.id === id) ?? null;
   const { savePathDraft, setSavePathDraft, handleBrowse, handleSave } =
@@ -43,6 +51,10 @@ export function GameDetailPage() {
     useDescriptionForm(game, updateMutation);
   const saveInfoMutation = useGetSaveInfoMutation();
   const syncMutation = useSyncGameMutation();
+  const validateQuery = useValidatePathsQuery();
+  const isPathInvalid =
+    game != null &&
+    (validateQuery.data ?? []).some((v) => v.gameId === game.id && !v.valid);
 
   if (!game) {
     return (
@@ -100,8 +112,8 @@ export function GameDetailPage() {
         <dl className="grid gap-[14px] grid-cols-2 m-0 max-[720px]:grid-cols-1">
           {[
             { label: "Save folder", value: game.savePath ?? "Not set" },
-            { label: "Last local save", value: game.lastLocalModified ?? "Never" },
-            { label: "Last cloud save", value: game.lastCloudModified ?? "Never" },
+            { label: "Last local save", value: formatLocalTime(game.lastLocalModified) },
+            { label: "Last cloud save", value: formatLocalTime(game.lastCloudModified) },
             { label: "Google Drive folder", value: game.gdriveFolderId ?? "Not synced" },
           ].map(({ label, value }) => (
             <div
@@ -147,6 +159,12 @@ export function GameDetailPage() {
       {/* Save folder form */}
       <div className={CARD}>
         <h3 className="m-0 mb-4 font-semibold">Save folder mapping</h3>
+
+        {isPathInvalid && (
+          <div className="mb-4 p-3 rounded-2xl border border-[rgba(255,100,100,0.3)] bg-[rgba(62,18,22,0.5)] text-[#ff9e9e] text-sm flex items-center gap-2">
+            <span>⚠</span> The configured save path does not exist on this machine.
+          </div>
+        )}
 
         <div className={FORM_GRID}>
           <label className={FORM_LABEL}>
@@ -249,6 +267,36 @@ export function GameDetailPage() {
           </p>
         )}
       </div>
+
+      {/* Danger zone */}
+      <div className={CARD}>
+        <h3 className="m-0 mb-4 font-semibold text-[#ff9e9e]">Danger zone</h3>
+        <button
+          className={DANGER_BTN}
+          type="button"
+          disabled={removeMutation.isPending}
+          onClick={() => setShowRemoveModal(true)}
+        >
+          {removeMutation.isPending ? "Removing…" : "Remove game"}
+        </button>
+        {removeMutation.isError && (
+          <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
+            {msg(removeMutation.error, "Unable to remove game.")}
+          </p>
+        )}
+      </div>
+
+      <ConfirmModal
+        open={showRemoveModal}
+        title="Remove game"
+        message={`Are you sure you want to remove "${game.name}" from your library? This cannot be undone.`}
+        confirmLabel="Remove"
+        onConfirm={() => {
+          setShowRemoveModal(false);
+          removeMutation.mutate(game.id, { onSuccess: () => navigate("/", { replace: true }) });
+        }}
+        onCancel={() => setShowRemoveModal(false)}
+      />
     </>
   );
 }
@@ -373,10 +421,22 @@ function useSavePathForm(
   }, [game?.id, game?.savePath]);
 
   async function handleBrowse() {
+    // Priority: current game's parent dir → last game's parent dir → no default
+    let defaultPath: string | undefined;
+    if (game?.savePath) {
+      const sep = game.savePath.lastIndexOf("\\");
+      if (sep > 0) defaultPath = game.savePath.slice(0, sep);
+    }
+    if (!defaultPath) {
+      const suggested = await getBrowseDefaultPath();
+      if (suggested) defaultPath = suggested;
+    }
+
     const p = await open({
       directory: true,
       multiple: false,
       title: "Choose the save game folder",
+      defaultPath,
     });
     if (typeof p === "string") setSavePathDraft(p);
   }

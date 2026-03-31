@@ -12,7 +12,7 @@ use tauri::Manager;
 
 use models::{
     AddGamePayload, AppSettings, AuthStatus, DashboardData, GoogleUserInfo,
-    OAuthCredentials, SaveInfo, SaveTokensPayload, SyncResult, UpdateGamePayload,
+    OAuthCredentials, PathValidation, SaveInfo, SaveTokensPayload, SyncResult, UpdateGamePayload,
 };
 
 #[tauri::command]
@@ -37,6 +37,13 @@ fn update_game(
     payload: UpdateGamePayload,
 ) -> Result<DashboardData, String> {
     settings::upsert_game(&app, payload.game)?;
+    let state = settings::load_state(&app)?;
+    Ok(DashboardData { games: state.games })
+}
+
+#[tauri::command]
+fn remove_game(app: tauri::AppHandle, game_id: String) -> Result<DashboardData, String> {
+    settings::remove_game(&app, &game_id)?;
     let state = settings::load_state(&app)?;
     Ok(DashboardData { games: state.games })
 }
@@ -86,6 +93,18 @@ fn get_settings(app: tauri::AppHandle) -> Result<AppSettings, String> {
 #[tauri::command]
 fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
     settings::update_settings(&app, settings)
+}
+
+// ── Path validation commands ──────────────────────────────
+
+#[tauri::command]
+fn validate_save_paths(app: tauri::AppHandle) -> Result<Vec<PathValidation>, String> {
+    settings::validate_save_paths(&app)
+}
+
+#[tauri::command]
+fn get_browse_default_path(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    settings::get_browse_default_path(&app)
 }
 
 // ── Save info commands ─────────────────────────────────────
@@ -177,6 +196,7 @@ pub fn run() {
             load_dashboard,
             add_manual_game,
             update_game,
+            remove_game,
             check_auth_status,
             save_auth_tokens,
             get_oauth_credentials,
@@ -189,6 +209,8 @@ pub fn run() {
             sync_all_games,
             toggle_track_changes,
             toggle_auto_sync,
+            validate_save_paths,
+            get_browse_default_path,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

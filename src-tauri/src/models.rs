@@ -171,6 +171,15 @@ pub struct DriveFile {
     pub size: Option<u64>,
 }
 
+// ── Path Validation ───────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathValidation {
+    pub game_id: String,
+    pub valid: bool,
+}
+
 // ── Persistence ───────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -86,3 +86,10 @@ export interface SyncResult {
   skipped: number;
   error: string | null;
 }
+
+// ── Path Validation ───────────────────────────────────────
+
+export interface PathValidation {
+  gameId: string;
+  valid: boolean;
+}

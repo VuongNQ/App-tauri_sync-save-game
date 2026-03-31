@@ -1,4 +1,4 @@
-import { useDashboardQuery } from "../queries";
+import { useDashboardQuery, useValidatePathsQuery } from "../queries";
 import { AddGameCard } from "../components/AddGameCard";
 import { GamesList } from "../components/GamesList";
 import { HeroCard } from "../components/HeroCard";
@@ -7,7 +7,14 @@ import { msg } from "../utils";
 
 export function DashboardPage() {
   const dashboardQuery = useDashboardQuery();
+  const validateQuery = useValidatePathsQuery();
   const games = dashboardQuery.data?.games ?? [];
+
+  const invalidGameIds = new Set(
+    (validateQuery.data ?? [])
+      .filter((v) => !v.valid)
+      .map((v) => v.gameId),
+  );
 
   return (
     <>
@@ -36,7 +43,7 @@ export function DashboardPage() {
       </div>
 
       {/* Game list */}
-      <GamesList games={games} />
+      <GamesList games={games} invalidGameIds={invalidGameIds} />
     </>
   );
 }

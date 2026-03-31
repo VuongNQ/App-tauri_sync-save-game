@@ -8,6 +8,7 @@ import type {
   GameEntry,
   GoogleUserInfo,
   OAuthCredentials,
+  PathValidation,
   SaveInfo,
   SaveTokensPayload,
   SyncResult,
@@ -29,6 +30,10 @@ export async function updateGame(
 ): Promise<DashboardData> {
   const payload: UpdateGamePayload = { game };
   return invoke<DashboardData>("update_game", { payload });
+}
+
+export async function removeGame(gameId: string): Promise<DashboardData> {
+  return invoke<DashboardData>("remove_game", { gameId });
 }
 
 // ── Auth (plugin-based OAuth) ─────────────────────────────────────────────
@@ -97,4 +102,14 @@ export async function toggleAutoSync(
   enabled: boolean,
 ): Promise<DashboardData> {
   return invoke<DashboardData>("toggle_auto_sync", { gameId, enabled });
+}
+
+// ── Path Validation ──────────────────────────────────────────────────────────
+
+export async function validateSavePaths(): Promise<PathValidation[]> {
+  return invoke<PathValidation[]>("validate_save_paths");
+}
+
+export async function getBrowseDefaultPath(): Promise<string | null> {
+  return invoke<string | null>("get_browse_default_path");
 }

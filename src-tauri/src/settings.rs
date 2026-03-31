@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use tauri::{AppHandle, Manager};
 
-use crate::models::{AddGamePayload, AppSettings, GameEntry, StoredState};
+use crate::models::{AddGamePayload, AppSettings, GameEntry, PathValidation, StoredState};
 
 const SETTINGS_FILE_NAME: &str = "games-library.json";
 
@@ -72,6 +72,16 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
     save_state(app, &state)?;
 
     Ok(game)
+}
+
+pub fn remove_game(app: &AppHandle, game_id: &str) -> Result<(), String> {
+    let mut state = load_state(app)?;
+    let before = state.games.len();
+    state.games.retain(|g| g.id != game_id);
+    if state.games.len() == before {
+        return Err(format!("Game not found: {game_id}"));
+    }
+    save_state(app, &state)
 }
 
 pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
@@ -173,6 +183,69 @@ fn ensure_unique_id(existing: &[GameEntry], base_id: String) -> String {
             return candidate;
         }
         i += 1;
+    }
+}
+
+// ── Path validation ───────────────────────────────────────
+
+pub fn validate_save_paths(app: &AppHandle) -> Result<Vec<PathValidation>, String> {
+    let state = load_state(app)?;
+    let results = state
+        .games
+        .iter()
+        .map(|g| {
+            let valid = match &g.save_path {
+                Some(p) => std::path::Path::new(p).exists(),
+                None => true, // no path set yet — not an error
+            };
+            PathValidation {
+                game_id: g.id.clone(),
+                valid,
+            }
+        })
+        .collect();
+    Ok(results)
+}
+
+pub fn get_browse_default_path(app: &AppHandle) -> Result<Option<String>, String> {
+    let state = load_state(app)?;
+
+    // Find the game with the most recent last_local_modified that has a valid save_path
+    let best = state
+        .games
+        .iter()
+        .filter_map(|g| {
+            let path = g.save_path.as_deref()?;
+            let ts = g.last_local_modified.as_deref()?;
+            if std::path::Path::new(path).exists() {
+                Some((ts, path))
+            } else {
+                None
+            }
+        })
+        .max_by_key(|(ts, _)| ts.to_string());
+
+    match best {
+        Some((_, path)) => {
+            let parent = std::path::Path::new(path)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string());
+            Ok(parent)
+        }
+        None => {
+            // Fallback: first game with any existing save_path
+            let fallback = state.games.iter().find_map(|g| {
+                let path = g.save_path.as_deref()?;
+                if std::path::Path::new(path).exists() {
+                    std::path::Path::new(path)
+                        .parent()
+                        .map(|p| p.to_string_lossy().to_string())
+                } else {
+                    None
+                }
+            });
+            Ok(fallback)
+        }
     }
 }
 
