@@ -1,4 +1,4 @@
-export { DASHBOARD_KEY, AUTH_STATUS_KEY } from "./keys";
+export { DASHBOARD_KEY, AUTH_STATUS_KEY, SETTINGS_KEY } from "./keys";
 export {
   useAddGameMutation,
   useDashboardQuery,
@@ -7,4 +7,15 @@ export {
 export {
   useAuthStatusQuery,
   useLoginMutation,
+  useLogoutMutation,
 } from "./auth";
+export {
+  useSettingsQuery,
+  useUpdateSettingsMutation,
+} from "./settings";
+export {
+  useSyncGameMutation,
+  useSyncAllMutation,
+  useToggleTrackChangesMutation,
+  useToggleAutoSyncMutation,
+} from "./sync";

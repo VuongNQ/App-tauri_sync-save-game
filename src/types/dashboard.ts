@@ -31,3 +31,33 @@ export interface UpdateGamePayload {
 export interface AuthStatus {
   authenticated: boolean;
 }
+
+export interface SaveTokensPayload {
+  accessToken: string;
+  refreshToken: string | null;
+  expiresAt: number | null;
+}
+
+export interface OAuthCredentials {
+  clientId: string;
+  clientSecret: string;
+}
+
+// ── Settings ──────────────────────────────────────────────
+
+export interface AppSettings {
+  globalAutoSync: boolean;
+  syncIntervalMinutes: number;
+  startMinimised: boolean;
+  runOnStartup: boolean;
+}
+
+// ── Sync ──────────────────────────────────────────────────
+
+export interface SyncResult {
+  gameId: string;
+  uploaded: number;
+  downloaded: number;
+  skipped: number;
+  error: string | null;
+}

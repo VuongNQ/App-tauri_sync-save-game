@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use tauri::{AppHandle, Manager};
 
-use crate::models::{AddGamePayload, GameEntry, StoredState};
+use crate::models::{AddGamePayload, AppSettings, GameEntry, StoredState};
 
 const SETTINGS_FILE_NAME: &str = "games-library.json";
 
@@ -82,6 +82,34 @@ pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
     }
 
     save_state(app, &state)
+}
+
+pub fn get_settings(app: &AppHandle) -> Result<AppSettings, String> {
+    let state = load_state(app)?;
+    Ok(state.settings)
+}
+
+pub fn update_settings(app: &AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
+    let mut state = load_state(app)?;
+    state.settings = settings;
+    save_state(app, &state)?;
+    Ok(state.settings)
+}
+
+pub fn update_game_field(
+    app: &AppHandle,
+    game_id: &str,
+    updater: impl FnOnce(&mut GameEntry),
+) -> Result<StoredState, String> {
+    let mut state = load_state(app)?;
+    let game = state
+        .games
+        .iter_mut()
+        .find(|g| g.id == game_id)
+        .ok_or_else(|| format!("Game not found: {game_id}"))?;
+    updater(game);
+    save_state(app, &state)?;
+    Ok(state)
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
