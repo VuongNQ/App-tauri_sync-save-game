@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 use models::{
-    AddGamePayload, AppSettings, AuthStatus, DashboardData, OAuthCredentials,
-    SaveInfo, SaveTokensPayload, SyncResult, UpdateGamePayload,
+    AddGamePayload, AppSettings, AuthStatus, DashboardData, GoogleUserInfo,
+    OAuthCredentials, SaveInfo, SaveTokensPayload, SyncResult, UpdateGamePayload,
 };
 
 #[tauri::command]
@@ -68,6 +68,11 @@ fn get_oauth_credentials() -> Result<OAuthCredentials, String> {
 #[tauri::command]
 fn logout(app: tauri::AppHandle) -> Result<AuthStatus, String> {
     gdrive_auth::logout(&app)
+}
+
+#[tauri::command]
+fn get_google_user_info(app: tauri::AppHandle) -> Result<GoogleUserInfo, String> {
+    gdrive_auth::get_google_user_info(&app)
 }
 
 // ── Settings commands ─────────────────────────────────────
@@ -163,6 +168,7 @@ pub fn run() {
             save_auth_tokens,
             get_oauth_credentials,
             logout,
+            get_google_user_info,
             get_settings,
             update_settings,
             get_save_info,

@@ -3,14 +3,18 @@ import { signIn, signOut } from "@choochmeque/tauri-plugin-google-auth-api";
 
 import {
   checkAuthStatus,
+  getGoogleUserInfo,
   getOAuthCredentials,
   logout,
   saveAuthTokens,
 } from "../services/tauri";
 import type { AuthStatus } from "../types/dashboard";
-import { AUTH_STATUS_KEY } from "./keys";
+import { AUTH_STATUS_KEY, GOOGLE_USER_INFO_KEY } from "./keys";
 
 const SCOPES = [
+  "openid",
+  "email",
+  "profile",
   "https://www.googleapis.com/auth/drive.file",
   "https://www.googleapis.com/auth/drive.appdata",
 ];
@@ -55,7 +59,18 @@ export function useLogoutMutation() {
       await signOut();
       return logout();
     },
-    onSuccess: (data: AuthStatus) =>
-      queryClient.setQueryData<AuthStatus>(AUTH_STATUS_KEY, data),
+    onSuccess: (data: AuthStatus) => {
+      queryClient.setQueryData<AuthStatus>(AUTH_STATUS_KEY, data);
+      queryClient.removeQueries({ queryKey: GOOGLE_USER_INFO_KEY });
+    },
+  });
+}
+
+export function useGoogleUserInfoQuery() {
+  const { data: authStatus } = useAuthStatusQuery();
+  return useQuery({
+    queryKey: GOOGLE_USER_INFO_KEY,
+    queryFn: getGoogleUserInfo,
+    enabled: authStatus?.authenticated === true,
   });
 }

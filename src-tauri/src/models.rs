@@ -74,6 +74,15 @@ pub struct OAuthCredentials {
     pub client_secret: String,
 }
 
+/// Google account profile information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoogleUserInfo {
+    pub email: String,
+    pub name: Option<String>,
+    pub picture: Option<String>,
+}
+
 // ── Settings ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

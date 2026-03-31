@@ -45,6 +45,12 @@ export interface OAuthCredentials {
   clientSecret: string;
 }
 
+export interface GoogleUserInfo {
+  email: string;
+  name: string | null;
+  picture: string | null;
+}
+
 // ── Settings ──────────────────────────────────────────────
 
 export interface AppSettings {

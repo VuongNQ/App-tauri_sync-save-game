@@ -6,6 +6,7 @@ export {
 } from "./dashboard";
 export {
   useAuthStatusQuery,
+  useGoogleUserInfoQuery,
   useLoginMutation,
   useLogoutMutation,
 } from "./auth";

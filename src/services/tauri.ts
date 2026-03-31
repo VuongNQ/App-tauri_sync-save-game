@@ -6,6 +6,7 @@ import type {
   AuthStatus,
   DashboardData,
   GameEntry,
+  GoogleUserInfo,
   OAuthCredentials,
   SaveInfo,
   SaveTokensPayload,
@@ -48,6 +49,10 @@ export async function getOAuthCredentials(): Promise<OAuthCredentials> {
 
 export async function logout(): Promise<AuthStatus> {
   return invoke<AuthStatus>("logout");
+}
+
+export async function getGoogleUserInfo(): Promise<GoogleUserInfo> {
+  return invoke<GoogleUserInfo>("get_google_user_info");
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────

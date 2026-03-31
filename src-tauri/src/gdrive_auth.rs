@@ -7,7 +7,7 @@ use std::{
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::models::{AuthStatus, OAuthTokens, SaveTokensPayload};
+use crate::models::{AuthStatus, GoogleUserInfo, OAuthTokens, SaveTokensPayload};
 
 // ── Google OAuth 2.0 constants ────────────────────────────
 // CLIENT_ID / CLIENT_SECRET are injected at compile time from env vars.
@@ -212,4 +212,43 @@ pub fn get_client_id() -> Result<String, String> {
 /// Return the `CLIENT_SECRET` for use by the frontend plugin configuration.
 pub fn get_client_secret() -> String {
     CLIENT_SECRET.to_string()
+}
+
+const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
+
+/// Fetch the authenticated user's Google profile.
+pub fn get_google_user_info(app: &AppHandle) -> Result<GoogleUserInfo, String> {
+    let token = get_access_token(app)?;
+
+    let config = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .build();
+    let agent = ureq::Agent::new_with_config(config);
+    let resp = agent
+        .get(USERINFO_URL)
+        .header("Authorization", &format!("Bearer {token}"))
+        .call()
+        .map_err(|e| format!("Userinfo request failed: {e}"))?;
+
+    let status = resp.status().as_u16();
+    let body = resp.into_body().read_to_string().unwrap_or_default();
+    if status != 200 {
+        return Err(format!("Userinfo failed (HTTP {status}): {body}"));
+    }
+
+    #[derive(Deserialize)]
+    struct Raw {
+        email: String,
+        name: Option<String>,
+        picture: Option<String>,
+    }
+
+    let raw: Raw = serde_json::from_str(&body)
+        .map_err(|e| format!("Parse userinfo: {e}"))?;
+
+    Ok(GoogleUserInfo {
+        email: raw.email,
+        name: raw.name,
+        picture: raw.picture,
+    })
 }
