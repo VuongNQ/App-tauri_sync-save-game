@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
+  getSaveInfo,
   syncAllGames,
   syncGame,
   toggleAutoSync,
@@ -46,5 +47,11 @@ export function useToggleAutoSyncMutation() {
     mutationFn: ({ gameId, enabled }: { gameId: string; enabled: boolean }) =>
       toggleAutoSync(gameId, enabled),
     onSuccess: setCache,
+  });
+}
+
+export function useGetSaveInfoMutation() {
+  return useMutation({
+    mutationFn: (gameId: string) => getSaveInfo(gameId),
   });
 }

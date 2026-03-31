@@ -2,8 +2,14 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { useDashboardQuery, useUpdateGameMutation } from "../queries";
+import {
+  useDashboardQuery,
+  useUpdateGameMutation,
+  useGetSaveInfoMutation,
+  useSyncGameMutation,
+} from "../queries";
 import type { GameEntry } from "../types/dashboard";
+import type { SaveInfo } from "../types/dashboard";
 import { norm, msg } from "../utils";
 import {
   CARD,
@@ -33,6 +39,10 @@ export function GameDetailPage() {
   const game = dashboard?.games.find((g) => g.id === id) ?? null;
   const { savePathDraft, setSavePathDraft, handleBrowse, handleSave } =
     useSavePathForm(game, updateMutation);
+  const { descDraft, setDescDraft, handleSaveDesc } =
+    useDescriptionForm(game, updateMutation);
+  const saveInfoMutation = useGetSaveInfoMutation();
+  const syncMutation = useSyncGameMutation();
 
   if (!game) {
     return (
@@ -78,6 +88,11 @@ export function GameDetailPage() {
             <p className={EYEBROW}>Game details</p>
             <h2 className="m-0">{game.name}</h2>
             <span className={sourceBadge}>{game.source}</span>
+            {game.description && (
+              <p className="m-0 text-sm text-[#9aa8c7] max-w-[480px] whitespace-pre-wrap">
+                {game.description}
+              </p>
+            )}
           </div>
         </div>
 
@@ -98,6 +113,35 @@ export function GameDetailPage() {
             </div>
           ))}
         </dl>
+      </div>
+
+      {/* Description */}
+      <div className={CARD}>
+        <h3 className="m-0 mb-4 font-semibold">Description</h3>
+
+        <div className={FORM_GRID}>
+          <label className={FORM_LABEL}>
+            <span className={LABEL_SPAN}>Game description (max 1000 characters)</span>
+            <textarea
+              className={`${INPUT_CLS} resize-y min-h-[60px]`}
+              value={descDraft}
+              onChange={(e) => setDescDraft(e.currentTarget.value)}
+              maxLength={1000}
+              rows={4}
+              placeholder="Brief description of the game…"
+            />
+            <span className={MUTED + " text-xs mt-1"}>{descDraft.length}/1000</span>
+          </label>
+
+          <button
+            className={PRIMARY_BTN}
+            type="button"
+            onClick={handleSaveDesc}
+            disabled={updateMutation.isPending}
+          >
+            {updateMutation.isPending ? "Saving…" : "Save description"}
+          </button>
+        </div>
       </div>
 
       {/* Save folder form */}
@@ -161,6 +205,50 @@ export function GameDetailPage() {
           />
         </div>
       </div>
+
+      {/* Actions */}
+      <div className={CARD}>
+        <h3 className="m-0 mb-4 font-semibold">Actions</h3>
+
+        <div className="grid gap-4 grid-cols-2 max-[720px]:grid-cols-1">
+          <button
+            className={SECONDARY_BTN}
+            type="button"
+            disabled={!game.savePath || saveInfoMutation.isPending}
+            onClick={() => game.savePath && saveInfoMutation.mutate(game.id)}
+          >
+            {saveInfoMutation.isPending ? "Loading…" : "Get save info"}
+          </button>
+          <button
+            className={PRIMARY_BTN}
+            type="button"
+            disabled={!game.savePath || syncMutation.isPending}
+            onClick={() => game.savePath && syncMutation.mutate(game.id)}
+          >
+            {syncMutation.isPending ? "Syncing…" : "Sync to Google Drive"}
+          </button>
+        </div>
+
+        {/* Save Info Result */}
+        {saveInfoMutation.data && (
+          <SaveInfoPanel info={saveInfoMutation.data} />
+        )}
+        {saveInfoMutation.isError && (
+          <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
+            {msg(saveInfoMutation.error, "Unable to get save info.")}
+          </p>
+        )}
+
+        {/* Sync Result */}
+        {syncMutation.data && (
+          <SyncResultPanel result={syncMutation.data} />
+        )}
+        {syncMutation.isError && (
+          <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
+            {msg(syncMutation.error, "Sync failed.")}
+          </p>
+        )}
+      </div>
     </>
   );
 }
@@ -194,6 +282,84 @@ function ToggleRow({ label, description, enabled, onChange }: ToggleRowProps) {
   );
 }
 
+function SaveInfoPanel({ info }: { info: SaveInfo }) {
+  return (
+    <div className="mt-4 p-4 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]">
+      <p className={EYEBROW}>Local save info</p>
+      <dl className="grid gap-2 grid-cols-2 m-0 max-[720px]:grid-cols-1">
+        <div>
+          <dt className="text-[#c7d3f7] text-sm">Total files</dt>
+          <dd className={`${MUTED} m-0`}>{info.totalFiles}</dd>
+        </div>
+        <div>
+          <dt className="text-[#c7d3f7] text-sm">Total size</dt>
+          <dd className={`${MUTED} m-0`}>{formatBytes(info.totalSize)}</dd>
+        </div>
+        <div>
+          <dt className="text-[#c7d3f7] text-sm">Last modified</dt>
+          <dd className={`${MUTED} m-0`}>{info.lastModified ?? "N/A"}</dd>
+        </div>
+        <div>
+          <dt className="text-[#c7d3f7] text-sm">Save path</dt>
+          <dd className={`${MUTED} m-0 break-all text-xs`}>{info.savePath}</dd>
+        </div>
+      </dl>
+      {info.files.length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-sm text-[#7dc9ff]">
+            Show files ({info.files.length})
+          </summary>
+          <ul className="mt-2 list-none p-0 grid gap-1 max-h-[240px] overflow-y-auto">
+            {info.files.map((f) => (
+              <li
+                key={f.relativePath}
+                className="flex items-center justify-between gap-2 text-xs px-2 py-1 rounded-lg bg-[rgba(255,255,255,0.03)]"
+              >
+                <span className="text-[#c7d3f7] truncate">{f.relativePath}</span>
+                <span className={MUTED}>{formatBytes(f.size)}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function SyncResultPanel({ result }: { result: { uploaded: number; downloaded: number; skipped: number; error: string | null } }) {
+  return (
+    <div className={`mt-4 p-4 rounded-[18px] border ${result.error ? "bg-[rgba(40,10,10,0.75)] border-[rgba(255,120,120,0.2)]" : "bg-[rgba(9,14,28,0.75)] border-[rgba(165,185,255,0.08)]"}`}>
+      <p className={EYEBROW}>{result.error ? "Sync error" : "Sync complete"}</p>
+      {result.error ? (
+        <p className="m-0 text-sm text-[#ffd5d5]">{result.error}</p>
+      ) : (
+        <dl className="grid gap-2 grid-cols-3 m-0">
+          <div>
+            <dt className="text-[#c7d3f7] text-sm">Uploaded</dt>
+            <dd className={`${MUTED} m-0`}>{result.uploaded}</dd>
+          </div>
+          <div>
+            <dt className="text-[#c7d3f7] text-sm">Downloaded</dt>
+            <dd className={`${MUTED} m-0`}>{result.downloaded}</dd>
+          </div>
+          <div>
+            <dt className="text-[#c7d3f7] text-sm">Skipped</dt>
+            <dd className={`${MUTED} m-0`}>{result.skipped}</dd>
+          </div>
+        </dl>
+      )}
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const val = bytes / Math.pow(1024, i);
+  return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
 // ── Co-located hook ───────────────────────────────────────────────────────────
 
 function useSavePathForm(
@@ -221,4 +387,26 @@ function useSavePathForm(
   }
 
   return { savePathDraft, setSavePathDraft, handleBrowse, handleSave };
+}
+
+function useDescriptionForm(
+  game: GameEntry | null,
+  updateMutation: ReturnType<typeof useUpdateGameMutation>,
+) {
+  const [descDraft, setDescDraft] = useState(game?.description ?? "");
+
+  useEffect(() => {
+    setDescDraft(game?.description ?? "");
+  }, [game?.id, game?.description]);
+
+  async function handleSaveDesc() {
+    if (!game) return;
+    const trimmed = descDraft.trim().slice(0, 1000);
+    await updateMutation.mutateAsync({
+      ...game,
+      description: trimmed || null,
+    });
+  }
+
+  return { descDraft, setDescDraft, handleSaveDesc };
 }

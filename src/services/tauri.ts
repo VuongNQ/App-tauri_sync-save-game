@@ -7,6 +7,7 @@ import type {
   DashboardData,
   GameEntry,
   OAuthCredentials,
+  SaveInfo,
   SaveTokensPayload,
   SyncResult,
   UpdateGamePayload,
@@ -59,6 +60,12 @@ export async function updateSettings(
   settings: AppSettings,
 ): Promise<AppSettings> {
   return invoke<AppSettings>("update_settings", { settings });
+}
+
+// ── Save Info ─────────────────────────────────────────────────────────────────
+
+export async function getSaveInfo(gameId: string): Promise<SaveInfo> {
+  return invoke<SaveInfo>("get_save_info", { gameId });
 }
 
 // ── Sync ──────────────────────────────────────────────────────────────────────

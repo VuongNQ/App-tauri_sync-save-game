@@ -1,8 +1,9 @@
-export type GameSource = "steam" | "epic" | "emulator" | "manual";
+export type GameSource = "emulator" | "manual";
 
 export interface GameEntry {
   id: string;
   name: string;
+  description: string | null;
   thumbnail: string | null;
   source: GameSource;
   savePath: string | null;
@@ -19,6 +20,7 @@ export interface DashboardData {
 
 export interface AddGamePayload {
   name: string;
+  description: string | null;
   thumbnail: string | null;
   source: GameSource;
   savePath: string | null;
@@ -50,6 +52,23 @@ export interface AppSettings {
   syncIntervalMinutes: number;
   startMinimised: boolean;
   runOnStartup: boolean;
+}
+
+// ── Save Info ─────────────────────────────────────────────
+
+export interface SaveFileInfo {
+  relativePath: string;
+  size: number;
+  modifiedTime: string;
+}
+
+export interface SaveInfo {
+  gameId: string;
+  savePath: string;
+  totalFiles: number;
+  totalSize: number;
+  lastModified: string | null;
+  files: SaveFileInfo[];
 }
 
 // ── Sync ──────────────────────────────────────────────────

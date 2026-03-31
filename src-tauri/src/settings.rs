@@ -49,9 +49,15 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
     let base_id = format!("manual-{}", slugify(name));
     let id = ensure_unique_id(&state.games, base_id);
 
+    let description = payload
+        .description
+        .map(|d| d.chars().take(1000).collect::<String>())
+        .filter(|d| !d.trim().is_empty());
+
     let game = GameEntry {
         id,
         name: name.to_string(),
+        description,
         thumbnail: payload.thumbnail,
         source: payload.source,
         save_path: normalize_optional_path(payload.save_path),

@@ -15,6 +15,7 @@ pub struct DashboardData {
 pub struct GameEntry {
     pub id: String,
     pub name: String,
+    pub description: Option<String>,
     pub thumbnail: Option<String>,
     pub source: String,
     pub save_path: Option<String>,
@@ -29,6 +30,7 @@ pub struct GameEntry {
 #[serde(rename_all = "camelCase")]
 pub struct AddGamePayload {
     pub name: String,
+    pub description: Option<String>,
     pub thumbnail: Option<String>,
     pub source: String,
     pub save_path: Option<String>,
@@ -95,6 +97,27 @@ impl Default for AppSettings {
 }
 
 // ── Sync ──────────────────────────────────────────────────
+
+// ── Save Info ─────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveFileInfo {
+    pub relative_path: String,
+    pub size: u64,
+    pub modified_time: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveInfo {
+    pub game_id: String,
+    pub save_path: String,
+    pub total_files: u32,
+    pub total_size: u64,
+    pub last_modified: Option<String>,
+    pub files: Vec<SaveFileInfo>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

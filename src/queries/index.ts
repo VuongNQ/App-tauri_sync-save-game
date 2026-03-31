@@ -18,4 +18,5 @@ export {
   useSyncAllMutation,
   useToggleTrackChangesMutation,
   useToggleAutoSyncMutation,
+  useGetSaveInfoMutation,
 } from "./sync";

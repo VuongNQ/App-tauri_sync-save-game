@@ -9,7 +9,7 @@ use walkdir::WalkDir;
 
 use crate::{
     gdrive,
-    models::{SyncFileMeta, SyncMeta, SyncResult},
+    models::{SaveFileInfo, SaveInfo, SyncFileMeta, SyncMeta, SyncResult},
     settings,
 };
 
@@ -64,6 +64,52 @@ fn collect_local_files(save_path: &Path) -> Result<Vec<LocalFileInfo>, String> {
     }
 
     Ok(files)
+}
+
+// ── Public functions ──────────────────────────────────────
+
+/// Get information about local save files for a game.
+pub fn get_save_info(app: &AppHandle, game_id: &str) -> Result<SaveInfo, String> {
+    let state = settings::load_state(app)?;
+    let game = state
+        .games
+        .iter()
+        .find(|g| g.id == game_id)
+        .ok_or_else(|| format!("Game not found: {game_id}"))?;
+
+    let save_path = game
+        .save_path
+        .as_deref()
+        .ok_or("Save path is not set for this game")?;
+    let save_dir = Path::new(save_path);
+
+    let local_files = collect_local_files(save_dir)?;
+
+    let total_files = local_files.len() as u32;
+    let total_size: u64 = local_files.iter().map(|f| f.size).sum();
+    let last_modified = local_files
+        .iter()
+        .map(|f| f.modified_iso.as_str())
+        .max()
+        .map(String::from);
+
+    let files: Vec<SaveFileInfo> = local_files
+        .iter()
+        .map(|f| SaveFileInfo {
+            relative_path: f.relative_path.clone(),
+            size: f.size,
+            modified_time: f.modified_iso.clone(),
+        })
+        .collect();
+
+    Ok(SaveInfo {
+        game_id: game_id.to_string(),
+        save_path: save_path.to_string(),
+        total_files,
+        total_size,
+        last_modified,
+        files,
+    })
 }
 
 // ── Public sync functions ─────────────────────────────────

@@ -40,11 +40,11 @@ const BADGE =
 export const SOFT_BADGE = `${BADGE} bg-[rgba(102,126,255,0.14)] text-[#c8d2ff]`;
 
 export const SOURCE_BADGE: Record<string, string> = {
-  steam:    `${BADGE} bg-[rgba(67,201,142,0.14)] text-[#8bffc6]`,
-  epic:     `${BADGE} bg-[rgba(102,126,255,0.14)] text-[#c8d2ff]`,
   emulator: `${BADGE} bg-[rgba(255,196,91,0.14)] text-[#ffd98a]`,
   manual:   `${BADGE} bg-[rgba(255,255,255,0.08)] text-[#c7d3f7]`,
 };
+
+export const FIELD_ERROR = "text-[0.82rem] text-[#ff9e9e] mt-0.5";
 
 // ── Toggle switch ─────────────────────────────────────────────────────────────
 

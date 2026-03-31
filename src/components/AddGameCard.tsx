@@ -1,13 +1,15 @@
+import { zodResolver } from "@hookform/resolvers/zod";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useState } from "react";
-import type { FormEvent } from "react";
+import { useForm } from "react-hook-form";
 import { useNavigate } from "react-router";
+import { z } from "zod";
 
 import { useAddGameMutation } from "../queries";
-import type { AddGamePayload, GameSource } from "../types/dashboard";
+import type { AddGamePayload } from "../types/dashboard";
 import { norm, msg } from "../utils";
 import {
   CARD,
+  FIELD_ERROR,
   FORM_GRID,
   FORM_LABEL,
   INPUT_CLS,
@@ -18,21 +20,37 @@ import {
   SECONDARY_BTN,
 } from "./styles";
 
-const DEFAULT_FORM: AddGamePayload = {
+const addGameSchema = z.object({
+  name: z.string().min(1, "Game name is required."),
+  description: z.string().max(1000, "Description must be 1000 characters or fewer.").nullable(),
+  thumbnail: z.string().nullable(),
+  source: z.enum(["manual", "emulator"]),
+  savePath: z.string().nullable(),
+}) satisfies z.ZodType<AddGamePayload>;
+
+const DEFAULT_VALUES: AddGamePayload = {
   name: "",
+  description: null,
   thumbnail: null,
   source: "manual",
   savePath: null,
 };
 
 export function AddGameCard() {
-  const [form, setForm] = useState<AddGamePayload>(DEFAULT_FORM);
+  const { register, handleSubmit, setValue, reset, watch, formState: { errors } } =
+    useForm<AddGamePayload>({
+      defaultValues: DEFAULT_VALUES,
+      resolver: zodResolver(addGameSchema),
+    });
   const addMutation = useAddGameMutation();
   const navigate = useNavigate();
 
+  const thumbnail = watch("thumbnail");
+  const savePath = watch("savePath");
+
   async function handleBrowseSave() {
     const p = await open({ directory: true, multiple: false, title: "Choose the save game folder" });
-    if (typeof p === "string") setForm((c) => ({ ...c, savePath: p }));
+    if (typeof p === "string") setValue("savePath", p);
   }
 
   async function handleBrowseThumbnail() {
@@ -41,22 +59,22 @@ export function AddGameCard() {
       title: "Choose a thumbnail image",
       filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
     });
-    if (typeof p === "string") setForm((c) => ({ ...c, thumbnail: p }));
+    if (typeof p === "string") setValue("thumbnail", p);
   }
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function onSubmit(values: AddGamePayload) {
     const payload: AddGamePayload = {
-      name: form.name.trim(),
-      thumbnail: norm(form.thumbnail),
-      source: form.source,
-      savePath: norm(form.savePath),
+      name: values.name.trim(),
+      description: norm(values.description),
+      thumbnail: norm(values.thumbnail),
+      source: values.source,
+      savePath: norm(values.savePath),
     };
     const data = await addMutation.mutateAsync(payload);
     const added = data.games.find(
       (g) => g.name.toLowerCase() === payload.name.toLowerCase(),
     );
-    setForm(DEFAULT_FORM);
+    reset(DEFAULT_VALUES);
     if (added) navigate(`/game/${added.id}`);
   }
 
@@ -66,30 +84,36 @@ export function AddGameCard() {
         <h2 className="m-0 text-lg font-semibold">Add game</h2>
       </div>
 
-      <form className={FORM_GRID} onSubmit={handleSubmit}>
+      <form className={FORM_GRID} onSubmit={handleSubmit(onSubmit)}>
         <label className={FORM_LABEL}>
           <span className={LABEL_SPAN}>Game name</span>
           <input
             className={INPUT_CLS}
-            value={form.name}
-            onChange={(e) => setForm((c) => ({ ...c, name: e.currentTarget.value }))}
+            {...register("name")}
             placeholder="Example: Elden Ring"
-            required
           />
+          {errors.name && <span className={FIELD_ERROR}>{errors.name.message}</span>}
+        </label>
+
+        <label className={FORM_LABEL}>
+          <span className={LABEL_SPAN}>Description (optional)</span>
+          <textarea
+            className={`${INPUT_CLS} resize-y min-h-[60px]`}
+            {...register("description")}
+            maxLength={1000}
+            rows={3}
+            placeholder="Brief description of the game…"
+          />
+          {errors.description && <span className={FIELD_ERROR}>{errors.description.message}</span>}
         </label>
 
         <label className={FORM_LABEL}>
           <span className={LABEL_SPAN}>Source</span>
           <select
             className={INPUT_CLS}
-            value={form.source}
-            onChange={(e) =>
-              setForm((c) => ({ ...c, source: e.currentTarget.value as GameSource }))
-            }
+            {...register("source")}
           >
             <option value="manual">Manual</option>
-            <option value="steam">Steam</option>
-            <option value="epic">Epic Games</option>
             <option value="emulator">Emulator</option>
           </select>
         </label>
@@ -99,8 +123,8 @@ export function AddGameCard() {
           <div className={INPUT_ROW}>
             <input
               className={INPUT_CLS}
-              value={form.thumbnail ?? ""}
-              onChange={(e) => setForm((c) => ({ ...c, thumbnail: e.currentTarget.value }))}
+              {...register("thumbnail")}
+              value={thumbnail ?? ""}
               placeholder="https://… or browse a local file"
             />
             <button type="button" className={SECONDARY_BTN} onClick={handleBrowseThumbnail}>
@@ -114,8 +138,8 @@ export function AddGameCard() {
           <div className={INPUT_ROW}>
             <input
               className={INPUT_CLS}
-              value={form.savePath ?? ""}
-              onChange={(e) => setForm((c) => ({ ...c, savePath: e.currentTarget.value }))}
+              {...register("savePath")}
+              value={savePath ?? ""}
               placeholder="Choose the save game folder"
             />
             <button type="button" className={SECONDARY_BTN} onClick={handleBrowseSave}>

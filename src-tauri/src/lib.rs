@@ -11,7 +11,7 @@ use tauri::Manager;
 
 use models::{
     AddGamePayload, AppSettings, AuthStatus, DashboardData, OAuthCredentials,
-    SaveTokensPayload, SyncResult, UpdateGamePayload,
+    SaveInfo, SaveTokensPayload, SyncResult, UpdateGamePayload,
 };
 
 #[tauri::command]
@@ -80,6 +80,13 @@ fn get_settings(app: tauri::AppHandle) -> Result<AppSettings, String> {
 #[tauri::command]
 fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
     settings::update_settings(&app, settings)
+}
+
+// ── Save info commands ─────────────────────────────────────
+
+#[tauri::command]
+fn get_save_info(app: tauri::AppHandle, game_id: String) -> Result<SaveInfo, String> {
+    sync::get_save_info(&app, &game_id)
 }
 
 // ── Sync commands ─────────────────────────────────────────
@@ -158,6 +165,7 @@ pub fn run() {
             logout,
             get_settings,
             update_settings,
+            get_save_info,
             sync_game,
             sync_all_games,
             toggle_track_changes,
