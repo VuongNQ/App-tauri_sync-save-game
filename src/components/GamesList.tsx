@@ -49,6 +49,9 @@ export function GamesList({ games }: Props) {
                       <span className={`${MUTED} text-xs truncate`}>{g.savePath}</span>
                     )}
                   </div>
+                  {g.description && (
+                    <p className={`${MUTED} m-0 text-xs truncate`}>{g.description}</p>
+                  )}
                 </div>
               </Link>
             );
