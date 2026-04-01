@@ -1,17 +1,26 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router";
 
-import { useLoginMutation } from "../queries";
 import { CARD, MUTED, PRIMARY_BTN } from "../components/styles";
+import { useAuthStatusQuery, useLoginMutation } from "../queries";
 import { msg } from "../utils";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const { data: authStatus } = useAuthStatusQuery();
   const login = useLoginMutation();
+
+  useEffect(() => {
+    if (authStatus?.authenticated) {
+      navigate("/", { replace: true });
+    }
+  }, [authStatus?.authenticated, navigate]);
 
   async function handleLogin() {
     await login.mutateAsync();
-    navigate("/", { replace: true });
   }
+
+  const isRedirecting = authStatus?.authenticated === true;
 
   return (
     <div className="grid min-h-screen place-items-center p-6">
@@ -27,10 +36,18 @@ export function LoginPage() {
           className={PRIMARY_BTN}
           type="button"
           onClick={handleLogin}
-          disabled={login.isPending}
+          disabled={login.isPending || isRedirecting}
         >
-          {login.isPending ? "Connecting…" : "Connect with Google"}
+          {login.isPending
+            ? "Connecting…"
+            : isRedirecting
+              ? "Redirecting…"
+              : "Connect with Google"}
         </button>
+
+        {isRedirecting && (
+          <p className={MUTED}>Login successful. Returning to your dashboard…</p>
+        )}
 
         {login.isError && (
           <p className="m-0 text-sm text-[#ffd5d5]">

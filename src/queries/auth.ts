@@ -23,6 +23,9 @@ export function useAuthStatusQuery() {
   return useQuery({
     queryKey: AUTH_STATUS_KEY,
     queryFn: checkAuthStatus,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 }
 
