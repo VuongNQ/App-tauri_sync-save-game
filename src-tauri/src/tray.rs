@@ -6,7 +6,13 @@ use tauri::{
 
 use crate::sync;
 
+const TRAY_ID: &str = "main-tray";
+
 pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    if app.tray_by_id(TRAY_ID).is_some() {
+        return Ok(());
+    }
+
     let open_item = MenuItemBuilder::with_id("open", "Open Dashboard").build(app)?;
     let sync_item = MenuItemBuilder::with_id("sync_all", "Sync All Now").build(app)?;
     let separator = PredefinedMenuItem::separator(app)?;
@@ -22,7 +28,7 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let icon = app.default_window_icon().cloned()
         .expect("app must have a default window icon configured in tauri.conf.json");
 
-    TrayIconBuilder::new()
+    TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
         .tooltip("Save Game Sync")
         .menu(&menu)
