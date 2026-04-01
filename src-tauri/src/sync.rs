@@ -286,13 +286,13 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
     })
 }
 
-/// Sync all games that have `track_changes == true` and a save_path set.
+/// Sync all games that have a save_path set (regardless of track_changes).
 pub fn sync_all_games(app: &AppHandle) -> Result<Vec<SyncResult>, String> {
     let state = settings::load_state(app)?;
     let game_ids: Vec<String> = state
         .games
         .iter()
-        .filter(|g| g.track_changes && g.save_path.is_some())
+        .filter(|g| g.save_path.is_some())
         .map(|g| g.id.clone())
         .collect();
 
