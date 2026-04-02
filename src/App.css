@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+/* ─── Global base styles ─────────────────────────────────────────────────────
+   These stay in CSS because they are body/root-level visual styles that
+   Tailwind cannot easily express as inline utility classes.               */
+
+:root {
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #ebf1ff;
+  background:
+    radial-gradient(circle at top, rgba(100, 92, 255, 0.24), transparent 28%),
+    linear-gradient(180deg, #08111f 0%, #0d1528 45%, #070d18 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+html, body, #root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body { min-height: 100vh; }
+
