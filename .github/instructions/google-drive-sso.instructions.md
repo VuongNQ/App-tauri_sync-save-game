@@ -22,8 +22,9 @@ Authentication uses `tauri-plugin-google-auth` (Rust crate: `tauri-plugin-google
 2. **Frontend** calls plugin `signIn({ clientId, clientSecret, scopes })` which opens the system browser for Google consent.
 3. Plugin returns `TokenResponse { accessToken, refreshToken, expiresAt }`.
 4. **Frontend** sends tokens to Rust via `saveAuthTokens(SaveTokensPayload)`.
-5. **Rust** persists `OAuthTokens { access_token, refresh_token, expires_at }` to `TOKEN_FILE_NAME`.
-6. **Rust** emits `"auth-status-changed"` event and returns `AuthStatus { authenticated: true }`.
+5. **Rust** persists `OAuthTokens { access_token, refresh_token, expires_at, user_id: "" }` to `TOKEN_FILE_NAME` first.
+6. **Rust** calls `/oauth2/v2/userinfo` with the access token to get the stable `id`; re-saves tokens with `user_id` populated.
+7. **Rust** emits `"auth-status-changed"` event and returns `AuthStatus { authenticated: true }`.
 
 ### Plugin Registration
 
@@ -62,7 +63,21 @@ pub fn get_access_token(app: &AppHandle) -> Result<String, String> { ... }
 | `load_tokens(app)` | Read + deserialize; returns `Option<OAuthTokens>` |
 | `save_tokens(app, tokens)` | Serialize + write JSON |
 | `delete_tokens(app)` | Remove file if exists |
-| `save_tokens_from_plugin(app, payload)` | Convert `SaveTokensPayload` → `OAuthTokens`, persist, emit event |
+| `save_tokens_from_plugin(app, payload)` | Convert `SaveTokensPayload` → `OAuthTokens`, persist, **then fetch userinfo to capture `user_id` and re-save**, emit event |
+| `get_current_user_id(app)` | Load tokens → return `Some(user_id)` if non-empty, else `None` |
+| `fetch_user_info_with_token(token)` | Private helper: call Google `/oauth2/v2/userinfo` with a raw token string (used by both `get_google_user_info` and `save_tokens_from_plugin`) |
+
+#### `save_tokens_from_plugin` — user_id capture order
+
+1. Build `OAuthTokens` with `user_id: String::new()` and `save_tokens()` immediately — makes `get_access_token()` functional.
+2. Call `fetch_user_info_with_token(&access_token)` (uses the payload token directly, no circular dependency).
+3. Set `tokens.user_id = info.id` and `save_tokens()` again — one extra disk write at login, never again unless re-login.
+4. If step 2 fails (network error) → log a warning, proceed; library falls back to legacy shared path until next login.
+
+#### `user_id` propagation rules
+
+- Always copy `old.user_id` when constructing `new_tokens` in `refresh_access_token()` — **never reset it on refresh**.
+- `OAuthTokens.user_id` has `#[serde(default)]` so old token files (without the field) deserialize as empty string without error.
 
 ## OAuth Scopes
 
@@ -170,7 +185,7 @@ Use Drive's native `modifiedTime` (from `GET /drive/v3/files/{id}?fields=modifie
 
 Because `ureq` is blocking, cloud library sync **must never block the UI thread**:
 
-- UI always reads from `games-library.json` on disk — fast, no network.
+- UI always reads from `games-library-{user_id}.json` (or fallback `games-library.json`) on disk — fast, no network.
 - After `settings::save_state()` completes, spawn a background thread to call `gdrive::sync_library_to_cloud()`.
 - Use a dedicated thread (mirror the `WatcherManager` pattern) — not the main Tauri thread.
 
@@ -298,6 +313,8 @@ pub struct OAuthTokens {        // internal, not sent to frontend
     pub access_token: String,
     pub refresh_token: String,
     pub expires_at: u64,
+    #[serde(default)]
+    pub user_id: String,        // stable Google numeric ID; empty on old token files
 }
 
 pub struct SaveTokensPayload {  // received from frontend after plugin sign-in
@@ -312,6 +329,7 @@ pub struct OAuthCredentials {   // sent to frontend for plugin config
 }
 
 pub struct GoogleUserInfo {     // user profile from Google API
+    pub id: String,             // stable Google numeric account ID
     pub email: String,
     pub name: Option<String>,
     pub picture: Option<String>,
@@ -324,7 +342,7 @@ pub struct GoogleUserInfo {     // user profile from Google API
 interface AuthStatus { authenticated: boolean }
 interface SaveTokensPayload { accessToken: string; refreshToken: string | null; expiresAt: number | null }
 interface OAuthCredentials { clientId: string; clientSecret: string }
-interface GoogleUserInfo { email: string; name: string | null; picture: string | null }
+interface GoogleUserInfo { id: string; email: string; name: string | null; picture: string | null }
 ```
 
 ### Serde Mapping

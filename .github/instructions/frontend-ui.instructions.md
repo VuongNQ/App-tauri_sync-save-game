@@ -276,6 +276,7 @@ export interface GameEntry {
   lastLocalModified: string | null; // ISO 8601
   lastCloudModified: string | null;
   gdriveFolder: string | null;
+  cloudStorageBytes: number | null; // total bytes synced to Drive; null = never synced
 }
 
 export interface DashboardData {

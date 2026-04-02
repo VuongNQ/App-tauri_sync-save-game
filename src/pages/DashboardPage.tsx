@@ -2,8 +2,51 @@ import { useDashboardQuery, useSyncAllMutation, useValidatePathsQuery } from "..
 import { AddGameCard } from "../components/AddGameCard";
 import { GamesList } from "../components/GamesList";
 import { HeroCard } from "../components/HeroCard";
-import { EYEBROW, SECONDARY_BTN } from "../components/styles";
+import { CARD, EYEBROW, SECONDARY_BTN } from "../components/styles";
 import { msg } from "../utils";
+
+function DashboardSkeleton() {
+  const shimmer = "animate-pulse bg-[rgba(165,185,255,0.08)] rounded-xl";
+  return (
+    <>
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="grid gap-2">
+          <div className={`h-3 w-16 rounded-full ${shimmer}`} />
+          <div className={`h-7 w-52 ${shimmer}`} />
+        </div>
+      </div>
+
+      {/* Hero + Add cards */}
+      <div className="grid grid-cols-[1fr_1fr] gap-5 max-[900px]:grid-cols-1">
+        <div className={`${CARD} h-[140px] ${shimmer}`} />
+        <div className={`${CARD} h-[140px] ${shimmer}`} />
+      </div>
+
+      {/* Games list */}
+      <div className={CARD}>
+        <div className="flex items-center justify-between mb-[18px]">
+          <div className={`h-5 w-20 ${shimmer}`} />
+          <div className={`h-4 w-16 ${shimmer}`} />
+        </div>
+        <div className="grid gap-[14px]">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="flex items-center gap-4 p-4 rounded-2xl bg-[rgba(10,16,31,0.72)] border border-[rgba(154,177,255,0.08)]"
+            >
+              <div className={`w-12 h-12 shrink-0 rounded-xl ${shimmer}`} />
+              <div className="flex-1 grid gap-2">
+                <div className={`h-4 w-36 ${shimmer}`} />
+                <div className={`h-3 w-24 rounded-full ${shimmer}`} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
 
 export function DashboardPage() {
   const dashboardQuery = useDashboardQuery();
@@ -16,6 +59,10 @@ export function DashboardPage() {
       .filter((v) => !v.valid)
       .map((v) => v.gameId),
   );
+
+  if (dashboardQuery.isLoading) {
+    return <DashboardSkeleton />;
+  }
 
   const syncableCount = games.filter((g) => g.savePath !== null).length;
 

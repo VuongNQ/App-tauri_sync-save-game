@@ -106,7 +106,7 @@ std::thread::spawn(move || {
 });
 ```
 
-UI always reads from the local `games-library.json` file — never waits on network calls.
+UI always reads from the local `games-library-{user_id}.json` file (or fallback `games-library.json` when unauthenticated) — never waits on network calls.
 
 ## Sync Algorithm (sync.rs)
 
@@ -123,7 +123,7 @@ UI always reads from the local `games-library.json` file — never waits on netw
    - Equal → skip.
 7. Download cloud-only files (present in `SyncMeta` but not locally).
 8. Upload updated `.sync-meta.json` with new file entries.
-9. Update `GameEntry.last_local_modified` + `last_cloud_modified` to now.
+9. Update `GameEntry.last_local_modified`, `last_cloud_modified`, and `cloud_storage_bytes` (sum of all synced file sizes) to now / actual bytes.
 
 ### Conflict Resolution
 
@@ -312,6 +312,30 @@ pub struct StoredState {
     pub last_cloud_library_modified: Option<String>, // ISO 8601 of last Drive library write
 }
 ```
+
+## Storage Quota (Per-User, Per-Sync)
+
+**Hard limit: 200 MB total cloud storage per user** across all games.
+
+Enforced in `sync_game_inner()` before any upload occurs:
+
+```rust
+const STORAGE_LIMIT_BYTES: u64 = 200 * 1024 * 1024;
+```
+
+### Enforcement Algorithm
+
+1. Call `projected_game_cloud_bytes(&local_files, &cloud_meta)` — computes projected bytes for the current game (local file sizes + cloud-only file sizes).
+2. Sum `cloud_storage_bytes` from all **other** games in local state (no Drive API call needed — fast).
+3. If `other_games_bytes + projected_this_game > STORAGE_LIMIT_BYTES` → return `Err(...)` with a human-readable message before any upload.
+4. On successful sync, update `GameEntry.cloud_storage_bytes` to the actual sum of all file sizes in the new `SyncMeta`.
+
+### `GameEntry.cloud_storage_bytes`
+
+- Rust type: `Option<u64>` with `#[serde(default)]` — old library files without the field deserialize as `None`.
+- TypeScript type: `cloudStorageBytes: number | null`.
+- Updated only after a successful `sync_game_inner()` via `settings::update_game_field()`.
+- `None` / `null` means this game has never been synced; treated as `0` in quota calculations.
 
 ## Logging Convention
 
