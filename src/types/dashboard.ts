@@ -12,6 +12,8 @@ export interface GameEntry {
   lastLocalModified: string | null;
   lastCloudModified: string | null;
   gdriveFolderId: string | null;
+  /** Total bytes stored in Google Drive for this game's save files. */
+  cloudStorageBytes: number | null;
 }
 
 export interface DashboardData {
@@ -46,6 +48,8 @@ export interface OAuthCredentials {
 }
 
 export interface GoogleUserInfo {
+  /** Stable numeric Google account ID. */
+  id: string;
   email: string;
   name: string | null;
   picture: string | null;

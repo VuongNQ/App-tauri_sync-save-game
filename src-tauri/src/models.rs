@@ -24,6 +24,10 @@ pub struct GameEntry {
     pub last_local_modified: Option<String>,
     pub last_cloud_modified: Option<String>,
     pub gdrive_folder_id: Option<String>,
+    /// Total bytes currently stored in Google Drive for this game's save files.
+    /// Updated after each successful sync. Used to enforce per-user storage quotas.
+    #[serde(default)]
+    pub cloud_storage_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +59,9 @@ pub struct OAuthTokens {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_at: u64,
+    /// Stable Google account numeric ID (populated at login, empty on old token files).
+    #[serde(default)]
+    pub user_id: String,
 }
 
 /// Payload received from the frontend after plugin-based Google sign-in.
@@ -78,6 +85,8 @@ pub struct OAuthCredentials {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoogleUserInfo {
+    /// Stable numeric Google account ID.
+    pub id: String,
     pub email: String,
     pub name: Option<String>,
     pub picture: Option<String>,

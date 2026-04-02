@@ -69,6 +69,7 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
         last_local_modified: None,
         last_cloud_modified: None,
         gdrive_folder_id: None,
+        cloud_storage_bytes: None,
     };
 
     state.games.push(game.clone());
@@ -178,6 +179,26 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
         .app_data_dir()
         .map_err(|e| format!("Unable to resolve app data directory: {e}"))?;
 
+    // Scope the library file to the currently logged-in Google account so that
+    // data never leaks between users sharing the same Windows account.
+    if let Some(user_id) = crate::gdrive_auth::get_current_user_id(app) {
+        let user_path = app_data_dir.join(format!("games-library-{user_id}.json"));
+
+        // One-time migration: if the user-scoped file doesn't exist yet but the
+        // legacy shared file does, rename it so existing data is preserved.
+        let legacy_path = app_data_dir.join(SETTINGS_FILE_NAME);
+        if !user_path.exists() && legacy_path.exists() {
+            if let Err(e) = fs::rename(&legacy_path, &user_path) {
+                eprintln!("[settings] Could not migrate legacy library file: {e}");
+            } else {
+                println!("[settings] Migrated games-library.json → games-library-{user_id}.json");
+            }
+        }
+
+        return Ok(user_path);
+    }
+
+    // Fallback: not authenticated or token file predates user_id capture.
     Ok(app_data_dir.join(SETTINGS_FILE_NAME))
 }
 

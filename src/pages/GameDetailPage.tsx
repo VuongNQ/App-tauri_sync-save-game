@@ -15,6 +15,7 @@ import type { SaveInfo } from "../types/dashboard";
 import { getBrowseDefaultPath } from "../services/tauri";
 import { norm, msg, formatLocalTime } from "../utils";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { Toast } from "../components/Toast";
 import {
   CARD,
   DANGER_BTN,
@@ -49,9 +50,13 @@ export function GameDetailPage() {
     useSavePathForm(game, updateMutation);
   const { descDraft, setDescDraft, handleSaveDesc } =
     useDescriptionForm(game, updateMutation);
+  const { thumbnailDraft, setThumbnailDraft, handleBrowseThumbnail, handleSaveThumbnail } =
+    useThumbnailForm(game, updateMutation);
   const saveInfoMutation = useGetSaveInfoMutation();
   const syncMutation = useSyncGameMutation();
   const validateQuery = useValidatePathsQuery();
+  const isSyncing = syncMutation.isPending;
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const isPathInvalid =
     game != null &&
     (validateQuery.data ?? []).some((v) => v.gameId === game.id && !v.valid);
@@ -127,6 +132,62 @@ export function GameDetailPage() {
         </dl>
       </div>
 
+      {/* Logo / Thumbnail */}
+      <div className={CARD}>
+        <h3 className="m-0 mb-4 font-semibold">Logo / Thumbnail</h3>
+
+        <div className={FORM_GRID}>
+          {thumbnailDraft && (
+            <div className="w-20 h-20 rounded-2xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
+              <img
+                src={thumbnailDraft}
+                alt="Thumbnail preview"
+                className="w-full h-full object-cover"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+              />
+            </div>
+          )}
+
+          <label className={FORM_LABEL}>
+            <span className={LABEL_SPAN}>URL or local file path</span>
+            <div className={INPUT_ROW}>
+              <input
+                className={INPUT_CLS}
+                value={thumbnailDraft}
+                onChange={(e) => setThumbnailDraft(e.currentTarget.value)}
+                placeholder="https://… or browse a local file"
+              />
+              <button type="button" className={SECONDARY_BTN} onClick={handleBrowseThumbnail}>
+                Browse
+              </button>
+            </div>
+          </label>
+
+          <div className="flex items-center gap-3">
+            <button
+              className={PRIMARY_BTN}
+              type="button"
+              onClick={handleSaveThumbnail}
+              disabled={updateMutation.isPending || isSyncing}
+            >
+              {updateMutation.isPending ? "Saving…" : "Save thumbnail"}
+            </button>
+            <button
+              className={GHOST_BTN}
+              type="button"              disabled={isSyncing}              onClick={() => setThumbnailDraft("")}
+            >
+              Clear
+            </button>
+          </div>
+
+          {updateMutation.isError && (
+            <p className="m-0 text-sm text-[#ffd5d5]">
+              {msg(updateMutation.error, "Unable to save.")}
+            </p>
+          )}
+        </div>
+      </div>
+
       {/* Description */}
       <div className={CARD}>
         <h3 className="m-0 mb-4 font-semibold">Description</h3>
@@ -149,7 +210,7 @@ export function GameDetailPage() {
             className={PRIMARY_BTN}
             type="button"
             onClick={handleSaveDesc}
-            disabled={updateMutation.isPending}
+            disabled={updateMutation.isPending || isSyncing}
           >
             {updateMutation.isPending ? "Saving…" : "Save description"}
           </button>
@@ -176,7 +237,7 @@ export function GameDetailPage() {
                 onChange={(e) => setSavePathDraft(e.currentTarget.value)}
                 placeholder="Choose or enter the save folder path"
               />
-              <button type="button" className={SECONDARY_BTN} onClick={handleBrowse}>
+              <button type="button" className={SECONDARY_BTN} onClick={handleBrowse} disabled={isSyncing}>
                 Browse
               </button>
             </div>
@@ -187,11 +248,11 @@ export function GameDetailPage() {
               className={PRIMARY_BTN}
               type="button"
               onClick={handleSave}
-              disabled={updateMutation.isPending}
+              disabled={updateMutation.isPending || isSyncing}
             >
               {updateMutation.isPending ? "Saving…" : "Save mapping"}
             </button>
-            <button className={GHOST_BTN} type="button" onClick={() => setSavePathDraft("")}>
+            <button className={GHOST_BTN} type="button" disabled={isSyncing} onClick={() => setSavePathDraft("")}>
               Clear
             </button>
           </div>
@@ -213,12 +274,14 @@ export function GameDetailPage() {
             label="Track file changes"
             description="Watch the save folder for modifications in the background"
             enabled={game.trackChanges}
+            disabled={isSyncing}
             onChange={(v) => updateMutation.mutate({ ...game, trackChanges: v })}
           />
           <ToggleRow
             label="Auto-sync to Google Drive"
             description="Automatically back up saves when changes are detected"
             enabled={game.autoSync}
+            disabled={isSyncing}
             onChange={(v) => updateMutation.mutate({ ...game, autoSync: v })}
           />
         </div>
@@ -232,18 +295,62 @@ export function GameDetailPage() {
           <button
             className={SECONDARY_BTN}
             type="button"
-            disabled={!game.savePath || saveInfoMutation.isPending}
+            disabled={!game.savePath || saveInfoMutation.isPending || isSyncing}
             onClick={() => game.savePath && saveInfoMutation.mutate(game.id)}
           >
             {saveInfoMutation.isPending ? "Loading…" : "Get save info"}
           </button>
           <button
-            className={PRIMARY_BTN}
+            className={`${PRIMARY_BTN} inline-flex items-center justify-center gap-2`}
             type="button"
-            disabled={!game.savePath || syncMutation.isPending}
-            onClick={() => game.savePath && syncMutation.mutate(game.id)}
+            disabled={!game.savePath || isSyncing}
+            onClick={() =>
+              game.savePath &&
+              syncMutation.mutate(game.id, {
+                onSuccess: (data) => {
+                  if (data.error) {
+                    setToast({ message: data.error, type: "error" });
+                  } else {
+                    setToast({
+                      message: `Sync complete — ↑${data.uploaded} ↓${data.downloaded} file(s)`,
+                      type: "success",
+                    });
+                  }
+                },
+                onError: (err) => {
+                  setToast({ message: msg(err, "Sync failed."), type: "error" });
+                },
+              })
+            }
           >
-            {syncMutation.isPending ? "Syncing…" : "Sync to Google Drive"}
+            {isSyncing ? (
+              <>
+                <svg
+                  className="animate-spin h-4 w-4 shrink-0"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>
+                Syncing…
+              </>
+            ) : (
+              "Sync to Google Drive"
+            )}
           </button>
         </div>
 
@@ -274,7 +381,7 @@ export function GameDetailPage() {
         <button
           className={DANGER_BTN}
           type="button"
-          disabled={removeMutation.isPending}
+          disabled={removeMutation.isPending || isSyncing}
           onClick={() => setShowRemoveModal(true)}
         >
           {removeMutation.isPending ? "Removing…" : "Remove game"}
@@ -285,6 +392,14 @@ export function GameDetailPage() {
           </p>
         )}
       </div>
+
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onDismiss={() => setToast(null)}
+        />
+      )}
 
       <ConfirmModal
         open={showRemoveModal}
@@ -307,10 +422,11 @@ interface ToggleRowProps {
   label: string;
   description: string;
   enabled: boolean;
+  disabled?: boolean;
   onChange: (value: boolean) => void;
 }
 
-function ToggleRow({ label, description, enabled, onChange }: ToggleRowProps) {
+function ToggleRow({ label, description, enabled, disabled, onChange }: ToggleRowProps) {
   return (
     <div className="flex items-center justify-between gap-4 p-4 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]">
       <div>
@@ -321,7 +437,8 @@ function ToggleRow({ label, description, enabled, onChange }: ToggleRowProps) {
         type="button"
         role="switch"
         aria-checked={enabled}
-        className={enabled ? TOGGLE_TRACK_ON : TOGGLE_TRACK_OFF}
+        disabled={disabled}
+        className={`${enabled ? TOGGLE_TRACK_ON : TOGGLE_TRACK_OFF} disabled:opacity-40 disabled:cursor-not-allowed`}
         onClick={() => onChange(!enabled)}
       >
         <span className={enabled ? TOGGLE_THUMB_ON : TOGGLE_THUMB_OFF} />
@@ -469,4 +586,34 @@ function useDescriptionForm(
   }
 
   return { descDraft, setDescDraft, handleSaveDesc };
+}
+
+function useThumbnailForm(
+  game: GameEntry | null,
+  updateMutation: ReturnType<typeof useUpdateGameMutation>,
+) {
+  const [thumbnailDraft, setThumbnailDraft] = useState(game?.thumbnail ?? "");
+
+  useEffect(() => {
+    setThumbnailDraft(game?.thumbnail ?? "");
+  }, [game?.id, game?.thumbnail]);
+
+  async function handleBrowseThumbnail() {
+    const p = await open({
+      multiple: false,
+      title: "Choose a thumbnail image",
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+    });
+    if (typeof p === "string") setThumbnailDraft(p);
+  }
+
+  async function handleSaveThumbnail() {
+    if (!game) return;
+    await updateMutation.mutateAsync({
+      ...game,
+      thumbnail: norm(thumbnailDraft),
+    });
+  }
+
+  return { thumbnailDraft, setThumbnailDraft, handleBrowseThumbnail, handleSaveThumbnail };
 }

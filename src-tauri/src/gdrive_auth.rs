@@ -111,15 +111,36 @@ pub fn get_access_token(app: &AppHandle) -> Result<String, String> {
 
 /// Save tokens received from the frontend (via tauri-plugin-google-auth).
 /// Called after the JS plugin's `signIn()` resolves with a TokenResponse.
+/// Immediately fetches userinfo to capture the stable Google account `id`,
+/// which is then stored in the token file to scope per-user local state.
 pub fn save_tokens_from_plugin(app: &AppHandle, payload: SaveTokensPayload) -> Result<AuthStatus, String> {
     require_client_id()?;
 
-    let tokens = OAuthTokens {
+    let access_token = payload.access_token.clone();
+    let mut tokens = OAuthTokens {
         access_token: payload.access_token,
         refresh_token: payload.refresh_token.unwrap_or_default(),
         expires_at: payload.expires_at.unwrap_or_else(|| now_secs() + 3600),
+        user_id: String::new(),
     };
+    // Save first so that get_access_token() is functional for subsequent calls.
     save_tokens(app, &tokens)?;
+
+    // Fetch the stable Google account ID and persist it alongside the tokens.
+    match fetch_user_info_with_token(&access_token) {
+        Ok(info) => {
+            tokens.user_id = info.id;
+            if let Err(e) = save_tokens(app, &tokens) {
+                eprintln!("[gdrive_auth] Failed to persist user_id in token file: {e}");
+            } else {
+                println!("[gdrive_auth] user_id captured: {}", tokens.user_id);
+            }
+        }
+        Err(e) => {
+            // Non-fatal: library will fall back to the legacy shared path until re-login.
+            eprintln!("[gdrive_auth] Could not fetch user_id at login: {e}");
+        }
+    }
 
     let status = AuthStatus { authenticated: true };
     let _ = app.emit("auth-status-changed", &status);
@@ -195,6 +216,8 @@ fn refresh_access_token(app: &AppHandle, old: &OAuthTokens) -> Result<OAuthToken
         access_token: tr.access_token,
         refresh_token: tr.refresh_token.unwrap_or_else(|| old.refresh_token.clone()),
         expires_at: now_secs() + tr.expires_in.unwrap_or(3600),
+        // Preserve the stable user_id across refreshes — it never changes.
+        user_id: old.user_id.clone(),
     };
 
     save_tokens(app, &new_tokens)?;
@@ -219,7 +242,11 @@ const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
 /// Fetch the authenticated user's Google profile.
 pub fn get_google_user_info(app: &AppHandle) -> Result<GoogleUserInfo, String> {
     let token = get_access_token(app)?;
+    fetch_user_info_with_token(&token)
+}
 
+/// Fetch user info using an arbitrary access token (used during login before tokens are fully saved).
+fn fetch_user_info_with_token(token: &str) -> Result<GoogleUserInfo, String> {
     let config = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .build();
@@ -238,6 +265,7 @@ pub fn get_google_user_info(app: &AppHandle) -> Result<GoogleUserInfo, String> {
 
     #[derive(Deserialize)]
     struct Raw {
+        id: String,
         email: String,
         name: Option<String>,
         picture: Option<String>,
@@ -247,8 +275,20 @@ pub fn get_google_user_info(app: &AppHandle) -> Result<GoogleUserInfo, String> {
         .map_err(|e| format!("Parse userinfo: {e}"))?;
 
     Ok(GoogleUserInfo {
+        id: raw.id,
         email: raw.email,
         name: raw.name,
         picture: raw.picture,
     })
+}
+
+/// Return the stable Google account numeric ID stored in the local token file.
+/// Returns `None` if the token file is missing, unreadable, or predates user_id capture.
+pub fn get_current_user_id(app: &AppHandle) -> Option<String> {
+    let tokens = load_tokens(app)?;
+    if tokens.user_id.is_empty() {
+        None
+    } else {
+        Some(tokens.user_id)
+    }
 }

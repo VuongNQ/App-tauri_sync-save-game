@@ -51,7 +51,7 @@ src-tauri/src/
 1. Frontend calls `getOAuthCredentials()` → Rust returns `CLIENT_ID` + `CLIENT_SECRET` (compiled in via `option_env!()`).
 2. Frontend passes credentials to `@choochmeque/tauri-plugin-google-auth-api` `signIn()` which opens the browser OAuth consent screen.
 3. Plugin handles the full redirect flow and returns `{ accessToken, refreshToken, expiresAt }`.
-4. Frontend calls `saveAuthTokens(payload)` → Rust persists tokens to `oauth-tokens.json` and emits `"auth-status-changed"` event.
+4. Frontend calls `saveAuthTokens(payload)` → Rust persists tokens to `oauth-tokens.json`, then immediately fetches `/oauth2/v2/userinfo` to capture the stable Google `id` and re-saves the token file with `user_id` populated. Emits `"auth-status-changed"` event.
 5. On subsequent launches, Rust silently refreshes the access token via `POST https://oauth2.googleapis.com/token` with `grant_type=refresh_token`.
 
 ### Token Lifecycle (`gdrive_auth.rs`)
@@ -59,7 +59,8 @@ src-tauri/src/
 - `check_auth_status()` → returns `AuthStatus { authenticated }` based on token file existence.
 - `get_access_token()` → loads tokens, checks expiry, refreshes if needed, returns valid access token.
 - `logout()` → deletes token file + emits `"auth-status-changed"` event.
-- `get_google_user_info()` → `GET https://www.googleapis.com/oauth2/v2/userinfo`.
+- `get_google_user_info()` → `GET https://www.googleapis.com/oauth2/v2/userinfo`; returns `GoogleUserInfo { id, email, name, picture }`.
+- `get_current_user_id()` → reads `user_id` from stored token file; returns `Some(id)` if present and non-empty, else `None`.
 
 ### Google OAuth Scopes
 
@@ -84,6 +85,7 @@ src-tauri/src/
 | `last_local_modified` | `Option<String>` | `string \| null` | ISO 8601 timestamp of last known local save modification |
 | `last_cloud_modified` | `Option<String>` | `string \| null` | ISO 8601 timestamp of last Google Drive save version |
 | `gdrive_folder_id` | `Option<String>` | `string \| null` | Google Drive folder ID where saves are stored |
+| `cloud_storage_bytes` | `Option<u64>` | `number \| null` | Total bytes stored in Drive for this game's saves; `None` = never synced |
 
 ### Serialisation Convention
 
@@ -167,7 +169,7 @@ Use **Drive's native `modifiedTime`** on the file object (returned by `GET /driv
 
 Because `ureq` is **blocking**, cloud library sync must never block the UI:
 
-- UI data always reads from `games-library.json` on disk (fast).
+- UI data always reads from `games-library-{user_id}.json` on disk (fast). Falls back to `games-library.json` when unauthenticated or on old token files without `user_id`.
 - After `settings::save_state()` completes, spawn a background thread to call `gdrive::sync_library_to_cloud()`.
 - Mirror the `WatcherManager` background-thread pattern: use a dedicated thread, not the main Tauri thread.
 
@@ -190,8 +192,9 @@ pub struct StoredState {
 
 1. Read local save folder → collect file paths + `last_modified` timestamps.
 2. Fetch `.sync-meta.json` from the game's Drive folder → get `last_cloud_modified`.
-3. **Compare**: if local is newer → upload local saves to Drive. If Drive is newer → download Drive saves to local. If equal → no-op.
-4. After sync, update `.sync-meta.json` on Drive and `last_local_modified` / `last_cloud_modified` in local state.
+3. **Storage quota check** (pre-upload): sum projected bytes for this game + `cloud_storage_bytes` from all other games. Reject if total exceeds **200 MB per user**.
+4. **Compare**: if local is newer → upload local saves to Drive. If Drive is newer → download Drive saves to local. If equal → no-op.
+5. After sync, update `.sync-meta.json` on Drive and `last_local_modified` / `last_cloud_modified` / `cloud_storage_bytes` in local state.
 
 ### Background File Watcher
 
@@ -242,8 +245,12 @@ A route wrapper or layout component checks `isAuthenticated` (from Tauri command
 
 ## Persistence
 
-`settings.rs` persists all game data and app settings to:
-`{app_data_dir()}/games-library.json`
+`settings.rs` persists all game data and app settings to a **per-user file** keyed by the authenticated Google account's stable numeric ID:
+`{app_data_dir()}/games-library-{user_id}.json`
+
+Falls back to `{app_data_dir()}/games-library.json` when unauthenticated or when the token file predates `user_id` capture (old installs).
+
+One-time migration: on the first login after an update, if the user-scoped file does not exist but the legacy shared file does, `settings_path()` renames it automatically.
 
 The file is read via `app.path().app_data_dir()` (Tauri `Manager` trait). Always call `load_state` → mutate → `save_state` — never write the file directly.
 
@@ -256,8 +263,6 @@ pub struct StoredState {
     pub settings: AppSettings,
     pub last_cloud_library_modified: Option<String>, // ISO 8601 of last Drive library write
 }
-
-pub struct AppSettings {
     pub start_minimised: bool,       // launch to tray on Windows startup
     pub run_on_startup: bool,        // register in Windows Run key
     pub global_auto_sync: bool,      // master switch for auto-sync

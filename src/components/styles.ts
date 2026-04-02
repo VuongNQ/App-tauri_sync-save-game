@@ -23,7 +23,7 @@ export const INPUT_CLS =
   "w-full min-h-[46px] rounded-[14px] border border-[rgba(140,165,241,0.16)] bg-[rgba(7,12,23,0.84)] text-[#eef4ff] px-3.5 focus:outline-2 focus:outline-[rgba(122,180,255,0.35)] focus:outline-offset-[1px]";
 
 export const BTN =
-  "border-none cursor-pointer transition-[transform,opacity,background] duration-[0.18s] ease-in-out hover:-translate-y-px focus:outline-2 focus:outline-[rgba(122,180,255,0.35)] focus:outline-offset-1";
+  "border-none cursor-pointer transition-[transform,opacity,background] duration-[0.18s] ease-in-out hover:-translate-y-px focus:outline-2 focus:outline-[rgba(122,180,255,0.35)] focus:outline-offset-1 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none";
 
 export const PRIMARY_BTN =
   `${BTN} w-full min-h-12 rounded-2xl bg-gradient-to-br from-[#6d7dff] to-[#55c5ff] text-[#05111f] font-bold`;

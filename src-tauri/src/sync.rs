@@ -68,7 +68,28 @@ fn collect_local_files(save_path: &Path) -> Result<Vec<LocalFileInfo>, String> {
 
 // ── Public functions ──────────────────────────────────────
 
-/// Get information about local save files for a game.
+/// Maximum total cloud storage allowed per user across all games (200 MB).
+const STORAGE_LIMIT_BYTES: u64 = 200 * 1024 * 1024;
+
+/// Compute the projected total cloud bytes for one game after a sync completes.
+/// Uses local file sizes for files that will be uploaded, and existing cloud
+/// sizes for files that are cloud-only (will be downloaded, not re-uploaded).
+fn projected_game_cloud_bytes(local_files: &[LocalFileInfo], cloud_meta: &SyncMeta) -> u64 {
+    // All local files will either be uploaded (local size) or stay in sync
+    // (local size is what Drive will hold after upload/keep).
+    let local_total: u64 = local_files.iter().map(|f| f.size).sum();
+
+    // Cloud-only files (not present locally) will be downloaded; their size
+    // counts toward cloud usage until the next sync writes the local copy back.
+    let cloud_only: u64 = cloud_meta
+        .files
+        .iter()
+        .filter(|(rel, _)| !local_files.iter().any(|l| l.relative_path == **rel))
+        .map(|(_, cm)| cm.size)
+        .sum();
+
+    local_total + cloud_only
+}
 pub fn get_save_info(app: &AppHandle, game_id: &str) -> Result<SaveInfo, String> {
     let state = settings::load_state(app)?;
     let game = state
@@ -175,6 +196,29 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
     // 5. Collect local files
     let local_files = collect_local_files(save_dir)?;
 
+    // ── Storage limit guard ───────────────────────────────────────────────────
+    let projected_this_game = projected_game_cloud_bytes(&local_files, &cloud_meta);
+    let other_games_bytes: u64 = state
+        .games
+        .iter()
+        .filter(|g| g.id != game_id)
+        .map(|g| g.cloud_storage_bytes.unwrap_or(0))
+        .sum();
+    let projected_total = other_games_bytes + projected_this_game;
+    if projected_total > STORAGE_LIMIT_BYTES {
+        return Err(format!(
+            "Storage limit exceeded: this sync would use {:.1} MB but the 200 MB per-user limit would be reached. \
+             Free up space by removing games or reducing save file sizes.",
+            projected_total as f64 / 1_048_576.0
+        ));
+    }
+    println!(
+        "[sync] Storage check passed for {game_id}: {:.1} MB / {:.1} MB used",
+        projected_total as f64 / 1_048_576.0,
+        STORAGE_LIMIT_BYTES as f64 / 1_048_576.0
+    );
+    // ─────────────────────────────────────────────────────────────────────────
+
     let mut uploaded = 0u32;
     let mut downloaded = 0u32;
     let mut skipped = 0u32;
@@ -270,11 +314,13 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
     // 8. Upload updated sync metadata
     gdrive::upload_sync_meta(app, &game_folder_id, &new_meta, meta_file_id.as_deref())?;
 
-    // 9. Update game entry timestamps in state
+    // 9. Update game entry timestamps and cloud storage size in state
     let now_iso = chrono::Utc::now().to_rfc3339();
+    let new_cloud_bytes: u64 = new_meta.files.values().map(|f| f.size).sum();
     let _ = settings::update_game_field(app, game_id, |g| {
         g.last_local_modified = Some(now_iso.clone());
         g.last_cloud_modified = Some(now_iso.clone());
+        g.cloud_storage_bytes = Some(new_cloud_bytes);
     });
 
     Ok(SyncResult {
