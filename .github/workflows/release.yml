@@ -7,6 +7,8 @@ on:
 
 jobs:
   publish:
+    # Skip if this push is the automated version-bump commit (safety net)
+    if: "!startsWith(github.event.head_commit.message, 'chore: bump version')"
     permissions:
       contents: write
     strategy:
@@ -17,6 +19,34 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump patch version
+        id: bump
+        shell: pwsh
+        run: |
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $parts = $conf.version.Split('.')
+          $parts[2] = [int]$parts[2] + 1
+          $newVersion = $parts -join '.'
+          $conf.version = $newVersion
+          $conf | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
+
+          $cargo = Get-Content src-tauri/Cargo.toml
+          $cargo = $cargo -replace '^version = ".*"$', "version = `"$newVersion`""
+          $cargo | Set-Content src-tauri/Cargo.toml
+
+          echo "NEW_VERSION=$newVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Commit bumped version
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/tauri.conf.json src-tauri/Cargo.toml
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.NEW_VERSION }}"
+          git push
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
