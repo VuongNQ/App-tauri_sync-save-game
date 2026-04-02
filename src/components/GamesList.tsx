@@ -6,6 +6,35 @@ import type { GameEntry } from "../types/dashboard";
 import { ConfirmModal } from "./ConfirmModal";
 import { CARD, MUTED, SEC_HDR, SOURCE_BADGE, SOFT_BADGE } from "./styles";
 
+function LazyThumbnail({ src }: { src: string }) {
+  const [loaded, setLoaded] = useState(false);
+  const [errored, setErrored] = useState(false);
+
+  if (errored) {
+    return (
+      <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-lg">🎮</div>
+    );
+  }
+
+  return (
+    <div className="relative w-full h-full">
+      {!loaded && (
+        <div className="absolute inset-0 animate-pulse bg-[rgba(165,185,255,0.08)]" />
+      )}
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        className={`w-full h-full object-cover transition-opacity duration-300 ${
+          loaded ? "opacity-100" : "opacity-0"
+        }`}
+        onLoad={() => setLoaded(true)}
+        onError={() => setErrored(true)}
+      />
+    </div>
+  );
+}
+
 interface Props {
   games: GameEntry[];
   invalidGameIds?: Set<string>;
@@ -60,7 +89,7 @@ export function GamesList({ games, invalidGameIds }: Props) {
                   {/* Thumbnail */}
                   <div className="w-12 h-12 shrink-0 rounded-xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
                     {g.thumbnail ? (
-                      <img src={g.thumbnail} alt="" className="w-full h-full object-cover" />
+                      <LazyThumbnail src={g.thumbnail} />
                     ) : (
                       <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-lg">
                         🎮
