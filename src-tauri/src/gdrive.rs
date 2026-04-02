@@ -8,7 +8,7 @@ use tauri::AppHandle;
 
 use crate::{
     gdrive_auth,
-    models::{DriveFile, SyncMeta},
+    models::{AppSettings, DriveFile, GameEntry, SyncMeta},
     settings,
 };
 
@@ -16,6 +16,8 @@ const DRIVE_FILES_URL: &str = "https://www.googleapis.com/drive/v3/files";
 const DRIVE_UPLOAD_URL: &str = "https://www.googleapis.com/upload/drive/v3/files";
 const ROOT_FOLDER_NAME: &str = "game-processing-sync";
 const SYNC_META_NAME: &str = ".sync-meta.json";
+const LIBRARY_FILE_NAME: &str = "library.json";
+const CONFIG_FILE_NAME: &str = "config.json";
 
 // ── Helpers ───────────────────────────────────────────────
 
@@ -479,4 +481,257 @@ pub fn download_sync_meta(
             Ok((Some(meta), Some(f.id.clone())))
         }
     }
+}
+
+// ── File-based DB: JSON helpers ───────────────────────────
+
+/// Find a file by name inside a Drive folder. Returns `None` if not found.
+fn find_file_in_folder(
+    app: &AppHandle,
+    folder_id: &str,
+    name: &str,
+) -> Result<Option<DriveFile>, String> {
+    let files = list_files(app, folder_id)?;
+    Ok(files.into_iter().find(|f| f.name == name))
+}
+
+/// Upload a JSON buffer as a new file or update an existing one in a Drive folder.
+/// Uses multipart upload (same pattern as `upload_sync_meta`).
+fn upload_json_to_folder(
+    app: &AppHandle,
+    folder_id: &str,
+    file_name: &str,
+    json_bytes: &[u8],
+    existing_file_id: Option<&str>,
+) -> Result<DriveFile, String> {
+    let boundary = format!("----boundary{}", fastrand::u64(..));
+    let metadata = if existing_file_id.is_some() {
+        serde_json::json!({ "name": file_name })
+    } else {
+        serde_json::json!({ "name": file_name, "parents": [folder_id] })
+    };
+
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Type: application/json; charset=UTF-8\r\n\r\n");
+    body.extend_from_slice(metadata.to_string().as_bytes());
+    body.extend_from_slice(b"\r\n");
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Type: application/json\r\n\r\n");
+    body.extend_from_slice(json_bytes);
+    body.extend_from_slice(b"\r\n");
+    body.extend_from_slice(format!("--{boundary}--").as_bytes());
+
+    let content_type = format!("multipart/related; boundary={boundary}");
+
+    let (url, method_is_patch) = if let Some(fid) = existing_file_id {
+        (
+            format!("{DRIVE_UPLOAD_URL}/{fid}?uploadType=multipart&fields=id,name,modifiedTime"),
+            true,
+        )
+    } else {
+        (
+            format!("{DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,modifiedTime"),
+            false,
+        )
+    };
+
+    let token = gdrive_auth::get_access_token(app)?;
+    let resp = if method_is_patch {
+        agent()
+            .patch(&url)
+            .header("Authorization", &format!("Bearer {token}"))
+            .header("Content-Type", &content_type)
+            .send(&body[..])
+            .map_err(|e| format!("JSON PATCH failed: {e}"))?
+    } else {
+        agent()
+            .post(&url)
+            .header("Authorization", &format!("Bearer {token}"))
+            .header("Content-Type", &content_type)
+            .send(&body[..])
+            .map_err(|e| format!("JSON POST failed: {e}"))?
+    };
+
+    let status = resp.status().as_u16();
+    let resp_body = resp.into_body().read_to_string().unwrap_or_default();
+    if status != 200 {
+        return Err(format!(
+            "JSON upload failed for {file_name} (HTTP {status}): {resp_body}"
+        ));
+    }
+
+    let raw: DriveFileRaw =
+        serde_json::from_str(&resp_body).map_err(|e| format!("Parse JSON upload response: {e}"))?;
+    println!("[gdrive] Uploaded {file_name} → {}", raw.id);
+    Ok(DriveFile::from(raw))
+}
+
+/// Download a file's raw text content from Drive by file ID.
+fn download_json_from_drive(app: &AppHandle, file_id: &str) -> Result<String, String> {
+    let url = format!("{DRIVE_FILES_URL}/{file_id}?alt=media");
+    let token = gdrive_auth::get_access_token(app)?;
+    let resp = agent()
+        .get(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .call()
+        .map_err(|e| format!("JSON download failed: {e}"))?;
+    let status = resp.status().as_u16();
+    let body = resp.into_body().read_to_string().unwrap_or_default();
+    if status != 200 {
+        return Err(format!(
+            "JSON download failed for {file_id} (HTTP {status}): {body}"
+        ));
+    }
+    Ok(body)
+}
+
+/// Fetch the `modifiedTime` metadata for a Drive file (ISO 8601 string).
+fn get_file_modified_time(app: &AppHandle, file_id: &str) -> Result<String, String> {
+    let url = format!("{DRIVE_FILES_URL}/{file_id}?fields=modifiedTime");
+    let (status, body) = drive_get(app, &url)?;
+    if status != 200 {
+        return Err(format!(
+            "Failed to get modifiedTime for {file_id} (HTTP {status}): {body}"
+        ));
+    }
+    let val: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("Parse modifiedTime: {e}"))?;
+    val["modifiedTime"]
+        .as_str()
+        .map(String::from)
+        .ok_or_else(|| format!("Missing modifiedTime in response for {file_id}"))
+}
+
+// ── File-based DB: library.json ───────────────────────────
+
+/// Sync the local `Vec<GameEntry>` to `library.json` in the Drive root folder.
+///
+/// Conflict strategy: if Drive's `modifiedTime` is newer than our recorded
+/// `last_cloud_library_modified`, we pull the cloud games first and merge
+/// (cloud games + any local-only games) before uploading.
+pub fn sync_library_to_cloud(app: &AppHandle) -> Result<(), String> {
+    let root_id = ensure_root_folder(app)?;
+    let mut state = settings::load_state(app)?;
+
+    let existing = find_file_in_folder(app, &root_id, LIBRARY_FILE_NAME)?;
+
+    // Conflict check: pull cloud version if it's newer than what we last wrote.
+    if let Some(ref cloud_file) = existing {
+        if let Ok(drive_modified) = get_file_modified_time(app, &cloud_file.id) {
+            let local_known = state.last_cloud_library_modified.as_deref().unwrap_or("");
+            if drive_modified.as_str() > local_known {
+                // Drive is ahead — pull and merge before overwriting.
+                if let Ok(json) = download_json_from_drive(app, &cloud_file.id) {
+                    if let Ok(cloud_games) = serde_json::from_str::<Vec<GameEntry>>(&json) {
+                        println!("[gdrive] Cloud library is newer — merging before upload");
+                        // Append any cloud games not already in the local list.
+                        for cloud_game in cloud_games {
+                            if !state.games.iter().any(|g| g.id == cloud_game.id) {
+                                state.games.push(cloud_game);
+                            }
+                        }
+                        settings::save_state(app, &state)?;
+                        state = settings::load_state(app)?;
+                    }
+                }
+            }
+        }
+    }
+
+    let json_bytes = serde_json::to_vec_pretty(&state.games)
+        .map_err(|e| format!("Cannot serialize games: {e}"))?;
+
+    let uploaded = upload_json_to_folder(
+        app,
+        &root_id,
+        LIBRARY_FILE_NAME,
+        &json_bytes,
+        existing.as_ref().map(|f| f.id.as_str()),
+    )?;
+
+    // Persist the Drive modifiedTime so we can detect future conflicts.
+    if let Some(modified) = uploaded.modified_time {
+        let mut state2 = settings::load_state(app)?;
+        state2.last_cloud_library_modified = Some(modified);
+        settings::save_state(app, &state2)?;
+    }
+
+    println!("[gdrive] Library synced to cloud ({} games)", state.games.len());
+    Ok(())
+}
+
+/// Pull `library.json` from Drive and overwrite the local game list.
+/// Returns `Ok(false)` when the file doesn't exist on Drive yet (first-time user).
+pub fn fetch_library_from_cloud(app: &AppHandle) -> Result<bool, String> {
+    let root_id = ensure_root_folder(app)?;
+    let file = match find_file_in_folder(app, &root_id, LIBRARY_FILE_NAME)? {
+        Some(f) => f,
+        None => {
+            println!("[gdrive] No library.json on Drive — nothing to restore");
+            return Ok(false);
+        }
+    };
+
+    let json = download_json_from_drive(app, &file.id)?;
+    let games: Vec<GameEntry> =
+        serde_json::from_str(&json).map_err(|e| format!("Parse library.json: {e}"))?;
+
+    let mut state = settings::load_state(app)?;
+    state.games = games;
+    if let Some(modified) = file.modified_time {
+        state.last_cloud_library_modified = Some(modified);
+    }
+    settings::save_state(app, &state)?;
+
+    println!("[gdrive] Library restored from cloud ({} games)", state.games.len());
+    Ok(true)
+}
+
+// ── File-based DB: config.json ────────────────────────────
+
+/// Sync local `AppSettings` to `config.json` in the Drive root folder.
+/// Last-write-wins — no conflict tracking needed for settings.
+pub fn sync_settings_to_cloud(app: &AppHandle) -> Result<(), String> {
+    let root_id = ensure_root_folder(app)?;
+    let state = settings::load_state(app)?;
+    let existing = find_file_in_folder(app, &root_id, CONFIG_FILE_NAME)?;
+
+    let json_bytes = serde_json::to_vec_pretty(&state.settings)
+        .map_err(|e| format!("Cannot serialize settings: {e}"))?;
+
+    upload_json_to_folder(
+        app,
+        &root_id,
+        CONFIG_FILE_NAME,
+        &json_bytes,
+        existing.as_ref().map(|f| f.id.as_str()),
+    )?;
+
+    println!("[gdrive] Settings synced to cloud");
+    Ok(())
+}
+
+/// Pull `config.json` from Drive and merge into local `AppSettings`.
+/// Returns `Ok(false)` when the file doesn't exist on Drive yet.
+pub fn fetch_settings_from_cloud(app: &AppHandle) -> Result<bool, String> {
+    let root_id = ensure_root_folder(app)?;
+    let file = match find_file_in_folder(app, &root_id, CONFIG_FILE_NAME)? {
+        Some(f) => f,
+        None => {
+            println!("[gdrive] No config.json on Drive — nothing to restore");
+            return Ok(false);
+        }
+    };
+
+    let json = download_json_from_drive(app, &file.id)?;
+    let settings_from_cloud: AppSettings =
+        serde_json::from_str(&json).map_err(|e| format!("Parse config.json: {e}"))?;
+
+    let mut state = settings::load_state(app)?;
+    state.settings = settings_from_cloud;
+    settings::save_state(app, &state)?;
+
+    println!("[gdrive] Settings restored from cloud");
+    Ok(true)
 }

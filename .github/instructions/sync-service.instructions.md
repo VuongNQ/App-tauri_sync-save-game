@@ -1,5 +1,5 @@
 ---
-description: "Use when: syncing save-game files to Google Drive, implementing sync logic, modifying sync.rs, modifying watcher.rs, modifying gdrive.rs, adding file-watcher features, changing background tracking, extending sync algorithm, handling sync conflicts, adding sync Tauri commands, creating sync React Query hooks, building sync UI components, emitting or listening to sync events. Covers the full sync pipeline: local file collection, timestamp comparison, Drive upload/download, .sync-meta.json management, file-watcher lifecycle, and frontend sync integration."
+description: "Use when: syncing save-game files to Google Drive, implementing sync logic, modifying sync.rs, modifying watcher.rs, modifying gdrive.rs, adding file-watcher features, changing background tracking, extending sync algorithm, handling sync conflicts, adding sync Tauri commands, creating sync React Query hooks, building sync UI components, emitting or listening to sync events, syncing library.json or config.json to Google Drive as a file-based database, implementing cloud library restore on first login. Covers the full sync pipeline: local file collection, timestamp comparison, Drive upload/download, .sync-meta.json management, cloud DB library/settings sync, local-first strategy, file-watcher lifecycle, and frontend sync integration."
 ---
 
 # Save-Game Sync Service
@@ -58,6 +58,8 @@ fn drive_get(app: &AppHandle, url: &str) -> Result<(u16, String), String> {
 ```
 appDataFolder/
   game-processing-sync/          ← root folder (ensure_root_folder)
+    config.json                  ← AppSettings JSON (global configuration)
+    library.json                 ← Vec<GameEntry> JSON (game library table)
     {game_id}/                   ← per-game folder (ensure_game_folder)
       <save files...>
       .sync-meta.json            ← sync metadata (timestamps + Drive file IDs)
@@ -66,6 +68,45 @@ appDataFolder/
 - Root folder name: `"game-processing-sync"`, parent: `"appDataFolder"`.
 - Per-game folder name: matches `GameEntry.id` exactly.
 - Cache `gdrive_folder_id` in `GameEntry` — never search Drive for the same folder twice.
+- `library.json` and `config.json` are flat files directly under the root folder.
+
+## Cloud Library DB Sync (gdrive.rs)
+
+`library.json` and `config.json` on Drive act as the zero-cost, user-owned database.
+
+### Functions
+
+| Function | Direction | Trigger |
+|----------|-----------|---------|
+| `sync_library_to_cloud(app)` | Local → Cloud | After every `add_game`, `update_game`, `remove_game` — background thread |
+| `fetch_library_from_cloud(app)` | Cloud → Local | First login or missing local `games-library.json` |
+| `sync_settings_to_cloud(app)` | Local → Cloud | After every `update_settings` — background thread |
+| `fetch_settings_from_cloud(app)` | Cloud → Local | First login (alongside library fetch) |
+
+### Conflict Resolution for library.json / config.json
+
+Use Drive's `modifiedTime` returned by `GET /drive/v3/files/{id}?fields=modifiedTime`:
+
+1. Fetch Drive file `modifiedTime` before any write.
+2. Compare against `last_cloud_library_modified` stored in local `StoredState`.
+3. Drive newer → pull and merge cloud version to local first.
+4. Write new merged version to Drive; update `last_cloud_library_modified`.
+
+### Local-First Strategy (Non-negotiable)
+
+`ureq` is blocking — cloud library writes **must not block the UI**:
+
+```rust
+// Mandatory pattern after every save_state() call that modifies games/settings:
+let app_clone = app.clone();
+std::thread::spawn(move || {
+    if let Err(e) = gdrive::sync_library_to_cloud(&app_clone) {
+        eprintln!("[gdrive] Cloud library sync failed: {e}");
+    }
+});
+```
+
+UI always reads from the local `games-library.json` file — never waits on network calls.
 
 ## Sync Algorithm (sync.rs)
 
@@ -261,6 +302,14 @@ pub struct AppSettings {
     pub sync_interval_minutes: u32,   // 0 = only on change
     pub start_minimised: bool,
     pub run_on_startup: bool,
+}
+
+// StoredState includes last_cloud_library_modified for DB conflict detection
+pub struct StoredState {
+    pub version: u32,
+    pub games: Vec<GameEntry>,
+    pub settings: AppSettings,
+    pub last_cloud_library_modified: Option<String>, // ISO 8601 of last Drive library write
 }
 ```
 

@@ -2,7 +2,10 @@ use std::{fs, path::PathBuf};
 
 use tauri::{AppHandle, Manager};
 
-use crate::models::{AddGamePayload, AppSettings, GameEntry, PathValidation, StoredState};
+use crate::{
+    gdrive,
+    models::{AddGamePayload, AppSettings, GameEntry, PathValidation, StoredState},
+};
 
 const SETTINGS_FILE_NAME: &str = "games-library.json";
 
@@ -70,6 +73,7 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
 
     state.games.push(game.clone());
     save_state(app, &state)?;
+    spawn_library_cloud_sync(app);
 
     Ok(game)
 }
@@ -81,7 +85,9 @@ pub fn remove_game(app: &AppHandle, game_id: &str) -> Result<(), String> {
     if state.games.len() == before {
         return Err(format!("Game not found: {game_id}"));
     }
-    save_state(app, &state)
+    save_state(app, &state)?;
+    spawn_library_cloud_sync(app);
+    Ok(())
 }
 
 pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
@@ -97,7 +103,9 @@ pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
         state.games.push(normalized);
     }
 
-    save_state(app, &state)
+    save_state(app, &state)?;
+    spawn_library_cloud_sync(app);
+    Ok(())
 }
 
 pub fn get_settings(app: &AppHandle) -> Result<AppSettings, String> {
@@ -110,6 +118,7 @@ pub fn update_settings(app: &AppHandle, settings: AppSettings) -> Result<AppSett
     let old_run_on_startup = state.settings.run_on_startup;
     state.settings = settings;
     save_state(app, &state)?;
+    spawn_settings_cloud_sync(app);
 
     // Register / unregister Windows startup when the flag changes
     if state.settings.run_on_startup != old_run_on_startup {
@@ -137,6 +146,30 @@ pub fn update_game_field(
     updater(game);
     save_state(app, &state)?;
     Ok(state)
+}
+
+// ── Background cloud sync helpers ────────────────────────
+
+/// Spawn a background thread to sync the game library to Google Drive.
+/// Must only be called after `save_state()` has already succeeded locally.
+fn spawn_library_cloud_sync(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = gdrive::sync_library_to_cloud(&app) {
+            eprintln!("[gdrive] Background library cloud sync failed: {e}");
+        }
+    });
+}
+
+/// Spawn a background thread to sync app settings to Google Drive.
+/// Must only be called after `save_state()` has already succeeded locally.
+fn spawn_settings_cloud_sync(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = gdrive::sync_settings_to_cloud(&app) {
+            eprintln!("[gdrive] Background settings cloud sync failed: {e}");
+        }
+    });
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {

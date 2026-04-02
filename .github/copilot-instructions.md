@@ -121,19 +121,70 @@ tauri::generate_handler![
 
 ---
 
-## Google Drive Sync Logic
+## Google Drive as File-based Database
+
+The `drive.appdata` hidden folder acts as a **zero-cost, user-owned database**. There is no external server or SQL engine — all structured data is stored as versioned JSON files in `appDataFolder`.
 
 ### Folder Structure on Drive
 
 ```
 appDataFolder/
   game-processing-sync/
-    {game_id}/
-      <save files...>
-      .sync-meta.json       # timestamps + file hashes for conflict detection
+    config.json          # AppSettings (global configuration)
+    library.json         # Vec<GameEntry> (replaces a "Games" table)
+    games/
+      {game_id}/
+        <save files...>
+        .sync-meta.json  # timestamps + file hashes for conflict detection
 ```
 
-Use the `drive.appdata` scope to keep all data in the hidden app folder.
+### Why this approach
+
+- **$0 cost** — data lives on the user's own Google Drive quota.
+- **Secure** — `drive.appdata` is invisible in Drive UI; users cannot accidentally delete it.
+- **Cross-device restore** — on a new machine, `fetch_library_from_cloud()` re-hydrates the entire game list without the user re-entering anything.
+- **Minimal new code** — the existing `ureq`-based HTTP client and OAuth token flow already handle upload/download.
+
+### Cloud Library Sync Functions (`gdrive.rs`)
+
+| Function | Direction | Trigger |
+|----------|-----------|---------|
+| `sync_library_to_cloud(app)` | Local → Cloud | After every `add_game`, `update_game`, `remove_game`. Runs in a background thread — local save completes first. |
+| `fetch_library_from_cloud(app)` | Cloud → Local | On first login or when local `games-library.json` is missing. |
+| `sync_settings_to_cloud(app)` | Local → Cloud | After every `update_settings` call. |
+| `fetch_settings_from_cloud(app)` | Cloud → Local | On first login alongside library fetch. |
+
+### Conflict Resolution for library.json / config.json
+
+Use **Drive's native `modifiedTime`** on the file object (returned by `GET /drive/v3/files/{id}?fields=modifiedTime`) as the version timestamp. Algorithm:
+
+1. Before writing cloud, fetch the Drive file's `modifiedTime`.
+2. Compare with `last_cloud_library_modified` stored locally.
+3. If Drive version is **newer** → merge/prefer cloud, update local first.
+4. Then write the new version to Drive.
+
+### Local-First Strategy (Performance)
+
+Because `ureq` is **blocking**, cloud library sync must never block the UI:
+
+- UI data always reads from `games-library.json` on disk (fast).
+- After `settings::save_state()` completes, spawn a background thread to call `gdrive::sync_library_to_cloud()`.
+- Mirror the `WatcherManager` background-thread pattern: use a dedicated thread, not the main Tauri thread.
+
+### Stored State Shape (extended)
+
+```rust
+pub struct StoredState {
+    pub version: u32,
+    pub games: Vec<GameEntry>,
+    pub settings: AppSettings,
+    pub last_cloud_library_modified: Option<String>, // ISO 8601 of last Drive write
+}
+```
+
+---
+
+## Google Drive Sync Logic (Save Files)
 
 ### Sync Algorithm (per game)
 
@@ -203,6 +254,7 @@ pub struct StoredState {
     pub version: u32,
     pub games: Vec<GameEntry>,
     pub settings: AppSettings,
+    pub last_cloud_library_modified: Option<String>, // ISO 8601 of last Drive library write
 }
 
 pub struct AppSettings {

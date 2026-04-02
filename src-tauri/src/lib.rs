@@ -59,7 +59,33 @@ fn save_auth_tokens(
     app: tauri::AppHandle,
     payload: SaveTokensPayload,
 ) -> Result<AuthStatus, String> {
-    gdrive_auth::save_tokens_from_plugin(&app, payload)
+    let status = gdrive_auth::save_tokens_from_plugin(&app, payload)?;
+
+    // On first login (empty local library) restore games and settings from Drive.
+    let is_empty = settings::load_state(&app)
+        .map(|s| s.games.is_empty())
+        .unwrap_or(false);
+
+    if is_empty {
+        let app_clone = app.clone();
+        std::thread::spawn(move || {
+            match gdrive::fetch_library_from_cloud(&app_clone) {
+                Ok(true) => {
+                    println!("[gdrive] Cloud restore: library loaded");
+                    let _ = tauri::Emitter::emit(&app_clone, "library-restored", ());
+                }
+                Ok(false) => println!("[gdrive] Cloud restore: no library on Drive yet"),
+                Err(e) => eprintln!("[gdrive] Cloud restore library failed: {e}"),
+            }
+            match gdrive::fetch_settings_from_cloud(&app_clone) {
+                Ok(true) => println!("[gdrive] Cloud restore: settings loaded"),
+                Ok(false) => println!("[gdrive] Cloud restore: no config on Drive yet"),
+                Err(e) => eprintln!("[gdrive] Cloud restore settings failed: {e}"),
+            }
+        });
+    }
+
+    Ok(status)
 }
 
 /// Return OAuth client credentials so the frontend can pass them to the plugin.

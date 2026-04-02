@@ -5,7 +5,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 
 import { AppLayout } from "./components/AppLayout";
 import { AuthGuard } from "./components/AuthGuard";
-import { AUTH_STATUS_KEY } from "./queries/keys";
+import { AUTH_STATUS_KEY, DASHBOARD_KEY } from "./queries/keys";
 import { DashboardPage } from "./pages/DashboardPage";
 import { GameDetailPage } from "./pages/GameDetailPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -41,6 +41,11 @@ function useAuthStatusCallbacks() {
       queryClient.setQueryData<AuthStatus>(AUTH_STATUS_KEY, payload);
     });
 
+    // Refresh the game library when a cloud restore completes after first login.
+    const unlistenRestorePromise = listen("library-restored", () => {
+      void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
+    });
+
     const syncAuthStatus = () => {
       void queryClient.invalidateQueries({ queryKey: AUTH_STATUS_KEY });
     };
@@ -58,6 +63,7 @@ function useAuthStatusCallbacks() {
       window.removeEventListener("focus", syncAuthStatus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       void unlistenPromise.then((unlisten) => unlisten());
+      void unlistenRestorePromise.then((unlisten) => unlisten());
     };
   }, [queryClient]);
 }

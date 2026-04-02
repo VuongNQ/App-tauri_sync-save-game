@@ -189,6 +189,10 @@ pub struct StoredState {
     pub games: Vec<GameEntry>,
     #[serde(default)]
     pub settings: AppSettings,
+    /// ISO 8601 timestamp of the last successful `library.json` write to Drive.
+    /// Used for conflict detection before each cloud library write.
+    #[serde(default)]
+    pub last_cloud_library_modified: Option<String>,
 }
 
 impl Default for StoredState {
@@ -197,6 +201,7 @@ impl Default for StoredState {
             version: 1,
             games: Vec::new(),
             settings: AppSettings::default(),
+            last_cloud_library_modified: None,
         }
     }
 }

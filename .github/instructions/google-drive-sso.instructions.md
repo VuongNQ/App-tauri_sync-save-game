@@ -136,6 +136,8 @@ fn drive_get(app: &AppHandle, url: &str) -> Result<(u16, String), String> {
 ```
 appDataFolder/
   game-processing-sync/          ← root folder (ensure_root_folder)
+    config.json                  ← AppSettings (global configuration DB record)
+    library.json                 ← Vec<GameEntry> (game library DB table)
     {game_id}/                   ← per-game folder (ensure_game_folder)
       <save files...>
       .sync-meta.json            ← { last_synced, files: { relativePath → SyncFileMeta } }
@@ -144,6 +146,43 @@ appDataFolder/
 - Root folder name: `"game-processing-sync"`, parent: `"appDataFolder"`.
 - Per-game folder name: `{game_id}` (matches `GameEntry.id`).
 - Always cache `gdrive_folder_id` in `GameEntry` — avoid repeated Drive list calls.
+- `library.json` and `config.json` sit directly under the root folder (not inside a game sub-folder).
+
+### Cloud Library & Config DB Operations
+
+| Function | Direction | Trigger |
+|----------|-----------|---------|
+| `sync_library_to_cloud(app)` | Local → Cloud | After every `add_game`, `update_game`, `remove_game`. Runs in a **background thread** — local `save_state()` must complete first. |
+| `fetch_library_from_cloud(app)` | Cloud → Local | On first login or when local `games-library.json` is missing. |
+| `sync_settings_to_cloud(app)` | Local → Cloud | After every `update_settings` call. Runs in background thread. |
+| `fetch_settings_from_cloud(app)` | Cloud → Local | On first login alongside library fetch. |
+
+#### Conflict Resolution for library.json / config.json
+
+Use Drive's native `modifiedTime` (from `GET /drive/v3/files/{id}?fields=modifiedTime`) as the version timestamp:
+
+1. Before writing to cloud, fetch the Drive file's `modifiedTime`.
+2. Compare with `last_cloud_library_modified` stored in local `StoredState`.
+3. If Drive version is **newer** → pull cloud version and update local first.
+4. Then write the merged/updated version back to Drive.
+
+#### Local-First Strategy (Performance Requirement)
+
+Because `ureq` is blocking, cloud library sync **must never block the UI thread**:
+
+- UI always reads from `games-library.json` on disk — fast, no network.
+- After `settings::save_state()` completes, spawn a background thread to call `gdrive::sync_library_to_cloud()`.
+- Use a dedicated thread (mirror the `WatcherManager` pattern) — not the main Tauri thread.
+
+```rust
+// Pattern: background cloud sync after local save
+let app_clone = app.clone();
+std::thread::spawn(move || {
+    if let Err(e) = gdrive::sync_library_to_cloud(&app_clone) {
+        eprintln!("[gdrive] Cloud library sync failed: {e}");
+    }
+});
+```
 
 ### Common Drive Operations
 
