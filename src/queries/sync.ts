@@ -1,7 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
+  checkSyncStructureDiff,
   getSaveInfo,
+  pushToCloud,
+  restoreFromCloud,
   syncAllGames,
   syncGame,
   toggleAutoSync,
@@ -53,5 +56,27 @@ export function useToggleAutoSyncMutation() {
 export function useGetSaveInfoMutation() {
   return useMutation({
     mutationFn: (gameId: string) => getSaveInfo(gameId),
+  });
+}
+
+export function useCheckSyncDiffMutation() {
+  return useMutation({
+    mutationFn: (gameId: string) => checkSyncStructureDiff(gameId),
+  });
+}
+
+export function useRestoreFromCloudMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (gameId: string) => restoreFromCloud(gameId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY }),
+  });
+}
+
+export function usePushToCloudMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (gameId: string) => pushToCloud(gameId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY }),
   });
 }

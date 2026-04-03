@@ -12,7 +12,8 @@ use tauri::Manager;
 
 use models::{
     AddGamePayload, AppSettings, AuthStatus, DashboardData, GoogleUserInfo,
-    OAuthCredentials, PathValidation, SaveInfo, SaveTokensPayload, SyncResult, UpdateGamePayload,
+    OAuthCredentials, PathValidation, SaveInfo, SaveTokensPayload, SyncResult,
+    SyncStructureDiff, UpdateGamePayload,
 };
 
 #[tauri::command]
@@ -174,6 +175,36 @@ async fn sync_all_games(app: tauri::AppHandle) -> Result<Vec<SyncResult>, String
         .map_err(|e| format!("Sync all task failed: {e}"))?
 }
 
+#[tauri::command]
+async fn check_sync_structure_diff(
+    app: tauri::AppHandle,
+    game_id: String,
+) -> Result<SyncStructureDiff, String> {
+    tokio::task::spawn_blocking(move || sync::check_sync_structure_diff(&app, &game_id))
+        .await
+        .map_err(|e| format!("Diff check task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn restore_from_cloud(
+    app: tauri::AppHandle,
+    game_id: String,
+) -> Result<SyncResult, String> {
+    tokio::task::spawn_blocking(move || sync::restore_from_cloud(&app, &game_id))
+        .await
+        .map_err(|e| format!("Restore task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn push_to_cloud(
+    app: tauri::AppHandle,
+    game_id: String,
+) -> Result<SyncResult, String> {
+    tokio::task::spawn_blocking(move || sync::push_to_cloud(&app, &game_id))
+        .await
+        .map_err(|e| format!("Push task failed: {e}"))?
+}
+
 // ── Watcher commands ──────────────────────────────────────
 
 #[tauri::command]
@@ -251,6 +282,9 @@ pub fn run() {
             get_save_info,
             sync_game,
             sync_all_games,
+            check_sync_structure_diff,
+            restore_from_cloud,
+            push_to_cloud,
             toggle_track_changes,
             toggle_auto_sync,
             validate_save_paths,

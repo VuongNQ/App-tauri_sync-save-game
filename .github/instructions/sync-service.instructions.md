@@ -1,5 +1,5 @@
 ---
-description: "Use when: syncing save-game files to Google Drive, implementing sync logic, modifying sync.rs, modifying watcher.rs, modifying gdrive.rs, adding file-watcher features, changing background tracking, extending sync algorithm, handling sync conflicts, adding sync Tauri commands, creating sync React Query hooks, building sync UI components, emitting or listening to sync events, syncing library.json or config.json to Google Drive as a file-based database, implementing cloud library restore on first login. Covers the full sync pipeline: local file collection, timestamp comparison, Drive upload/download, .sync-meta.json management, cloud DB library/settings sync, local-first strategy, file-watcher lifecycle, and frontend sync integration."
+description: "Use when: syncing save-game files to Google Drive, implementing sync logic, modifying sync.rs, modifying watcher.rs, modifying gdrive.rs, adding file-watcher features, changing background tracking, extending sync algorithm, handling sync conflicts, adding sync Tauri commands, creating sync React Query hooks, building sync UI components, emitting or listening to sync events, syncing library.json or config.json to Google Drive as a file-based database, implementing cloud library restore on first login, forced-direction sync (restore from cloud, push to cloud), checking sync structure diff, SyncStructureDiff. Covers the full sync pipeline: local file collection, timestamp comparison, Drive upload/download, .sync-meta.json management, cloud DB library/settings sync, local-first strategy, file-watcher lifecycle, and frontend sync integration."
 ---
 
 # Save-Game Sync Service
@@ -210,9 +210,12 @@ fn toggle_track_changes(app: tauri::AppHandle, game_id: String, enabled: bool) -
 ### Return Types
 
 | Command | Returns |
-|---------|---------|
+|---------|----------|
 | `sync_game` | `Result<SyncResult, String>` |
 | `sync_all_games` | `Result<Vec<SyncResult>, String>` |
+| `check_sync_structure_diff` | `Result<SyncStructureDiff, String>` |
+| `restore_from_cloud` | `Result<SyncResult, String>` |
+| `push_to_cloud` | `Result<SyncResult, String>` |
 | `toggle_track_changes` | `Result<DashboardData, String>` |
 | `toggle_auto_sync` | `Result<DashboardData, String>` |
 | `get_settings` / `update_settings` | `Result<AppSettings, String>` |
@@ -238,6 +241,15 @@ All sync calls are typed wrappers — no raw `invoke()` outside this file:
 export async function syncGame(gameId: string): Promise<SyncResult> {
   return invoke<SyncResult>("sync_game", { gameId });
 }
+export async function checkSyncStructureDiff(gameId: string): Promise<SyncStructureDiff> {
+  return invoke<SyncStructureDiff>("check_sync_structure_diff", { gameId });
+}
+export async function restoreFromCloud(gameId: string): Promise<SyncResult> {
+  return invoke<SyncResult>("restore_from_cloud", { gameId });
+}
+export async function pushToCloud(gameId: string): Promise<SyncResult> {
+  return invoke<SyncResult>("push_to_cloud", { gameId });
+}
 export async function toggleTrackChanges(gameId: string, enabled: boolean): Promise<DashboardData> {
   return invoke<DashboardData>("toggle_track_changes", { gameId, enabled });
 }
@@ -247,10 +259,13 @@ export async function toggleTrackChanges(gameId: string, enabled: boolean): Prom
 
 - `useSyncGameMutation()` — calls `syncGame()`, invalidates `DASHBOARD_KEY` on success.
 - `useSyncAllMutation()` — calls `syncAllGames()`, invalidates `DASHBOARD_KEY`.
+- `useCheckSyncDiffMutation()` — calls `checkSyncStructureDiff()`, returns `SyncStructureDiff` (no cache side-effect).
+- `useRestoreFromCloudMutation()` — calls `restoreFromCloud()`, invalidates `DASHBOARD_KEY` on success.
+- `usePushToCloudMutation()` — calls `pushToCloud()`, invalidates `DASHBOARD_KEY` on success.
 - `useToggleTrackChangesMutation()` — calls `toggleTrackChanges()`, directly sets dashboard cache.
 - `useToggleAutoSyncMutation()` — calls `toggleAutoSync()`, directly sets dashboard cache.
 
-**Cache strategy**: Sync mutations invalidate (refetch) because timestamps change server-side. Toggle mutations set cache directly because they return the full updated `DashboardData`.
+**Cache strategy**: Sync/restore/push mutations invalidate (refetch) because timestamps change server-side. Toggle mutations set cache directly because they return the full updated `DashboardData`. Diff check has no cache side-effect — result is used locally in the component flow.
 
 ### Listening to Sync Events
 
@@ -278,6 +293,45 @@ pub struct SyncResult {
     pub error: Option<String>, // error: string | null
 }
 ```
+
+### SyncStructureDiff (Rust → TypeScript)
+
+Returned by `check_sync_structure_diff`. Read-only — no file transfers.
+
+```rust
+pub struct SyncStructureDiff {
+    pub game_id: String,
+    pub cloud_has_data: bool,          // false when no .sync-meta.json on Drive
+    pub local_only_files: Vec<String>, // relative paths in local but absent from Drive meta
+    pub cloud_only_files: Vec<String>, // relative paths in Drive meta but missing locally
+    pub local_newer_files: Vec<String>,// paths where local timestamp > cloud timestamp
+    pub cloud_newer_files: Vec<String>,// paths where cloud timestamp > local timestamp
+    pub has_diff: bool,                // true when any of the 4 vecs is non-empty
+}
+```
+
+TypeScript mirror in `src/types/dashboard.ts`:
+```ts
+export interface SyncStructureDiff {
+  gameId: string;
+  cloudHasData: boolean;
+  localOnlyFiles: string[];
+  cloudOnlyFiles: string[];
+  localNewerFiles: string[];
+  cloudNewerFiles: string[];
+  hasDiff: boolean;
+}
+```
+
+### Forced-Direction Sync Commands
+
+| Command | Behaviour |
+|---------|----------|
+| `sync_game` | Auto — newest file wins per-file timestamp comparison |
+| `restore_from_cloud` | Force-download ALL Drive files unconditionally; local-only files left untouched |
+| `push_to_cloud` | Force-upload ALL local files unconditionally; cloud-only files left in Drive |
+
+All three emit `"sync-started"` / `"sync-completed"` / `"sync-error"` events and return `SyncResult`.
 
 ### SyncMeta (Drive-side `.sync-meta.json`)
 

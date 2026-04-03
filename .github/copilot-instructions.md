@@ -113,8 +113,10 @@ tauri::generate_handler![
     check_auth_status, save_auth_tokens, get_oauth_credentials, logout, get_google_user_info,
     // Settings
     get_settings, update_settings,
-    // Sync
+    // Sync — auto
     get_save_info, sync_game, sync_all_games,
+    // Sync — forced direction + diff check
+    check_sync_structure_diff, restore_from_cloud, push_to_cloud,
     toggle_track_changes, toggle_auto_sync,
     // Validation
     validate_save_paths, get_browse_default_path, expand_save_path,

@@ -12,6 +12,7 @@ import type {
   SaveInfo,
   SaveTokensPayload,
   SyncResult,
+  SyncStructureDiff,
   UpdateGamePayload,
 } from "../types/dashboard";
 
@@ -86,6 +87,23 @@ export async function syncGame(gameId: string): Promise<SyncResult> {
 
 export async function syncAllGames(): Promise<SyncResult[]> {
   return invoke<SyncResult[]>("sync_all_games");
+}
+
+/** Check the diff between local saves and Drive without transferring files. */
+export async function checkSyncStructureDiff(
+  gameId: string,
+): Promise<SyncStructureDiff> {
+  return invoke<SyncStructureDiff>("check_sync_structure_diff", { gameId });
+}
+
+/** Force-download all Drive saves to local (newest-wins is skipped). */
+export async function restoreFromCloud(gameId: string): Promise<SyncResult> {
+  return invoke<SyncResult>("restore_from_cloud", { gameId });
+}
+
+/** Force-upload all local saves to Drive (newest-wins is skipped). */
+export async function pushToCloud(gameId: string): Promise<SyncResult> {
+  return invoke<SyncResult>("push_to_cloud", { gameId });
 }
 
 // ── Watcher toggles ──────────────────────────────────────────────────────────

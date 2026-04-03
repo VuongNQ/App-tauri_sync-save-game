@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { useRemoveGameMutation } from "../queries";
 import type { GameEntry } from "../types/dashboard";
+import { toImgSrc } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
 import { CARD, MUTED, SEC_HDR, SOURCE_BADGE, SOFT_BADGE } from "./styles";
 
@@ -22,7 +23,7 @@ function LazyThumbnail({ src }: { src: string }) {
         <div className="absolute inset-0 animate-pulse bg-[rgba(165,185,255,0.08)]" />
       )}
       <img
-        src={src}
+        src={toImgSrc(src)}
         alt=""
         loading="lazy"
         className={`w-full h-full object-cover transition-opacity duration-300 ${

@@ -83,6 +83,17 @@ export interface SaveInfo {
 
 // ── Sync ──────────────────────────────────────────────────
 
+export interface SyncStructureDiff {
+  gameId: string;
+  /** `false` when no sync data exists on Drive (game never synced). */
+  cloudHasData: boolean;
+  localOnlyFiles: string[];
+  cloudOnlyFiles: string[];
+  localNewerFiles: string[];
+  cloudNewerFiles: string[];
+  hasDiff: boolean;
+}
+
 export interface SyncResult {
   gameId: string;
   uploaded: number;
