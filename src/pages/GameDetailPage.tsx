@@ -12,11 +12,14 @@ import {
   useGetSaveInfoMutation,
   useSyncGameMutation,
   useValidatePathsQuery,
+  useCheckSyncDiffMutation,
+  useRestoreFromCloudMutation,
+  usePushToCloudMutation,
 } from "../queries";
 import type { GameEntry } from "../types/dashboard";
-import type { SaveInfo } from "../types/dashboard";
+import type { SaveInfo, SyncStructureDiff } from "../types/dashboard";
 import { getBrowseDefaultPath, expandSavePath, uploadGameLogo } from "../services/tauri";
-import { norm, msg, formatLocalTime } from "../utils";
+import { norm, msg, formatLocalTime, toImgSrc } from "../utils";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { Toast } from "../components/Toast";
 import {
@@ -84,9 +87,11 @@ export function GameDetailPage() {
 
   const validateQuery = useValidatePathsQuery();
 
-  const isSyncing = syncMutation.isPending;
-
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  const restoreFlow = useRestoreFromDriveFlow(id ?? "", setToast);
+
+  const isSyncing = syncMutation.isPending || restoreFlow.isChecking || restoreFlow.isExecuting;
 
   const methods = useForm<GameSettingsFormValues>({
     defaultValues: {
@@ -172,7 +177,7 @@ export function GameDetailPage() {
           <div className="w-24 h-24 shrink-0 rounded-2xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
             {game.thumbnail ? (
               <img
-                src={game.thumbnail}
+                src={toImgSrc(game.thumbnail)}
                 alt={game.name}
                 className="w-full h-full object-cover"
               />
@@ -243,7 +248,7 @@ export function GameDetailPage() {
       <div className={CARD}>
         <h3 className="m-0 mb-4 font-semibold">Actions</h3>
 
-        <div className="grid gap-4 grid-cols-2 max-[720px]:grid-cols-1">
+        <div className="grid gap-4 grid-cols-3 max-[900px]:grid-cols-1">
           <button
             className={SECONDARY_BTN}
             type="button"
@@ -251,6 +256,14 @@ export function GameDetailPage() {
             onClick={() => game.savePath && saveInfoMutation.mutate(game.id)}
           >
             {saveInfoMutation.isPending ? "Loading…" : "Get save info"}
+          </button>
+          <button
+            className={SECONDARY_BTN}
+            type="button"
+            disabled={!game.savePath || isSyncing}
+            onClick={() => game.savePath && restoreFlow.start()}
+          >
+            {restoreFlow.isChecking ? "Checking…" : "Restore from Drive"}
           </button>
           <button
             className={`${PRIMARY_BTN} inline-flex items-center justify-center gap-2`}
@@ -350,6 +363,15 @@ export function GameDetailPage() {
           message={toast.message}
           type={toast.type}
           onDismiss={() => setToast(null)}
+        />
+      )}
+
+      {restoreFlow.syncDiff && (
+        <SyncConflictModal
+          open={restoreFlow.showModal}
+          diff={restoreFlow.syncDiff}
+          onConfirm={(method) => restoreFlow.executeMethod(method)}
+          onCancel={restoreFlow.closeModal}
         />
       )}
 
@@ -534,7 +556,7 @@ function ThumbnailSection({ isSyncing }: ThumbnailSectionProps) {
         {thumbnailValue && (
           <div className="w-20 h-20 rounded-2xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
             <img
-              src={thumbnailValue}
+              src={toImgSrc(thumbnailValue)}
               alt="Thumbnail preview"
               className="w-full h-full object-cover"
               onError={(e) => {
@@ -723,6 +745,204 @@ function TrackingSettingsSection({ isSyncing }: TrackingSettingsSectionProps) {
             />
           )}
         />
+      </div>
+    </div>
+  );
+}
+
+// ── useRestoreFromDriveFlow ───────────────────────────────────────────────────
+
+type SyncMethod = "auto" | "restore" | "push";
+
+function useRestoreFromDriveFlow(
+  gameId: string,
+  setToast: (t: { message: string; type: "success" | "error" } | null) => void,
+) {
+  const [showModal, setShowModal] = useState(false);
+  const [syncDiff, setSyncDiff] = useState<SyncStructureDiff | null>(null);
+
+  const checkDiffMutation = useCheckSyncDiffMutation();
+  const restoreMutation = useRestoreFromCloudMutation();
+  const pushMutation = usePushToCloudMutation();
+  const syncMutation = useSyncGameMutation();
+
+  const isChecking = checkDiffMutation.isPending;
+  const isExecuting =
+    restoreMutation.isPending || pushMutation.isPending || syncMutation.isPending;
+
+  function start() {
+    checkDiffMutation.mutate(gameId, {
+      onSuccess: (diff) => {
+        if (!diff.cloudHasData) {
+          setToast({
+            message: "No cloud saves found. Sync to Drive first.",
+            type: "error",
+          });
+          return;
+        }
+        if (!diff.hasDiff) {
+          setToast({
+            message: "Drive and local are already identical — nothing to restore.",
+            type: "success",
+          });
+          return;
+        }
+        setSyncDiff(diff);
+        setShowModal(true);
+      },
+      onError: (err) => {
+        setToast({ message: msg(err, "Failed to check sync status."), type: "error" });
+      },
+    });
+  }
+
+  function closeModal() {
+    setShowModal(false);
+  }
+
+  function executeMethod(method: SyncMethod) {
+    setShowModal(false);
+    if (method === "auto") {
+      syncMutation.mutate(gameId, {
+        onSuccess: (data) => {
+          if (data.error) setToast({ message: data.error, type: "error" });
+          else
+            setToast({
+              message: `Sync complete — ↑${data.uploaded} ↓${data.downloaded} file(s)`,
+              type: "success",
+            });
+        },
+        onError: (err) => setToast({ message: msg(err, "Sync failed."), type: "error" }),
+      });
+    } else if (method === "restore") {
+      restoreMutation.mutate(gameId, {
+        onSuccess: (data) => {
+          if (data.error) setToast({ message: data.error, type: "error" });
+          else
+            setToast({
+              message: `Restore complete — ↓${data.downloaded} file(s) downloaded`,
+              type: "success",
+            });
+        },
+        onError: (err) => setToast({ message: msg(err, "Restore failed."), type: "error" }),
+      });
+    } else {
+      pushMutation.mutate(gameId, {
+        onSuccess: (data) => {
+          if (data.error) setToast({ message: data.error, type: "error" });
+          else
+            setToast({
+              message: `Push complete — ↑${data.uploaded} file(s) uploaded`,
+              type: "success",
+            });
+        },
+        onError: (err) =>
+          setToast({ message: msg(err, "Push to Drive failed."), type: "error" }),
+      });
+    }
+  }
+
+  return { start, isChecking, isExecuting, syncDiff, showModal, closeModal, executeMethod };
+}
+
+// ── SyncConflictModal ─────────────────────────────────────────────────────────
+
+interface SyncConflictModalProps {
+  open: boolean;
+  diff: SyncStructureDiff;
+  onConfirm: (method: SyncMethod) => void;
+  onCancel: () => void;
+}
+
+function SyncConflictModal({ open, diff, onConfirm, onCancel }: SyncConflictModalProps) {
+  const [selected, setSelected] = useState<SyncMethod>("auto");
+
+  if (!open) return null;
+
+  const rows: Array<{ label: string; count: number; warn?: boolean }> = [
+    { label: "Local files not on Drive", count: diff.localOnlyFiles.length },
+    { label: "Drive files not found locally", count: diff.cloudOnlyFiles.length },
+    { label: "Local files newer than Drive", count: diff.localNewerFiles.length, warn: true },
+    { label: "Drive files newer than local", count: diff.cloudNewerFiles.length, warn: true },
+  ].filter((r) => r.count > 0);
+
+  const methods: Array<{ value: SyncMethod; label: string; description: string }> = [
+    {
+      value: "auto",
+      label: "Auto-sync (newest wins)",
+      description: "Each file keeps whichever version was modified most recently.",
+    },
+    {
+      value: "restore",
+      label: "Restore from Drive",
+      description: "Overwrite local files with the Drive version — even if local is newer.",
+    },
+    {
+      value: "push",
+      label: "Push local to Drive",
+      description: "Overwrite Drive files with local versions — even if Drive is newer.",
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-[480px] rounded-3xl border border-[rgba(165,185,255,0.15)] bg-[rgba(9,14,28,0.97)] p-6 shadow-2xl grid gap-5">
+        {/* Header */}
+        <div>
+          <p className={EYEBROW}>Sync conflict detected</p>
+          <h3 className="m-0 mt-1">Local and Drive differ</h3>
+        </div>
+
+        {/* Diff summary */}
+        <div className="grid gap-2">
+          {rows.map((r) => (
+            <div
+              key={r.label}
+              className={`flex items-center justify-between gap-3 px-4 py-2 rounded-2xl border text-sm ${
+                r.warn
+                  ? "border-[rgba(255,180,80,0.2)] bg-[rgba(40,28,10,0.6)] text-[#ffd5a0]"
+                  : "border-[rgba(165,185,255,0.08)] bg-[rgba(255,255,255,0.02)] text-[#c7d3f7]"
+              }`}
+            >
+              <span>{r.label}</span>
+              <span className="font-semibold tabular-nums">{r.count}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Method picker */}
+        <div className="grid gap-2">
+          <p className={`${MUTED} text-xs uppercase tracking-wider`}>Choose sync method</p>
+          {methods.map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              onClick={() => setSelected(m.value)}
+              className={`text-left p-4 rounded-2xl border transition-colors ${
+                selected === m.value
+                  ? "border-[rgba(125,201,255,0.5)] bg-[rgba(125,201,255,0.08)]"
+                  : "border-[rgba(165,185,255,0.08)] bg-[rgba(255,255,255,0.02)] hover:border-[rgba(165,185,255,0.2)]"
+              }`}
+            >
+              <p className="m-0 font-medium text-[#c7d3f7] text-sm">{m.label}</p>
+              <p className={`${MUTED} m-0 text-xs mt-0.5`}>{m.description}</p>
+            </button>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3">
+          <button type="button" className={GHOST_BTN} onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={PRIMARY_BTN}
+            onClick={() => onConfirm(selected)}
+          >
+            Confirm
+          </button>
+        </div>
       </div>
     </div>
   );

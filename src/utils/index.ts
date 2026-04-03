@@ -1,3 +1,18 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
+
+/**
+ * Convert a thumbnail path or URL to a safe <img src> value for both dev and release builds.
+ * - http/https URLs → returned as-is
+ * - Local file paths → converted to asset:// protocol via convertFileSrc()
+ *   (raw file paths fail in Tauri release builds; asset:// works in both modes)
+ */
+export function toImgSrc(thumbnail: string | null | undefined): string | undefined {
+  if (!thumbnail) return undefined;
+  const src = thumbnail.trim();
+  if (src.startsWith("http://") || src.startsWith("https://")) return src;
+  return convertFileSrc(src);
+}
+
 /** Trim a string; return null if empty. */
 export function norm(v: string | null | undefined): string | null {
   const t = v?.trim();

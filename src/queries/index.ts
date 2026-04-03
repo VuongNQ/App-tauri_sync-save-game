@@ -17,9 +17,12 @@ export {
   useUpdateSettingsMutation,
 } from "./settings";
 export {
-  useSyncGameMutation,
-  useSyncAllMutation,
-  useToggleTrackChangesMutation,
-  useToggleAutoSyncMutation,
+  useCheckSyncDiffMutation,
   useGetSaveInfoMutation,
+  usePushToCloudMutation,
+  useRestoreFromCloudMutation,
+  useSyncAllMutation,
+  useSyncGameMutation,
+  useToggleAutoSyncMutation,
+  useToggleTrackChangesMutation,
 } from "./sync";

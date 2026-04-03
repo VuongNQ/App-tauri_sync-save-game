@@ -171,6 +171,26 @@ pub struct SyncFileMeta {
     pub drive_file_id: Option<String>,
 }
 
+/// Diff between local save files and Drive sync metadata.
+/// Returned by `check_sync_structure_diff` — no file transfers are performed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStructureDiff {
+    pub game_id: String,
+    /// `false` when no `.sync-meta.json` exists on Drive (game never synced).
+    pub cloud_has_data: bool,
+    /// Relative paths that exist locally but have no Drive counterpart.
+    pub local_only_files: Vec<String>,
+    /// Relative paths present in Drive meta but missing from local.
+    pub cloud_only_files: Vec<String>,
+    /// Paths where local `modified_time` is newer than the Drive version.
+    pub local_newer_files: Vec<String>,
+    /// Paths where the Drive version is newer than local.
+    pub cloud_newer_files: Vec<String>,
+    /// `true` when any of the four lists is non-empty.
+    pub has_diff: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DriveFile {
