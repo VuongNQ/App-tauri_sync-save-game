@@ -26,7 +26,7 @@ export const BTN =
   "border-none cursor-pointer transition-[transform,opacity,background] duration-[0.18s] ease-in-out hover:-translate-y-px focus:outline-2 focus:outline-[rgba(122,180,255,0.35)] focus:outline-offset-1 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none";
 
 export const PRIMARY_BTN =
-  `${BTN} w-full min-h-12 rounded-2xl bg-gradient-to-br from-[#6d7dff] to-[#55c5ff] text-[#05111f] font-bold`;
+  `${BTN} w-full min-h-12 px-4 rounded-2xl bg-gradient-to-br from-[#6d7dff] to-[#55c5ff] text-[#05111f] font-bold`;
 
 export const SECONDARY_BTN =
   `${BTN} min-h-[46px] px-4 rounded-2xl text-[#eaf3ff] bg-[rgba(86,133,255,0.16)]`;
