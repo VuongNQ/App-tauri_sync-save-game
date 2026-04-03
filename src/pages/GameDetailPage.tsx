@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { useForm, useFormContext, FormProvider, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { useParams, Link, useNavigate } from "react-router";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -12,7 +15,7 @@ import {
 } from "../queries";
 import type { GameEntry } from "../types/dashboard";
 import type { SaveInfo } from "../types/dashboard";
-import { getBrowseDefaultPath } from "../services/tauri";
+import { getBrowseDefaultPath, expandSavePath, uploadGameLogo } from "../services/tauri";
 import { norm, msg, formatLocalTime } from "../utils";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { Toast } from "../components/Toast";
@@ -20,6 +23,7 @@ import {
   CARD,
   DANGER_BTN,
   EYEBROW,
+  FIELD_ERROR,
   FORM_GRID,
   FORM_LABEL,
   GHOST_BTN,
@@ -37,26 +41,76 @@ import {
   TOGGLE_THUMB_OFF,
 } from "../components/styles";
 
+// ── Unified settings schema ───────────────────────────────────────────────────
+
+const gameSettingsSchema = z.object({
+  thumbnail: z.string().refine(
+    (v) =>
+      !v ||
+      v.startsWith("https://") ||
+      v.startsWith("http://") ||
+      /^[A-Za-z]:[\\//]/.test(v),
+    "Enter a valid image URL (https://…) or browse a local file.",
+  ),
+  description: z.string().max(1000, "Description must be 1000 characters or fewer."),
+  savePath: z.string(),
+  trackChanges: z.boolean(),
+  autoSync: z.boolean(),
+});
+
+type GameSettingsFormValues = z.infer<typeof gameSettingsSchema>;
+
 export function GameDetailPage() {
   const { id } = useParams<{ id: string }>();
+
   const navigate = useNavigate();
+
   const { data: dashboard } = useDashboardQuery();
+
   const updateMutation = useUpdateGameMutation();
+
   const removeMutation = useRemoveGameMutation();
+
   const [showRemoveModal, setShowRemoveModal] = useState(false);
 
   const game = dashboard?.games.find((g) => g.id === id) ?? null;
-  const { savePathDraft, setSavePathDraft, handleBrowse, handleSave } =
-    useSavePathForm(game, updateMutation);
-  const { descDraft, setDescDraft, handleSaveDesc } =
-    useDescriptionForm(game, updateMutation);
-  const { thumbnailDraft, setThumbnailDraft, handleBrowseThumbnail, handleSaveThumbnail } =
-    useThumbnailForm(game, updateMutation);
+
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
+
   const saveInfoMutation = useGetSaveInfoMutation();
+
   const syncMutation = useSyncGameMutation();
+
   const validateQuery = useValidatePathsQuery();
+
   const isSyncing = syncMutation.isPending;
+
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  const methods = useForm<GameSettingsFormValues>({
+    defaultValues: {
+      thumbnail: game?.thumbnail ?? "",
+      description: game?.description ?? "",
+      savePath: game?.savePath ?? "",
+      trackChanges: game?.trackChanges ?? false,
+      autoSync: game?.autoSync ?? false,
+    },
+    resolver: zodResolver(gameSettingsSchema),
+  });
+
+  const { handleSubmit, reset, formState: { isDirty } } = methods;
+
+  useEffect(() => {
+    reset({
+      thumbnail: game?.thumbnail ?? "",
+      description: game?.description ?? "",
+      savePath: game?.savePath ?? "",
+      trackChanges: game?.trackChanges ?? false,
+      autoSync: game?.autoSync ?? false,
+    });
+  }, [game?.id, game?.thumbnail, game?.description, game?.savePath, game?.trackChanges, game?.autoSync, reset]);
+
   const isPathInvalid =
     game != null &&
     (validateQuery.data ?? []).some((v) => v.gameId === game.id && !v.valid);
@@ -73,6 +127,34 @@ export function GameDetailPage() {
   }
 
   const sourceBadge = SOURCE_BADGE[game.source] ?? SOFT_BADGE;
+
+  async function onSaveSettings(values: GameSettingsFormValues) {
+    if (!game) return;
+    setLogoUploadError(null);
+    const src = norm(values.thumbnail);
+
+    if (methods.formState.dirtyFields.thumbnail && src) {
+      setIsUploadingLogo(true);
+      try {
+        await uploadGameLogo(game.id, src);
+      } catch (err) {
+        setLogoUploadError(msg(err, "Logo upload failed."));
+        setIsUploadingLogo(false);
+        return;
+      }
+      setIsUploadingLogo(false);
+    }
+
+    const trimmed = values.description.trim().slice(0, 1000);
+    await updateMutation.mutateAsync({
+      ...game,
+      thumbnail: src || null,
+      description: trimmed || null,
+      savePath: norm(values.savePath),
+      trackChanges: values.trackChanges,
+      autoSync: values.autoSync,
+    });
+  }
 
   return (
     <>
@@ -132,160 +214,30 @@ export function GameDetailPage() {
         </dl>
       </div>
 
-      {/* Logo / Thumbnail */}
-      <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold">Logo / Thumbnail</h3>
-
-        <div className={FORM_GRID}>
-          {thumbnailDraft && (
-            <div className="w-20 h-20 rounded-2xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
-              <img
-                src={thumbnailDraft}
-                alt="Thumbnail preview"
-                className="w-full h-full object-cover"
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-              />
-            </div>
-          )}
-
-          <label className={FORM_LABEL}>
-            <span className={LABEL_SPAN}>URL or local file path</span>
-            <div className={INPUT_ROW}>
-              <input
-                className={INPUT_CLS}
-                value={thumbnailDraft}
-                onChange={(e) => setThumbnailDraft(e.currentTarget.value)}
-                placeholder="https://… or browse a local file"
-              />
-              <button type="button" className={SECONDARY_BTN} onClick={handleBrowseThumbnail}>
-                Browse
-              </button>
-            </div>
-          </label>
-
-          <div className="flex items-center gap-3">
-            <button
-              className={PRIMARY_BTN}
-              type="button"
-              onClick={handleSaveThumbnail}
-              disabled={updateMutation.isPending || isSyncing}
-            >
-              {updateMutation.isPending ? "Saving…" : "Save thumbnail"}
-            </button>
-            <button
-              className={GHOST_BTN}
-              type="button"              disabled={isSyncing}              onClick={() => setThumbnailDraft("")}
-            >
-              Clear
-            </button>
-          </div>
-
-          {updateMutation.isError && (
-            <p className="m-0 text-sm text-[#ffd5d5]">
-              {msg(updateMutation.error, "Unable to save.")}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Description */}
-      <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold">Description</h3>
-
-        <div className={FORM_GRID}>
-          <label className={FORM_LABEL}>
-            <span className={LABEL_SPAN}>Game description (max 1000 characters)</span>
-            <textarea
-              className={`${INPUT_CLS} resize-y min-h-[60px]`}
-              value={descDraft}
-              onChange={(e) => setDescDraft(e.currentTarget.value)}
-              maxLength={1000}
-              rows={4}
-              placeholder="Brief description of the game…"
+      {/* Settings form */}
+      <FormProvider {...methods}>
+        <form onSubmit={handleSubmit(onSaveSettings)}>
+          {isDirty && (
+            <SaveBar
+              isSaving={isUploadingLogo || updateMutation.isPending}
+              onDiscard={() => reset()}
+              error={logoUploadError ?? (updateMutation.isError ? msg(updateMutation.error, "Unable to save.") : null)}
             />
-            <span className={MUTED + " text-xs mt-1"}>{descDraft.length}/1000</span>
-          </label>
-
-          <button
-            className={PRIMARY_BTN}
-            type="button"
-            onClick={handleSaveDesc}
-            disabled={updateMutation.isPending || isSyncing}
-          >
-            {updateMutation.isPending ? "Saving…" : "Save description"}
-          </button>
-        </div>
-      </div>
-
-      {/* Save folder form */}
-      <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold">Save folder mapping</h3>
-
-        {isPathInvalid && (
-          <div className="mb-4 p-3 rounded-2xl border border-[rgba(255,100,100,0.3)] bg-[rgba(62,18,22,0.5)] text-[#ff9e9e] text-sm flex items-center gap-2">
-            <span>⚠</span> The configured save path does not exist on this machine.
-          </div>
-        )}
-
-        <div className={FORM_GRID}>
-          <label className={FORM_LABEL}>
-            <span className={LABEL_SPAN}>Save folder path</span>
-            <div className={INPUT_ROW}>
-              <input
-                className={INPUT_CLS}
-                value={savePathDraft}
-                onChange={(e) => setSavePathDraft(e.currentTarget.value)}
-                placeholder="Choose or enter the save folder path"
-              />
-              <button type="button" className={SECONDARY_BTN} onClick={handleBrowse} disabled={isSyncing}>
-                Browse
-              </button>
-            </div>
-          </label>
-
-          <div className="flex items-center justify-between gap-3 max-[720px]:flex-col max-[720px]:items-stretch">
-            <button
-              className={PRIMARY_BTN}
-              type="button"
-              onClick={handleSave}
-              disabled={updateMutation.isPending || isSyncing}
-            >
-              {updateMutation.isPending ? "Saving…" : "Save mapping"}
-            </button>
-            <button className={GHOST_BTN} type="button" disabled={isSyncing} onClick={() => setSavePathDraft("")}>
-              Clear
-            </button>
-          </div>
-
-          {updateMutation.isError && (
-            <p className="m-0 text-sm text-[#ffd5d5]">
-              {msg(updateMutation.error, "Unable to save.")}
-            </p>
           )}
-        </div>
-      </div>
 
-      {/* Tracking & Sync settings */}
-      <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold">Tracking & Sync</h3>
+          {/* Logo / Thumbnail */}
+          <ThumbnailSection isSyncing={isSyncing} />
 
-        <div className="grid gap-4">
-          <ToggleRow
-            label="Track file changes"
-            description="Watch the save folder for modifications in the background"
-            enabled={game.trackChanges}
-            disabled={isSyncing}
-            onChange={(v) => updateMutation.mutate({ ...game, trackChanges: v })}
-          />
-          <ToggleRow
-            label="Auto-sync to Google Drive"
-            description="Automatically back up saves when changes are detected"
-            enabled={game.autoSync}
-            disabled={isSyncing}
-            onChange={(v) => updateMutation.mutate({ ...game, autoSync: v })}
-          />
-        </div>
-      </div>
+          {/* Description */}
+          <DescriptionSection />
+
+          {/* Save folder */}
+          <SaveFolderSection game={game} isSyncing={isSyncing} isPathInvalid={isPathInvalid} />
+
+          {/* Tracking & Sync */}
+          <TrackingSettingsSection isSyncing={isSyncing} />
+        </form>
+      </FormProvider>
 
       {/* Actions */}
       <div className={CARD}>
@@ -525,95 +477,253 @@ function formatBytes(bytes: number): string {
   return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-// ── Co-located hook ───────────────────────────────────────────────────────────
+// ── SaveBar ───────────────────────────────────────────────────────────────────
 
-function useSavePathForm(
-  game: GameEntry | null,
-  updateMutation: ReturnType<typeof useUpdateGameMutation>,
-) {
-  const [savePathDraft, setSavePathDraft] = useState(game?.savePath ?? "");
+interface SaveBarProps {
+  isSaving: boolean;
+  onDiscard: () => void;
+  error: string | null;
+}
 
-  useEffect(() => {
-    setSavePathDraft(game?.savePath ?? "");
-  }, [game?.id, game?.savePath]);
+function SaveBar({ isSaving, onDiscard, error }: SaveBarProps) {
+  return (
+    <div className="sticky top-0 z-50 mb-5 px-4 py-3 rounded-2xl border border-[rgba(120,180,255,0.25)] bg-[rgba(9,14,28,0.97)] backdrop-blur-sm flex items-center justify-between gap-4 max-[720px]:flex-col max-[720px]:items-stretch">
+      <div className="flex items-center gap-3">
+        <span className="h-2 w-2 rounded-full bg-[#7dc9ff] shrink-0" />
+        <span className="text-sm text-[#c7d3f7]">You have unsaved changes</span>
+        {error && <span className="text-sm text-[#ffd5d5]">{error}</span>}
+      </div>
+      <div className="flex items-center gap-3 shrink-0">
+        <button type="button" className={GHOST_BTN} onClick={onDiscard} disabled={isSaving}>
+          Discard
+        </button>
+        <button type="submit" className={PRIMARY_BTN} disabled={isSaving}>
+          {isSaving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Thumbnail section ─────────────────────────────────────────────────────────
+
+interface ThumbnailSectionProps {
+  isSyncing: boolean;
+}
+
+function ThumbnailSection({ isSyncing }: ThumbnailSectionProps) {
+  const { control, setValue, watch, formState: { errors } } = useFormContext<GameSettingsFormValues>();
+  const thumbnailValue = watch("thumbnail");
 
   async function handleBrowse() {
-    // Priority: current game's parent dir → last game's parent dir → no default
+    const p = await open({
+      multiple: false,
+      title: "Choose a thumbnail image",
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+    });
+    if (typeof p === "string") {
+      setValue("thumbnail", p, { shouldValidate: true, shouldDirty: true });
+    }
+  }
+
+  return (
+    <div className={CARD}>
+      <h3 className="m-0 mb-4 font-semibold">Logo / Thumbnail</h3>
+
+      <div className={FORM_GRID}>
+        {thumbnailValue && (
+          <div className="w-20 h-20 rounded-2xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
+            <img
+              src={thumbnailValue}
+              alt="Thumbnail preview"
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = "none";
+              }}
+            />
+          </div>
+        )}
+
+        <Controller
+          name="thumbnail"
+          control={control}
+          render={({ field }) => (
+            <label className={FORM_LABEL}>
+              <span className={LABEL_SPAN}>URL or local file path</span>
+              <div className={INPUT_ROW}>
+                <input
+                  className={INPUT_CLS}
+                  {...field}
+                  placeholder="https://… or browse a local file"
+                />
+                <button
+                  type="button"
+                  className={SECONDARY_BTN}
+                  onClick={handleBrowse}
+                  disabled={isSyncing}
+                >
+                  Browse
+                </button>
+              </div>
+              {errors.thumbnail && (
+                <span className={FIELD_ERROR}>{errors.thumbnail.message}</span>
+              )}
+            </label>
+          )}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── Description section ───────────────────────────────────────────────────────
+
+function DescriptionSection() {
+  const { control, formState: { errors } } = useFormContext<GameSettingsFormValues>();
+
+  return (
+    <div className={CARD}>
+      <h3 className="m-0 mb-4 font-semibold">Description</h3>
+      <div className={FORM_GRID}>
+        <Controller
+          name="description"
+          control={control}
+          render={({ field }) => (
+            <label className={FORM_LABEL}>
+              <span className={LABEL_SPAN}>Game description (max 1000 characters)</span>
+              <textarea
+                className={`${INPUT_CLS} resize-y min-h-[60px]`}
+                {...field}
+                maxLength={1000}
+                rows={4}
+                placeholder="Brief description of the game…"
+              />
+              <span className={MUTED + " text-xs mt-1"}>{field.value.length}/1000</span>
+              {errors.description && (
+                <span className={FIELD_ERROR}>{errors.description.message}</span>
+              )}
+            </label>
+          )}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── Save folder section ───────────────────────────────────────────────────────
+
+interface SaveFolderSectionProps {
+  game: GameEntry;
+  isSyncing: boolean;
+  isPathInvalid: boolean;
+}
+
+function SaveFolderSection({ game, isSyncing, isPathInvalid }: SaveFolderSectionProps) {
+  const { control, setValue } = useFormContext<GameSettingsFormValues>();
+
+  async function handleBrowse() {
     let defaultPath: string | undefined;
-    if (game?.savePath) {
-      const sep = game.savePath.lastIndexOf("\\");
-      if (sep > 0) defaultPath = game.savePath.slice(0, sep);
+    if (game.savePath) {
+      const resolved = game.savePath.includes("%")
+        ? await expandSavePath(game.savePath)
+        : game.savePath;
+      const sep = resolved.lastIndexOf("\\");
+      if (sep > 0) defaultPath = resolved.slice(0, sep);
     }
     if (!defaultPath) {
       const suggested = await getBrowseDefaultPath();
       if (suggested) defaultPath = suggested;
     }
-
     const p = await open({
       directory: true,
       multiple: false,
       title: "Choose the save game folder",
       defaultPath,
     });
-    if (typeof p === "string") setSavePathDraft(p);
+    if (typeof p === "string") setValue("savePath", p, { shouldDirty: true });
   }
 
-  async function handleSave() {
-    if (!game) return;
-    await updateMutation.mutateAsync({ ...game, savePath: norm(savePathDraft) });
-  }
+  return (
+    <div className={CARD}>
+      <h3 className="m-0 mb-4 font-semibold">Save folder mapping</h3>
 
-  return { savePathDraft, setSavePathDraft, handleBrowse, handleSave };
+      {isPathInvalid && (
+        <div className="mb-4 p-3 rounded-2xl border border-[rgba(255,100,100,0.3)] bg-[rgba(62,18,22,0.5)] text-[#ff9e9e] text-sm flex items-center gap-2">
+          <span>⚠</span> The configured save path does not exist on this machine.
+        </div>
+      )}
+
+      <div className={FORM_GRID}>
+        <Controller
+          name="savePath"
+          control={control}
+          render={({ field }) => (
+            <label className={FORM_LABEL}>
+              <span className={LABEL_SPAN}>Save folder path</span>
+              <div className={INPUT_ROW}>
+                <input
+                  className={INPUT_CLS}
+                  {...field}
+                  placeholder="Choose or enter the save folder path"
+                />
+                <button
+                  type="button"
+                  className={SECONDARY_BTN}
+                  onClick={handleBrowse}
+                  disabled={isSyncing}
+                >
+                  Browse
+                </button>
+              </div>
+            </label>
+          )}
+        />
+      </div>
+    </div>
+  );
 }
 
-function useDescriptionForm(
-  game: GameEntry | null,
-  updateMutation: ReturnType<typeof useUpdateGameMutation>,
-) {
-  const [descDraft, setDescDraft] = useState(game?.description ?? "");
+// ── Tracking & Sync section ───────────────────────────────────────────────────
 
-  useEffect(() => {
-    setDescDraft(game?.description ?? "");
-  }, [game?.id, game?.description]);
-
-  async function handleSaveDesc() {
-    if (!game) return;
-    const trimmed = descDraft.trim().slice(0, 1000);
-    await updateMutation.mutateAsync({
-      ...game,
-      description: trimmed || null,
-    });
-  }
-
-  return { descDraft, setDescDraft, handleSaveDesc };
+interface TrackingSettingsSectionProps {
+  isSyncing: boolean;
 }
 
-function useThumbnailForm(
-  game: GameEntry | null,
-  updateMutation: ReturnType<typeof useUpdateGameMutation>,
-) {
-  const [thumbnailDraft, setThumbnailDraft] = useState(game?.thumbnail ?? "");
+function TrackingSettingsSection({ isSyncing }: TrackingSettingsSectionProps) {
+  const { control } = useFormContext<GameSettingsFormValues>();
 
-  useEffect(() => {
-    setThumbnailDraft(game?.thumbnail ?? "");
-  }, [game?.id, game?.thumbnail]);
+  return (
+    <div className={CARD}>
+      <h3 className="m-0 mb-4 font-semibold">Tracking & Sync</h3>
 
-  async function handleBrowseThumbnail() {
-    const p = await open({
-      multiple: false,
-      title: "Choose a thumbnail image",
-      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
-    });
-    if (typeof p === "string") setThumbnailDraft(p);
-  }
-
-  async function handleSaveThumbnail() {
-    if (!game) return;
-    await updateMutation.mutateAsync({
-      ...game,
-      thumbnail: norm(thumbnailDraft),
-    });
-  }
-
-  return { thumbnailDraft, setThumbnailDraft, handleBrowseThumbnail, handleSaveThumbnail };
+      <div className="grid gap-4">
+        <Controller
+          name="trackChanges"
+          control={control}
+          render={({ field }) => (
+            <ToggleRow
+              label="Track file changes"
+              description="Watch the save folder for modifications in the background"
+              enabled={field.value}
+              disabled={isSyncing}
+              onChange={field.onChange}
+            />
+          )}
+        />
+        <Controller
+          name="autoSync"
+          control={control}
+          render={({ field }) => (
+            <ToggleRow
+              label="Auto-sync to Google Drive"
+              description="Automatically back up saves when changes are detected"
+              enabled={field.value}
+              disabled={isSyncing}
+              onChange={field.onChange}
+            />
+          )}
+        />
+      </div>
+    </div>
+  );
 }

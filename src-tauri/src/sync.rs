@@ -102,7 +102,8 @@ pub fn get_save_info(app: &AppHandle, game_id: &str) -> Result<SaveInfo, String>
         .save_path
         .as_deref()
         .ok_or("Save path is not set for this game")?;
-    let save_dir = Path::new(save_path);
+    let expanded_path = settings::expand_env_vars(save_path);
+    let save_dir = Path::new(&expanded_path);
 
     let local_files = collect_local_files(save_dir)?;
 
@@ -180,7 +181,8 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
         .save_path
         .as_deref()
         .ok_or("Save path is not set for this game")?;
-    let save_dir = Path::new(save_path);
+    let expanded_path = settings::expand_env_vars(save_path);
+    let save_dir = Path::new(&expanded_path);
 
     // 2. Ensure Drive folders exist
     let root_folder_id = gdrive::ensure_root_folder(app)?;

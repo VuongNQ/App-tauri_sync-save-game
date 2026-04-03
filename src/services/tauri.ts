@@ -113,3 +113,21 @@ export async function validateSavePaths(): Promise<PathValidation[]> {
 export async function getBrowseDefaultPath(): Promise<string | null> {
   return invoke<string | null>("get_browse_default_path");
 }
+
+export async function expandSavePath(path: string): Promise<string> {
+  return invoke<string>("expand_save_path", { path });
+}
+
+// ── Logo upload ───────────────────────────────────────────────────────────────
+
+/**
+ * Validate a game logo (≤ 3 MB) and upload it to the game's Google Drive folder.
+ * `logoSource` is a local file path or an HTTPS image URL.
+ * Throws if the logo exceeds 3 MB or if the Drive upload fails.
+ */
+export async function uploadGameLogo(
+  gameId: string,
+  logoSource: string,
+): Promise<void> {
+  return invoke<void>("upload_game_logo", { gameId, logoSource });
+}

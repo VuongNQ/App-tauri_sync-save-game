@@ -147,7 +147,8 @@ pub fn init_watchers(app: &AppHandle) {
     for game in &state.games {
         if game.track_changes {
             if let Some(ref sp) = game.save_path {
-                if let Err(e) = manager.start_watching(&game.id, sp) {
+                let expanded = settings::expand_env_vars(sp);
+                if let Err(e) = manager.start_watching(&game.id, &expanded) {
                     println!("[watcher] Failed to start watcher for {}: {e}", game.id);
                 }
             }
@@ -180,7 +181,8 @@ pub fn handle_track_changes_toggle(
             .as_deref()
             .ok_or("Save path must be set before enabling tracking")?;
 
-        manager.start_watching(game_id, save_path)?;
+        let expanded = settings::expand_env_vars(save_path);
+        manager.start_watching(game_id, &expanded)?;
     } else {
         manager.stop_watching(game_id);
     }

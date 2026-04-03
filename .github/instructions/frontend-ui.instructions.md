@@ -181,6 +181,11 @@ export async function addManualGame(payload: AddGamePayload): Promise<DashboardD
 export async function syncGame(gameId: string): Promise<SyncResult> {
   return invoke<SyncResult>("sync_game", { gameId });
 }
+
+// Expands stored %VAR% tokens (e.g. %LOCALAPPDATA%) to absolute path on current machine
+export async function expandSavePath(path: string): Promise<string> {
+  return invoke<string>("expand_save_path", { path });
+}
 ```
 
 **Rules:**
@@ -423,6 +428,16 @@ function useAuthStatusCallbacks() {
 
 Use `norm()` when converting form string inputs to `string | null` for payloads.
 Use `msg()` in `catch` blocks and mutation `onError` callbacks.
+
+---
+
+### Save Path Portability
+
+Save paths in `game.savePath` may contain Windows env-var tokens (`%LOCALAPPDATA%`, `%APPDATA%`, `%USERPROFILE%`, `%PROGRAMDATA%`, `%TEMP%`). These are stored intentionally — do **not** strip them.
+
+- **Display**: show the token string as-is.
+- **Folder-picker `defaultPath`**: call `expandSavePath(game.savePath)` first if the value contains `%`, then extract the parent directory.
+- Never pass a token path directly to any filesystem API on the frontend; always expand first.
 
 ---
 
