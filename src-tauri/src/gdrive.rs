@@ -735,3 +735,195 @@ pub fn fetch_settings_from_cloud(app: &AppHandle) -> Result<bool, String> {
     println!("[gdrive] Settings restored from cloud");
     Ok(true)
 }
+
+// ── Logo upload ───────────────────────────────────────────
+
+const MAX_LOGO_BYTES: usize = 3 * 1024 * 1024; // 3 MB
+
+/// Validate and upload a game logo (local file path or HTTPS URL) to the game's
+/// Drive folder as `logo.<ext>`. Replaces any previously uploaded logo.
+///
+/// Returns `Err` if:
+/// - The source cannot be read / downloaded.
+/// - The image exceeds the 3 MB size limit.
+/// - The Drive upload fails.
+pub fn upload_game_logo(app: &AppHandle, game_id: &str, logo_source: &str) -> Result<(), String> {
+    // 1. Fetch bytes and determine file extension.
+    let (bytes, ext) = if logo_source.starts_with("http://") || logo_source.starts_with("https://") {
+        fetch_logo_url_bytes(logo_source)?
+    } else {
+        read_logo_file_bytes(logo_source)?
+    };
+
+    // 2. Validate size.
+    if bytes.len() > MAX_LOGO_BYTES {
+        return Err(format!(
+            "Logo is {:.1} MB — must be 3 MB or smaller.",
+            bytes.len() as f64 / 1_048_576.0
+        ));
+    }
+
+    // 3. Ensure Drive folders exist.
+    let root_id = ensure_root_folder(app)?;
+    let folder_id = ensure_game_folder(app, &root_id, game_id)?;
+
+    // 4. Check for an existing logo file so we PATCH rather than create a duplicate.
+    let files = list_files(app, &folder_id)?;
+    let existing_logo = files.iter().find(|f| f.name.starts_with("logo."));
+    let logo_name = format!("logo.{ext}");
+
+    // If the extension changed (e.g. from png to jpg), delete the old file first.
+    if let Some(old) = existing_logo {
+        if old.name != logo_name {
+            delete_drive_file(app, &old.id)?;
+            upload_bytes_as_file(app, &folder_id, &logo_name, &bytes, None)?;
+        } else {
+            upload_bytes_as_file(app, &folder_id, &logo_name, &bytes, Some(&old.id))?;
+        }
+    } else {
+        upload_bytes_as_file(app, &folder_id, &logo_name, &bytes, None)?;
+    }
+
+    println!("[gdrive] Logo uploaded for game {game_id} as {logo_name}");
+    Ok(())
+}
+
+/// Download image bytes from an HTTP/HTTPS URL (no auth required — public URL).
+fn fetch_logo_url_bytes(url: &str) -> Result<(Vec<u8>, String), String> {
+    let resp = agent()
+        .get(url)
+        .call()
+        .map_err(|e| format!("Failed to download logo URL: {e}"))?;
+    let status = resp.status().as_u16();
+    if status != 200 {
+        return Err(format!(
+            "Failed to download logo URL (HTTP {status}): {url}"
+        ));
+    }
+    let bytes = resp
+        .into_body()
+        .read_to_vec()
+        .map_err(|e| format!("Failed to read logo download body: {e}"))?;
+    let ext = guess_image_ext_from_url(url);
+    Ok((bytes, ext))
+}
+
+/// Read image bytes from a local filesystem path.
+fn read_logo_file_bytes(path: &str) -> Result<(Vec<u8>, String), String> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("Failed to read logo file '{path}': {e}"))?;
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+    let ext = match ext.as_str() {
+        "png" | "jpg" | "jpeg" | "gif" | "webp" => ext,
+        _ => "png".to_string(),
+    };
+    Ok((bytes, ext))
+}
+
+/// Guess an image extension from the URL path, defaulting to `"png"`.
+fn guess_image_ext_from_url(url: &str) -> String {
+    let path_part = url.split('?').next().unwrap_or(url);
+    let ext = std::path::Path::new(path_part)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+    match ext.as_str() {
+        "png" | "jpg" | "jpeg" | "gif" | "webp" => ext,
+        _ => "png".to_string(),
+    }
+}
+
+/// Upload raw bytes as a file inside a Drive folder (multipart upload).
+/// Pass `existing_file_id` to PATCH an existing file; `None` to create a new one.
+fn upload_bytes_as_file(
+    app: &AppHandle,
+    folder_id: &str,
+    file_name: &str,
+    bytes: &[u8],
+    existing_file_id: Option<&str>,
+) -> Result<DriveFile, String> {
+    let boundary = format!("----boundary{}", fastrand::u64(..));
+    let metadata = if existing_file_id.is_some() {
+        serde_json::json!({ "name": file_name })
+    } else {
+        serde_json::json!({ "name": file_name, "parents": [folder_id] })
+    };
+
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Type: application/json; charset=UTF-8\r\n\r\n");
+    body.extend_from_slice(metadata.to_string().as_bytes());
+    body.extend_from_slice(b"\r\n");
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(b"Content-Type: application/octet-stream\r\n\r\n");
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(b"\r\n");
+    body.extend_from_slice(format!("--{boundary}--").as_bytes());
+
+    let content_type = format!("multipart/related; boundary={boundary}");
+    let (url, method_is_patch) = if let Some(fid) = existing_file_id {
+        (
+            format!("{DRIVE_UPLOAD_URL}/{fid}?uploadType=multipart&fields=id,name,modifiedTime,size"),
+            true,
+        )
+    } else {
+        (
+            format!("{DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,modifiedTime,size"),
+            false,
+        )
+    };
+
+    let token = gdrive_auth::get_access_token(app)?;
+    let resp = if method_is_patch {
+        agent()
+            .patch(&url)
+            .header("Authorization", &format!("Bearer {token}"))
+            .header("Content-Type", &content_type)
+            .send(&body[..])
+            .map_err(|e| format!("Logo upload PATCH failed: {e}"))?
+    } else {
+        agent()
+            .post(&url)
+            .header("Authorization", &format!("Bearer {token}"))
+            .header("Content-Type", &content_type)
+            .send(&body[..])
+            .map_err(|e| format!("Logo upload POST failed: {e}"))?
+    };
+
+    let status = resp.status().as_u16();
+    let resp_body = resp.into_body().read_to_string().unwrap_or_default();
+    if status != 200 {
+        return Err(format!(
+            "Logo upload failed for '{file_name}' (HTTP {status}): {resp_body}"
+        ));
+    }
+
+    let raw: DriveFileRaw =
+        serde_json::from_str(&resp_body).map_err(|e| format!("Parse logo upload response: {e}"))?;
+    println!("[gdrive] Uploaded '{file_name}' → {}", raw.id);
+    Ok(DriveFile::from(raw))
+}
+
+/// Delete a Drive file by ID (used when the logo extension changes).
+fn delete_drive_file(app: &AppHandle, file_id: &str) -> Result<(), String> {
+    let token = gdrive_auth::get_access_token(app)?;
+    let url = format!("{DRIVE_FILES_URL}/{file_id}");
+    let resp = agent()
+        .delete(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .call()
+        .map_err(|e| format!("Drive DELETE failed: {e}"))?;
+    let status = resp.status().as_u16();
+    // 204 No Content is the success status for DELETE; 404 means already gone.
+    if status != 204 && status != 404 {
+        let body = resp.into_body().read_to_string().unwrap_or_default();
+        return Err(format!("Delete Drive file {file_id} failed (HTTP {status}): {body}"));
+    }
+    println!("[gdrive] Deleted Drive file {file_id}");
+    Ok(())
+}

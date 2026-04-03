@@ -79,7 +79,7 @@ src-tauri/src/
 | `description` | `Option<String>` | `string \| null` | User-provided description |
 | `thumbnail` | `Option<String>` | `string \| null` | Local file path **or** remote URL for logo/thumbnail |
 | `source` | `String` | `string` | One of: `"manual"`, `"emulator"` |
-| `save_path` | `Option<String>` | `string \| null` | Absolute path to local save-game folder |
+| `save_path` | `Option<String>` | `string \| null` | Save-game folder path, stored with `%VAR%` tokens (e.g. `%LOCALAPPDATA%\Game\Saves`); expanded to absolute at runtime |
 | `track_changes` | `bool` | `boolean` | Watch this game's save folder for file changes (default `false`) |
 | `auto_sync` | `bool` | `boolean` | Automatically sync on change detection (default `false`) |
 | `last_local_modified` | `Option<String>` | `string \| null` | ISO 8601 timestamp of last known local save modification |
@@ -117,7 +117,7 @@ tauri::generate_handler![
     get_save_info, sync_game, sync_all_games,
     toggle_track_changes, toggle_auto_sync,
     // Validation
-    validate_save_paths, get_browse_default_path,
+    validate_save_paths, get_browse_default_path, expand_save_path,
 ]
 ```
 
@@ -240,6 +240,29 @@ A route wrapper or layout component checks `isAuthenticated` (from Tauri command
 
 - All games: `manual-{slugified_name}` with numeric suffix for collisions (handled by `ensure_unique_id` in `settings.rs`).
 - IDs are stable keys — sync metadata on Google Drive references them.
+
+---
+
+## Save Path Portability (Windows Env-Var Tokens)
+
+Save paths are stored with Windows environment-variable tokens instead of hardcoded user names so they work across accounts and machines.
+
+### Storage contract
+- `normalize_optional_path()` (called on every add/update) calls `contract_env_vars()` which replaces known user-folder prefixes with `%VAR%` tokens.
+- Replacement priority (most-specific first): `TEMP` → `LOCALAPPDATA` → `APPDATA` → `USERPROFILE` → `PROGRAMDATA`.
+- Example: `C:\Users\vuong\AppData\Local\Game\Saves` → `%LOCALAPPDATA%\Game\Saves`.
+
+### Expansion contract
+- `expand_env_vars(path)` in `settings.rs` is the **single** expansion function; call it everywhere a path is used as a real filesystem path.
+- Expansion sites: `validate_save_paths`, `get_browse_default_path`, `sync::get_save_info`, `sync::sync_game_inner`, `watcher::init_watchers`, `watcher::handle_track_changes_toggle`.
+- Paths are **displayed to users with tokens** — this is intentional and portable.
+
+### `expand_save_path` Tauri command
+- Lets the frontend expand a stored path to an absolute path on demand (e.g. for the folder-picker dialog `defaultPath`).
+- Frontend wrapper: `expandSavePath(path: string): Promise<string>` in `src/services/tauri.ts`.
+
+### Frontend rule
+In `useSavePathForm.handleBrowse()`: if `game.savePath` contains `%`, call `expandSavePath()` before extracting the parent directory for the folder-picker `defaultPath`.
 
 ---
 

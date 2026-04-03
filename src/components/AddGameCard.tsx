@@ -1,5 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { open } from "@tauri-apps/plugin-dialog";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate } from "react-router";
 import { z } from "zod";
@@ -7,6 +8,7 @@ import { z } from "zod";
 import { useAddGameMutation } from "../queries";
 import type { AddGamePayload } from "../types/dashboard";
 import { norm, msg } from "../utils";
+import { uploadGameLogo } from "../services/tauri";
 import {
   CARD,
   FIELD_ERROR,
@@ -44,6 +46,7 @@ export function AddGameCard() {
     });
   const addMutation = useAddGameMutation();
   const navigate = useNavigate();
+  const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
 
   const thumbnail = watch("thumbnail");
   const savePath = watch("savePath");
@@ -63,6 +66,7 @@ export function AddGameCard() {
   }
 
   async function onSubmit(values: AddGamePayload) {
+    setLogoUploadError(null);
     const payload: AddGamePayload = {
       name: values.name.trim(),
       description: norm(values.description),
@@ -74,6 +78,18 @@ export function AddGameCard() {
     const added = data.games.find(
       (g) => g.name.toLowerCase() === payload.name.toLowerCase(),
     );
+
+    if (added && payload.thumbnail) {
+      try {
+        await uploadGameLogo(added.id, payload.thumbnail);
+      } catch (err) {
+        setLogoUploadError(msg(err, "Game added but logo upload failed."));
+        reset(DEFAULT_VALUES);
+        navigate(`/game/${added.id}`);
+        return;
+      }
+    }
+
     reset(DEFAULT_VALUES);
     if (added) navigate(`/game/${added.id}`);
   }
@@ -156,6 +172,9 @@ export function AddGameCard() {
           <p className="m-0 text-sm text-[#ffd5d5]">
             {msg(addMutation.error, "Unable to add the game.")}
           </p>
+        )}
+        {logoUploadError && (
+          <p className="m-0 text-sm text-[#ffd5d5]">{logoUploadError}</p>
         )}
       </form>
     </section>

@@ -124,6 +124,11 @@ fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<AppSe
 // ── Path validation commands ──────────────────────────────
 
 #[tauri::command]
+fn expand_save_path(path: String) -> String {
+    settings::expand_env_vars(&path)
+}
+
+#[tauri::command]
 fn validate_save_paths(app: tauri::AppHandle) -> Result<Vec<PathValidation>, String> {
     settings::validate_save_paths(&app)
 }
@@ -141,6 +146,19 @@ fn get_save_info(app: tauri::AppHandle, game_id: String) -> Result<SaveInfo, Str
 }
 
 // ── Sync commands ─────────────────────────────────────────
+
+/// Validate a game logo (file ≤ 3 MB; URL download ≤ 3 MB) and upload it to the
+/// game's Google Drive folder as `logo.<ext>`.
+#[tauri::command]
+async fn upload_game_logo(
+    app: tauri::AppHandle,
+    game_id: String,
+    logo_source: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || gdrive::upload_game_logo(&app, &game_id, &logo_source))
+        .await
+        .map_err(|e| format!("Logo upload task failed: {e}"))?
+}
 
 #[tauri::command]
 async fn sync_game(app: tauri::AppHandle, game_id: String) -> Result<SyncResult, String> {
@@ -237,6 +255,8 @@ pub fn run() {
             toggle_auto_sync,
             validate_save_paths,
             get_browse_default_path,
+            expand_save_path,
+            upload_game_logo,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

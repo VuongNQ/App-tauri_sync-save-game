@@ -202,10 +202,51 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir.join(SETTINGS_FILE_NAME))
 }
 
+/// Expand Windows environment-variable tokens (e.g. `%LOCALAPPDATA%`) to
+/// their current runtime values.  Safe to call with plain absolute paths —
+/// they are returned unchanged.
+pub fn expand_env_vars(path: &str) -> String {
+    // Order: most-specific first so that overlapping prefixes resolve correctly
+    // (e.g. %TEMP% is a subdirectory of %LOCALAPPDATA%, so try TEMP first).
+    const VARS: &[&str] = &["TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA"];
+    let mut result = path.to_string();
+    for var in VARS {
+        let token = format!("%{}%", var.to_uppercase());
+        if let Ok(val) = std::env::var(var) {
+            // Case-insensitive token match on Windows path strings
+            let upper = result.to_uppercase();
+            if let Some(pos) = upper.find(&token) {
+                result = format!("{}{}{}", &result[..pos], val, &result[pos + token.len()..]);
+            }
+        }
+    }
+    result
+}
+
+/// Replace a known Windows user-folder prefix with its environment-variable
+/// token so that paths are portable across accounts and machines.
+fn contract_env_vars(path: &str) -> String {
+    // Most-specific first: TEMP ≈ %LOCALAPPDATA%\Temp, so replace it before
+    // we would replace the longer LOCALAPPDATA prefix.
+    const VARS: &[&str] = &["TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA"];
+    let path_upper = path.to_uppercase();
+    for var in VARS {
+        if let Ok(val) = std::env::var(var) {
+            let val_upper = val.to_uppercase();
+            if path_upper.starts_with(&val_upper) {
+                let remainder = &path[val.len()..];
+                return format!("%{}%{}", var, remainder);
+            }
+        }
+    }
+    path.to_string()
+}
+
 fn normalize_optional_path(value: Option<String>) -> Option<String> {
     value
         .map(|v| v.trim().replace('/', "\\"))
         .filter(|v| !v.is_empty())
+        .map(|v| contract_env_vars(&v))
 }
 
 fn slugify(value: &str) -> String {
@@ -249,7 +290,7 @@ pub fn validate_save_paths(app: &AppHandle) -> Result<Vec<PathValidation>, Strin
         .iter()
         .map(|g| {
             let valid = match &g.save_path {
-                Some(p) => std::path::Path::new(p).exists(),
+                Some(p) => std::path::Path::new(&expand_env_vars(p)).exists(),
                 None => true, // no path set yet — not an error
             };
             PathValidation {
@@ -271,17 +312,18 @@ pub fn get_browse_default_path(app: &AppHandle) -> Result<Option<String>, String
         .filter_map(|g| {
             let path = g.save_path.as_deref()?;
             let ts = g.last_local_modified.as_deref()?;
-            if std::path::Path::new(path).exists() {
-                Some((ts, path))
+            let expanded = expand_env_vars(path);
+            if std::path::Path::new(&expanded).exists() {
+                Some((ts.to_string(), expanded))
             } else {
                 None
             }
         })
-        .max_by_key(|(ts, _)| ts.to_string());
+        .max_by_key(|(ts, _)| ts.clone());
 
     match best {
         Some((_, path)) => {
-            let parent = std::path::Path::new(path)
+            let parent = std::path::Path::new(&path)
                 .parent()
                 .map(|p| p.to_string_lossy().to_string());
             Ok(parent)
@@ -290,8 +332,9 @@ pub fn get_browse_default_path(app: &AppHandle) -> Result<Option<String>, String
             // Fallback: first game with any existing save_path
             let fallback = state.games.iter().find_map(|g| {
                 let path = g.save_path.as_deref()?;
-                if std::path::Path::new(path).exists() {
-                    std::path::Path::new(path)
+                let expanded = expand_env_vars(path);
+                if std::path::Path::new(&expanded).exists() {
+                    std::path::Path::new(&expanded)
                         .parent()
                         .map(|p| p.to_string_lossy().to_string())
                 } else {

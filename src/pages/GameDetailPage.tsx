@@ -12,7 +12,7 @@ import {
 } from "../queries";
 import type { GameEntry } from "../types/dashboard";
 import type { SaveInfo } from "../types/dashboard";
-import { getBrowseDefaultPath } from "../services/tauri";
+import { getBrowseDefaultPath, expandSavePath, uploadGameLogo } from "../services/tauri";
 import { norm, msg, formatLocalTime } from "../utils";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { Toast } from "../components/Toast";
@@ -50,7 +50,7 @@ export function GameDetailPage() {
     useSavePathForm(game, updateMutation);
   const { descDraft, setDescDraft, handleSaveDesc } =
     useDescriptionForm(game, updateMutation);
-  const { thumbnailDraft, setThumbnailDraft, handleBrowseThumbnail, handleSaveThumbnail } =
+  const { thumbnailDraft, setThumbnailDraft, handleBrowseThumbnail, handleSaveThumbnail, isUploadingLogo, logoUploadError } =
     useThumbnailForm(game, updateMutation);
   const saveInfoMutation = useGetSaveInfoMutation();
   const syncMutation = useSyncGameMutation();
@@ -168,9 +168,9 @@ export function GameDetailPage() {
               className={PRIMARY_BTN}
               type="button"
               onClick={handleSaveThumbnail}
-              disabled={updateMutation.isPending || isSyncing}
+              disabled={updateMutation.isPending || isUploadingLogo || isSyncing}
             >
-              {updateMutation.isPending ? "Saving…" : "Save thumbnail"}
+              {isUploadingLogo ? "Uploading…" : updateMutation.isPending ? "Saving…" : "Save thumbnail"}
             </button>
             <button
               className={GHOST_BTN}
@@ -180,7 +180,10 @@ export function GameDetailPage() {
             </button>
           </div>
 
-          {updateMutation.isError && (
+          {logoUploadError && (
+            <p className="m-0 text-sm text-[#ffd5d5]">{logoUploadError}</p>
+          )}
+          {!logoUploadError && updateMutation.isError && (
             <p className="m-0 text-sm text-[#ffd5d5]">
               {msg(updateMutation.error, "Unable to save.")}
             </p>
@@ -541,8 +544,13 @@ function useSavePathForm(
     // Priority: current game's parent dir → last game's parent dir → no default
     let defaultPath: string | undefined;
     if (game?.savePath) {
-      const sep = game.savePath.lastIndexOf("\\");
-      if (sep > 0) defaultPath = game.savePath.slice(0, sep);
+      // Expand %VAR% tokens before extracting the parent so the dialog opens
+      // at the real filesystem location rather than the token string.
+      const resolved = game.savePath.includes("%")
+        ? await expandSavePath(game.savePath)
+        : game.savePath;
+      const sep = resolved.lastIndexOf("\\");
+      if (sep > 0) defaultPath = resolved.slice(0, sep);
     }
     if (!defaultPath) {
       const suggested = await getBrowseDefaultPath();
@@ -593,6 +601,8 @@ function useThumbnailForm(
   updateMutation: ReturnType<typeof useUpdateGameMutation>,
 ) {
   const [thumbnailDraft, setThumbnailDraft] = useState(game?.thumbnail ?? "");
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     setThumbnailDraft(game?.thumbnail ?? "");
@@ -604,16 +614,31 @@ function useThumbnailForm(
       title: "Choose a thumbnail image",
       filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
     });
-    if (typeof p === "string") setThumbnailDraft(p);
+    if (typeof p === "string") {
+      setThumbnailDraft(p);
+      setLogoUploadError(null);
+    }
   }
 
   async function handleSaveThumbnail() {
     if (!game) return;
-    await updateMutation.mutateAsync({
-      ...game,
-      thumbnail: norm(thumbnailDraft),
-    });
+    const src = norm(thumbnailDraft);
+    setLogoUploadError(null);
+
+    if (src) {
+      setIsUploadingLogo(true);
+      try {
+        await uploadGameLogo(game.id, src);
+      } catch (err) {
+        setLogoUploadError(msg(err, "Logo upload failed."));
+        setIsUploadingLogo(false);
+        return;
+      }
+      setIsUploadingLogo(false);
+    }
+
+    await updateMutation.mutateAsync({ ...game, thumbnail: src });
   }
 
-  return { thumbnailDraft, setThumbnailDraft, handleBrowseThumbnail, handleSaveThumbnail };
+  return { thumbnailDraft, setThumbnailDraft, handleBrowseThumbnail, handleSaveThumbnail, isUploadingLogo, logoUploadError };
 }
