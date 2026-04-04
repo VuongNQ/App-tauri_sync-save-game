@@ -167,6 +167,48 @@ pub fn sync_game(app: &AppHandle, game_id: &str) -> Result<SyncResult, String> {
     result
 }
 
+/// Download a Drive file to a local path.
+/// If the stored `drive_file_id` returns HTTP 404 (stale ID), re-lists the
+/// folder, finds the file by the last component of `rel_path`, and retries.
+/// Returns `Some(id_used)` on success, `None` if the file can't be found.
+fn download_with_fallback(
+    app: &AppHandle,
+    folder_id: &str,
+    cached_files: &mut Vec<crate::models::DriveFile>,
+    drive_file_id: &str,
+    rel_path: &str,
+    dest: &Path,
+) -> Result<Option<String>, String> {
+    match gdrive::download_file(app, drive_file_id, dest) {
+        Ok(()) => return Ok(Some(drive_file_id.to_string())),
+        Err(ref e) if !e.contains("404") => return Err(e.clone()),
+        Err(_) => {} // 404 — fall through to re-list
+    }
+
+    eprintln!(
+        "[sync] drive_file_id {drive_file_id} stale for '{rel_path}'; re-listing folder {folder_id}"
+    );
+    let refreshed = gdrive::list_files(app, folder_id)?;
+    *cached_files = refreshed;
+
+    let file_name = Path::new(rel_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(rel_path);
+
+    match cached_files.iter().find(|f| f.name == file_name) {
+        Some(f) => {
+            let fid = f.id.clone();
+            gdrive::download_file(app, &fid, dest)?;
+            Ok(Some(fid))
+        }
+        None => {
+            eprintln!("[sync] '{rel_path}' not found on Drive after re-list — skipping");
+            Ok(None)
+        }
+    }
+}
+
 fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String> {
     // 1. Load game entry
     let state = settings::load_state(app)?;
@@ -192,8 +234,8 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
     let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
     let cloud_meta = cloud_meta_opt.unwrap_or_default();
 
-    // 4. List existing Drive files (for looking up file IDs)
-    let drive_files = gdrive::list_files(app, &game_folder_id)?;
+    // 4. List existing Drive files (for looking up file IDs by name)
+    let mut drive_files = gdrive::list_files(app, &game_folder_id)?;
 
     // 5. Collect local files
     let local_files = collect_local_files(save_dir)?;
@@ -271,17 +313,28 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
                     .ok_or_else(|| format!("No Drive file ID for {}", local.relative_path))?;
 
                 let dest = save_dir.join(local.relative_path.replace('/', "\\"));
-                gdrive::download_file(app, drive_file_id, &dest)?;
-
-                new_meta.files.insert(
-                    local.relative_path.clone(),
-                    SyncFileMeta {
-                        modified_time: cm.modified_time.clone(),
-                        size: cm.size,
-                        drive_file_id: Some(drive_file_id.to_string()),
-                    },
-                );
-                downloaded += 1;
+                let used_id = download_with_fallback(
+                    app,
+                    &game_folder_id,
+                    &mut drive_files,
+                    drive_file_id,
+                    &local.relative_path,
+                    &dest,
+                )?;
+                if let Some(fid) = used_id {
+                    new_meta.files.insert(
+                        local.relative_path.clone(),
+                        SyncFileMeta {
+                            modified_time: cm.modified_time.clone(),
+                            size: cm.size,
+                            drive_file_id: Some(fid),
+                        },
+                    );
+                    downloaded += 1;
+                } else {
+                    // File no longer exists on Drive — treat local copy as authoritative
+                    skipped += 1;
+                }
             } else {
                 skipped += 1;
             }
@@ -299,17 +352,25 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
         // File exists on cloud but not locally → download it
         if let Some(ref drive_file_id) = cm.drive_file_id {
             let dest = save_dir.join(rel_path.replace('/', "\\"));
-            gdrive::download_file(app, drive_file_id, &dest)?;
-
-            new_meta.files.insert(
-                rel_path.clone(),
-                SyncFileMeta {
-                    modified_time: cm.modified_time.clone(),
-                    size: cm.size,
-                    drive_file_id: Some(drive_file_id.clone()),
-                },
-            );
-            downloaded += 1;
+            let used_id = download_with_fallback(
+                app,
+                &game_folder_id,
+                &mut drive_files,
+                drive_file_id,
+                rel_path,
+                &dest,
+            )?;
+            if let Some(fid) = used_id {
+                new_meta.files.insert(
+                    rel_path.clone(),
+                    SyncFileMeta {
+                        modified_time: cm.modified_time.clone(),
+                        size: cm.size,
+                        drive_file_id: Some(fid),
+                    },
+                );
+                downloaded += 1;
+            }
         }
     }
 

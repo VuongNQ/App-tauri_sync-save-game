@@ -5,6 +5,8 @@ import type {
   AppSettings,
   AuthStatus,
   DashboardData,
+  DriveFileItem,
+  DriveVersionBackup,
   GameEntry,
   GoogleUserInfo,
   OAuthCredentials,
@@ -148,4 +150,86 @@ export async function uploadGameLogo(
   logoSource: string,
 ): Promise<void> {
   return invoke<void>("upload_game_logo", { gameId, logoSource });
+}
+
+// ── Drive file management ─────────────────────────────────────────────────────
+
+/** List all items (files + folders) in the game's Drive folder, or a subfolder when `folderId` is given. */
+export async function listGameDriveFiles(gameId: string, folderId?: string): Promise<DriveFileItem[]> {
+  return invoke<DriveFileItem[]>("list_game_drive_files", { gameId, folderId });
+}
+
+/** Rename a Drive file or folder. Updates .sync-meta.json for regular files. */
+export async function renameGameDriveFile(
+  gameId: string,
+  fileId: string,
+  oldName: string,
+  newName: string,
+  isFolder: boolean,
+): Promise<void> {
+  return invoke<void>("rename_game_drive_file", { gameId, fileId, oldName, newName, isFolder });
+}
+
+/** Move a Drive file to a different subfolder within the game's Drive folder. */
+export async function moveGameDriveFile(
+  gameId: string,
+  fileId: string,
+  fileName: string,
+  newParentId: string,
+  oldParentId: string,
+): Promise<void> {
+  return invoke<void>("move_game_drive_file", {
+    gameId,
+    fileId,
+    fileName,
+    newParentId,
+    oldParentId,
+  });
+}
+
+/** Delete a Drive file or folder. Updates .sync-meta.json for regular files. */
+export async function deleteGameDriveFile(
+  gameId: string,
+  fileId: string,
+  fileName: string,
+  isFolder: boolean,
+): Promise<void> {
+  return invoke<void>("delete_game_drive_file", { gameId, fileId, fileName, isFolder });
+}
+
+// ── Version backups ───────────────────────────────────────────────────────────
+
+/** Create a manual version backup for a game. `label` is an optional display name. */
+export async function createVersionBackup(
+  gameId: string,
+  label?: string,
+): Promise<DriveVersionBackup> {
+  return invoke<DriveVersionBackup>("create_version_backup", {
+    gameId,
+    label: label ?? null,
+  });
+}
+
+/** List all version backups for a game, sorted newest-first. */
+export async function listVersionBackups(gameId: string): Promise<DriveVersionBackup[]> {
+  return invoke<DriveVersionBackup[]>("list_version_backups", { gameId });
+}
+
+/**
+ * Restore a version backup: copies backup files to the Drive game root and downloads
+ * them to the local save folder. Returns a SyncResult with the download count.
+ */
+export async function restoreVersionBackup(
+  gameId: string,
+  backupFolderId: string,
+): Promise<SyncResult> {
+  return invoke<SyncResult>("restore_version_backup", { gameId, backupFolderId });
+}
+
+/** Delete a version backup folder (and all its files) from Drive. */
+export async function deleteVersionBackup(
+  gameId: string,
+  backupFolderId: string,
+): Promise<void> {
+  return invoke<void>("delete_version_backup", { gameId, backupFolderId });
 }

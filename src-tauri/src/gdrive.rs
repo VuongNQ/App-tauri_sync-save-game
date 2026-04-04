@@ -8,7 +8,7 @@ use tauri::AppHandle;
 
 use crate::{
     gdrive_auth,
-    models::{AppSettings, DriveFile, GameEntry, SyncMeta},
+    models::{AppSettings, DriveFile, DriveFileItem, GameEntry, SyncMeta},
     settings,
 };
 
@@ -244,6 +244,171 @@ pub fn list_files(app: &AppHandle, folder_id: &str) -> Result<Vec<DriveFile>, St
         .collect())
 }
 
+// ── Drive item listing (files + folders with mimeType) ────────────────────────
+
+#[derive(Deserialize)]
+struct DriveItemListResponse {
+    files: Option<Vec<DriveItemRaw>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DriveItemRaw {
+    id: String,
+    name: String,
+    mime_type: String,
+    modified_time: Option<String>,
+    size: Option<String>,
+}
+
+impl From<DriveItemRaw> for DriveFileItem {
+    fn from(raw: DriveItemRaw) -> Self {
+        let is_folder = raw.mime_type == "application/vnd.google-apps.folder";
+        DriveFileItem {
+            id: raw.id,
+            name: raw.name,
+            is_folder,
+            mime_type: raw.mime_type,
+            modified_time: raw.modified_time,
+            size: raw.size.and_then(|s| s.parse().ok()),
+        }
+    }
+}
+
+/// List all items (files AND folders) in a Drive folder, with MIME type.
+pub fn list_drive_items(app: &AppHandle, folder_id: &str) -> Result<Vec<DriveFileItem>, String> {
+    let url = format!(
+        "{DRIVE_FILES_URL}?q=%27{folder_id}%27+in+parents+and+trashed%3Dfalse&spaces=appDataFolder&fields=files(id,name,mimeType,modifiedTime,size)"
+    );
+    let (status, body) = drive_get(app, &url)?;
+    if status != 200 {
+        return Err(format!("Failed to list drive items (HTTP {status}): {body}"));
+    }
+    let list: DriveItemListResponse =
+        serde_json::from_str(&body).map_err(|e| format!("Parse drive items error: {e}"))?;
+    Ok(list
+        .files
+        .unwrap_or_default()
+        .into_iter()
+        .map(DriveFileItem::from)
+        .collect())
+}
+
+/// Rename a Drive file or folder in-place (does NOT move it).
+pub fn rename_drive_item(app: &AppHandle, file_id: &str, new_name: &str) -> Result<(), String> {
+    let url = format!("{DRIVE_FILES_URL}/{file_id}?fields=id");
+    let body = serde_json::json!({ "name": new_name }).to_string();
+    let token = gdrive_auth::get_access_token(app)?;
+    let resp = agent()
+        .patch(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .content_type("application/json")
+        .send(body.as_bytes())
+        .map_err(|e| format!("Rename Drive item failed: {e}"))?;
+    let status = resp.status().as_u16();
+    if status != 200 {
+        let resp_body = resp.into_body().read_to_string().unwrap_or_default();
+        return Err(format!(
+            "Rename Drive item {file_id} failed (HTTP {status}): {resp_body}"
+        ));
+    }
+    println!("[gdrive] Renamed Drive item {file_id} → '{new_name}'");
+    Ok(())
+}
+
+/// Move a Drive file from one folder to another via the Drive `addParents/removeParents` API.
+pub fn move_drive_file(
+    app: &AppHandle,
+    file_id: &str,
+    new_parent_id: &str,
+    old_parent_id: &str,
+) -> Result<(), String> {
+    let url = format!(
+        "{DRIVE_FILES_URL}/{file_id}?addParents={new_parent_id}&removeParents={old_parent_id}&fields=id"
+    );
+    let token = gdrive_auth::get_access_token(app)?;
+    // PATCH with empty JSON body is required by the Drive API for metadata-only changes.
+    let resp = agent()
+        .patch(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .content_type("application/json")
+        .send(b"{}")
+        .map_err(|e| format!("Move Drive file failed: {e}"))?;
+    let status = resp.status().as_u16();
+    if status != 200 {
+        let resp_body = resp.into_body().read_to_string().unwrap_or_default();
+        return Err(format!(
+            "Move Drive file {file_id} failed (HTTP {status}): {resp_body}"
+        ));
+    }
+    println!("[gdrive] Moved Drive file {file_id} to parent {new_parent_id}");
+    Ok(())
+}
+
+/// Server-side copy a Drive file into a destination folder. Returns the new file's metadata.
+pub fn copy_drive_file(
+    app: &AppHandle,
+    file_id: &str,
+    dest_folder_id: &str,
+) -> Result<DriveFile, String> {
+    let url = format!(
+        "{DRIVE_FILES_URL}/{file_id}/copy?fields=id,name,modifiedTime,size"
+    );
+    let body = serde_json::json!({ "parents": [dest_folder_id] }).to_string();
+    let (status, resp_body) = drive_post_json(app, &url, &body)?;
+    if status != 200 {
+        return Err(format!(
+            "Copy Drive file {file_id} failed (HTTP {status}): {resp_body}"
+        ));
+    }
+    let raw: DriveFileRaw =
+        serde_json::from_str(&resp_body).map_err(|e| format!("Parse copy response: {e}"))?;
+    println!("[gdrive] Copied Drive file {file_id} → {}", raw.id);
+    Ok(DriveFile::from(raw))
+}
+
+/// Find or create a named subfolder inside `parent_id`. No caching — always queries Drive.
+pub fn ensure_subfolder(app: &AppHandle, parent_id: &str, name: &str) -> Result<String, String> {
+    let encoded = urlencoding::encode(name);
+    let url = format!(
+        "{DRIVE_FILES_URL}?q=name%3D%27{encoded}%27+and+%27{parent_id}%27+in+parents+and+mimeType%3D%27application%2Fvnd.google-apps.folder%27+and+trashed%3Dfalse&spaces=appDataFolder&fields=files(id,name)"
+    );
+    let (status, body) = drive_get(app, &url)?;
+    if status != 200 {
+        return Err(format!(
+            "Failed to search subfolder '{name}' (HTTP {status}): {body}"
+        ));
+    }
+    let list: FileListResponse =
+        serde_json::from_str(&body).map_err(|e| format!("Parse error: {e}"))?;
+    if let Some(files) = &list.files {
+        if let Some(f) = files.first() {
+            return Ok(f.id.clone());
+        }
+    }
+    // Create the subfolder
+    let meta = serde_json::json!({
+        "name": name,
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [parent_id]
+    });
+    let (status, body) =
+        drive_post_json(app, &format!("{DRIVE_FILES_URL}?fields=id"), &meta.to_string())?;
+    if status != 200 {
+        return Err(format!(
+            "Failed to create subfolder '{name}' (HTTP {status}): {body}"
+        ));
+    }
+    let created: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("Parse create subfolder: {e}"))?;
+    let id = created["id"]
+        .as_str()
+        .ok_or("Missing id in create subfolder response")?
+        .to_string();
+    println!("[gdrive] Created subfolder '{name}' under {parent_id}: {id}");
+    Ok(id)
+}
+
 /// Upload a new file to a Drive folder using multipart upload.
 pub fn upload_file(
     app: &AppHandle,
@@ -317,6 +482,53 @@ pub fn upload_file(
 
     let status = resp.status().as_u16();
     let resp_body = resp.into_body().read_to_string().unwrap_or_default();
+
+    // If PATCH returned 404 the stored file ID is stale — retry as a fresh POST.
+    if status == 404 && method_is_patch {
+        eprintln!(
+            "[gdrive] PATCH 404 for {file_name} (stale ID); retrying as POST (new file)"
+        );
+        let post_meta = serde_json::json!({
+            "name": file_name,
+            "parents": [folder_id]
+        });
+        let post_boundary = format!("----boundary{}", fastrand::u64(..));
+        let mut post_body = Vec::new();
+        post_body.extend_from_slice(format!("--{post_boundary}\r\n").as_bytes());
+        post_body.extend_from_slice(b"Content-Type: application/json; charset=UTF-8\r\n\r\n");
+        post_body.extend_from_slice(post_meta.to_string().as_bytes());
+        post_body.extend_from_slice(b"\r\n");
+        post_body.extend_from_slice(format!("--{post_boundary}\r\n").as_bytes());
+        post_body.extend_from_slice(b"Content-Type: application/octet-stream\r\n\r\n");
+        post_body.extend_from_slice(&file_bytes);
+        post_body.extend_from_slice(b"\r\n");
+        post_body.extend_from_slice(format!("--{post_boundary}--").as_bytes());
+
+        let post_ct = format!("multipart/related; boundary={post_boundary}");
+        let post_url = format!(
+            "{DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,modifiedTime,size"
+        );
+        let token2 = gdrive_auth::get_access_token(app)?;
+        let post_resp = agent()
+            .post(&post_url)
+            .header("Authorization", &format!("Bearer {token2}"))
+            .header("Content-Type", &post_ct)
+            .send(&post_body[..])
+            .map_err(|e| format!("Upload POST (retry) failed: {e}"))?;
+
+        let post_status = post_resp.status().as_u16();
+        let post_body_str = post_resp.into_body().read_to_string().unwrap_or_default();
+        if post_status != 200 {
+            return Err(format!(
+                "Upload failed for {file_name} (HTTP {post_status}): {post_body_str}"
+            ));
+        }
+        let raw: DriveFileRaw = serde_json::from_str(&post_body_str)
+            .map_err(|e| format!("Parse upload (retry) response: {e}"))?;
+        println!("[gdrive] Uploaded {file_name} (retry POST) → {}", raw.id);
+        return Ok(DriveFile::from(raw));
+    }
+
     if status != 200 {
         return Err(format!(
             "Upload failed for {} (HTTP {status}): {resp_body}",
@@ -497,7 +709,7 @@ fn find_file_in_folder(
 
 /// Upload a JSON buffer as a new file or update an existing one in a Drive folder.
 /// Uses multipart upload (same pattern as `upload_sync_meta`).
-fn upload_json_to_folder(
+pub fn upload_json_to_folder(
     app: &AppHandle,
     folder_id: &str,
     file_name: &str,
@@ -568,7 +780,7 @@ fn upload_json_to_folder(
 }
 
 /// Download a file's raw text content from Drive by file ID.
-fn download_json_from_drive(app: &AppHandle, file_id: &str) -> Result<String, String> {
+pub fn download_json_from_drive(app: &AppHandle, file_id: &str) -> Result<String, String> {
     let url = format!("{DRIVE_FILES_URL}/{file_id}?alt=media");
     let token = gdrive_auth::get_access_token(app)?;
     let resp = agent()
@@ -909,8 +1121,8 @@ fn upload_bytes_as_file(
     Ok(DriveFile::from(raw))
 }
 
-/// Delete a Drive file by ID (used when the logo extension changes).
-fn delete_drive_file(app: &AppHandle, file_id: &str) -> Result<(), String> {
+/// Delete a Drive file or folder by ID.
+pub fn delete_drive_file(app: &AppHandle, file_id: &str) -> Result<(), String> {
     let token = gdrive_auth::get_access_token(app)?;
     let url = format!("{DRIVE_FILES_URL}/{file_id}");
     let resp = agent()

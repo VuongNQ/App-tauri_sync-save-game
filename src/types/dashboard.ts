@@ -58,7 +58,6 @@ export interface GoogleUserInfo {
 // ── Settings ──────────────────────────────────────────────
 
 export interface AppSettings {
-  globalAutoSync: boolean;
   syncIntervalMinutes: number;
   startMinimised: boolean;
   runOnStartup: boolean;
@@ -107,4 +106,27 @@ export interface SyncResult {
 export interface PathValidation {
   gameId: string;
   valid: boolean;
+}
+
+// ── Drive File Management ─────────────────────────────────
+
+/** A single item (file or folder) inside a game's Google Drive folder. */
+export interface DriveFileItem {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number | null;
+  modifiedTime: string | null;
+  isFolder: boolean;
+}
+
+/** A version-backup snapshot stored under the game's `backups/` Drive folder. */
+export interface DriveVersionBackup {
+  /** Drive folder ID of the backup subfolder. */
+  id: string;
+  /** Display name: ISO-8601 timestamp, optionally suffixed with " — {label}". */
+  name: string;
+  createdTime: string;
+  totalFiles: number;
+  totalSize: number;
 }

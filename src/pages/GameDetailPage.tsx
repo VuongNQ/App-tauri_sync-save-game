@@ -21,7 +21,9 @@ import type { SaveInfo, SyncStructureDiff } from "../types/dashboard";
 import { getBrowseDefaultPath, expandSavePath, uploadGameLogo } from "../services/tauri";
 import { norm, msg, formatLocalTime, toImgSrc } from "../utils";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { DriveFilesSection } from "../components/DriveFilesSection";
 import { Toast } from "../components/Toast";
+import { VersionBackupsSection } from "../components/VersionBackupsSection";
 import {
   CARD,
   DANGER_BTN,
@@ -339,6 +341,16 @@ export function GameDetailPage() {
           </p>
         )}
       </div>
+
+      {/* Drive file manager */}
+      {game.gdriveFolderId && (
+        <DriveFilesSection gameId={game.id} gameFolderId={game.gdriveFolderId} />
+      )}
+
+      {/* Version backups */}
+      {game.gdriveFolderId && (
+        <VersionBackupsSection gameId={game.id} />
+      )}
 
       {/* Danger zone */}
       <div className={CARD}>

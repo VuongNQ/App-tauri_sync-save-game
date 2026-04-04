@@ -203,7 +203,7 @@ pub struct StoredState {
 - Uses `notify` + `notify-debouncer-mini` with a **2-second debounce** window.
 - `WatcherManager` holds a `HashMap<game_id, Debouncer<RecommendedWatcher>>` + per-game `Arc<Mutex<()>>` sync locks.
 - Only active for games where `track_changes == true`.
-- On detected change: check `game.auto_sync && settings.global_auto_sync`. If true → `try_lock()` the per-game mutex (non-blocking) and run `sync::sync_game()`. If lock unavailable → skip (sync already in progress). If auto-sync disabled → emit `"game-sync-pending"` event.
+- On detected change: check `game.auto_sync`. If true → `try_lock()` the per-game mutex (non-blocking) and run `sync::sync_game()`. If lock unavailable → skip (sync already in progress). If auto-sync disabled → emit `"game-sync-pending"` event.
 - `init_watchers()` is called at app startup; starts watchers for all eligible games.
 - The watcher runs in a dedicated background thread managed by the Tauri app lifecycle.
 
@@ -290,7 +290,6 @@ pub struct StoredState {
 }
     pub start_minimised: bool,       // launch to tray on Windows startup
     pub run_on_startup: bool,        // register in Windows Run key
-    pub global_auto_sync: bool,      // master switch for auto-sync
     pub sync_interval_minutes: u32,  // periodic sync interval (0 = only on change)
 }
 ```

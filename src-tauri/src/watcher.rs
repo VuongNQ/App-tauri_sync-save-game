@@ -72,7 +72,6 @@ impl WatcherManager {
                             .and_then(|state| {
                                 state.games.iter().find(|g| g.id == gid).map(|g| {
                                     g.auto_sync
-                                        && state.settings.global_auto_sync
                                 })
                             })
                             .unwrap_or(false);

@@ -97,7 +97,6 @@ pub struct GoogleUserInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
-    pub global_auto_sync: bool,
     pub sync_interval_minutes: u32,
     pub start_minimised: bool,
     pub run_on_startup: bool,
@@ -106,7 +105,6 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            global_auto_sync: false,
             sync_interval_minutes: 0,
             start_minimised: false,
             run_on_startup: false,
@@ -198,6 +196,43 @@ pub struct DriveFile {
     pub name: String,
     pub modified_time: Option<String>,
     pub size: Option<u64>,
+}
+
+// ── Drive File Management ─────────────────────────────────
+
+/// A single item (file or folder) in a game's Google Drive folder.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveFileItem {
+    pub id: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size: Option<u64>,
+    pub modified_time: Option<String>,
+    pub is_folder: bool,
+}
+
+/// Metadata written as `.backup-meta.json` inside each version-backup folder on Drive.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupMeta {
+    pub created_time: String,
+    pub label: Option<String>,
+    pub total_files: u32,
+    pub total_size: u64,
+}
+
+/// A version-backup snapshot shown in the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveVersionBackup {
+    /// Drive folder ID for this backup's subfolder.
+    pub id: String,
+    /// Display name: ISO-8601 timestamp, optionally suffixed with " — {label}".
+    pub name: String,
+    pub created_time: String,
+    pub total_files: u32,
+    pub total_size: u64,
 }
 
 // ── Path Validation ───────────────────────────────────────

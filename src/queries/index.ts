@@ -18,11 +18,19 @@ export {
 } from "./settings";
 export {
   useCheckSyncDiffMutation,
+  useCreateVersionBackupMutation,
+  useDeleteDriveFileMutation,
+  useDeleteVersionBackupMutation,
+  useDriveFilesQuery,
   useGetSaveInfoMutation,
+  useMoveDriveFileMutation,
   usePushToCloudMutation,
+  useRenameDriveFileMutation,
   useRestoreFromCloudMutation,
+  useRestoreVersionBackupMutation,
   useSyncAllMutation,
   useSyncGameMutation,
   useToggleAutoSyncMutation,
   useToggleTrackChangesMutation,
+  useVersionBackupsQuery,
 } from "./sync";

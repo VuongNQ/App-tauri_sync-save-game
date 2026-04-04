@@ -1,8 +1,16 @@
+import { getVersion } from "@tauri-apps/api/app";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 
 import { NAV_LINK, NAV_LINK_ACTIVE } from "./styles";
 
 export function AppLayout() {
+  const [appVersion, setAppVersion] = useState<string>("");
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
+
   return (
     <div className="grid min-h-screen grid-cols-[260px_1fr] max-[900px]:grid-cols-1">
       {/* ── Sidebar ── */}
@@ -27,11 +35,13 @@ export function AppLayout() {
           </NavLink>
         </nav>
 
-        <div className="mt-auto px-4 py-3 text-xs text-[#9aa8c7]">v0.1.0</div>
+        {appVersion && (
+          <div className="mt-auto px-4 py-3 text-xs text-[#9aa8c7]">v{appVersion}</div>
+        )}
       </aside>
 
       {/* ── Page content ── */}
-      <main className="flex flex-col gap-5 overflow-auto p-7 max-[720px]:p-[18px]">
+      <main className="flex flex-col gap-5 overflow-auto p-7 max-[720px]:p-4.5">
         <Outlet />
       </main>
     </div>
