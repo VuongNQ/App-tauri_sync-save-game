@@ -17,3 +17,6 @@ export type SaveInfoKey = typeof SAVE_INFO_KEY;
 
 export const VALIDATE_PATHS_KEY = ["validate-paths"] as const;
 export type ValidatePathsKey = typeof VALIDATE_PATHS_KEY;
+
+export const driveFilesKey = (gameId: string) => ["drive-files", gameId] as const;
+export const versionBackupsKey = (gameId: string) => ["version-backups", gameId] as const;

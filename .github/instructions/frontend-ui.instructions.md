@@ -47,6 +47,8 @@ src/
     styles.ts          # Shared Tailwind class-string constants
     AppLayout.tsx      # Sidebar + <Outlet /> shell
     AuthGuard.tsx      # Route protection (layout route)
+    DriveFilesSection.tsx  # Collapsible Drive file manager (rename, move, delete)
+    VersionBackupsSection.tsx  # Collapsible version backup manager (create, restore, delete)
     ...
   utils/
     index.ts           # Pure helpers: norm(), msg(), formatLocalTime()
@@ -219,6 +221,9 @@ export const AUTH_STATUS_KEY = ["auth-status"] as const;
 export const VALIDATE_PATHS_KEY = ["validate-paths"] as const;
 export const SETTINGS_KEY = ["settings"] as const;
 export const GOOGLE_USER_INFO_KEY = ["google-user-info"] as const;
+// Per-game dynamic keys — factory functions:
+export const driveFilesKey = (gameId: string) => ["drive-files", gameId] as const;
+export const versionBackupsKey = (gameId: string) => ["version-backups", gameId] as const;
 ```
 
 ### Query Hook Pattern
@@ -251,6 +256,28 @@ export function useAddGameMutation() {
   return useMutation({
     mutationFn: (payload: AddGamePayload) => addManualGame(payload),
     onSuccess: setCache,
+  });
+}
+```
+
+### VALIDATE_PATHS_KEY Invalidation Rule
+
+Invalidate `VALIDATE_PATHS_KEY` in `onSuccess` whenever a mutation **writes files to disk** on the local machine. This clears the "save path does not exist" warning in `GameDetailPage` automatically.
+
+**Mutations that must invalidate `VALIDATE_PATHS_KEY`:**
+- `useRestoreFromCloudMutation` — downloads Drive files to local save path
+- `useRestoreVersionBackupMutation` — downloads backup files to local save path
+
+```ts
+export function useRestoreVersionBackupMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ...,
+    onSuccess: (_data, { gameId }) => {
+      queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
+      queryClient.invalidateQueries({ queryKey: driveFilesKey(gameId) });
+      queryClient.invalidateQueries({ queryKey: VALIDATE_PATHS_KEY }); // ← required
+    },
   });
 }
 ```
@@ -438,6 +465,52 @@ Save paths in `game.savePath` may contain Windows env-var tokens (`%LOCALAPPDATA
 - **Display**: show the token string as-is.
 - **Folder-picker `defaultPath`**: call `expandSavePath(game.savePath)` first if the value contains `%`, then extract the parent directory.
 - Never pass a token path directly to any filesystem API on the frontend; always expand first.
+
+---
+
+## Drive File Manager Components
+
+### DriveFilesSection
+
+**File**: `src/components/DriveFilesSection.tsx`  
+**Props**: `{ gameId: string; gameFolderId: string }`  
+**Used in**: `GameDetailPage` — only rendered when `game.gdriveFolderId !== null`.
+
+- Collapsible section; `useDriveFilesQuery(gameId, isOpen)` — lazy fetch, only runs when open.
+- Rows list every file/folder in the game's Drive folder root.
+- **Protected items** (`.sync-meta.json`, `backups/`): displayed but actions (rename/move/delete) are disabled; show a `"protected"` badge.
+- **Rename**: pencil button → inline input replaces name text; `Enter` commits, `Escape` cancels.
+- **Move**: folder icon button → `MoveFileModal` with radio list of available subfolders within the game folder; includes "game root" option.
+- **Delete**: trash icon → `ConfirmModal` before calling `useDeleteDriveFileMutation`.
+- Move warning: files moved out of game root are removed from `.sync-meta.json` and will be re-uploaded on next sync.
+
+### VersionBackupsSection
+
+**File**: `src/components/VersionBackupsSection.tsx`  
+**Props**: `{ gameId: string }`  
+**Used in**: `GameDetailPage` — only rendered when `game.gdriveFolderId !== null`.
+
+- Collapsible section; `useVersionBackupsQuery(gameId, isOpen)` — lazy fetch.
+- **Create backup**: "+ Create backup" button → inline form with optional label input → `useCreateVersionBackupMutation`.
+- Backup rows show: ISO 8601 timestamp, optional label, file count, total size.
+- **Restore**: `ConfirmModal` with strong warning (overwrites both Drive and local saves) → `useRestoreVersionBackupMutation`.
+- **Delete**: `ConfirmModal` → `useDeleteVersionBackupMutation`.
+- Backup name format: `"{ISO-ts}"` or `"{ISO-ts}_{label}"` — extract label as `name.slice(name.indexOf('_') + 1).replace(/-/g, ' ')`.
+
+### GameDetailPage Integration
+
+Both sections are placed **between** the Sync actions card and the Danger Zone card:
+
+```tsx
+{game.gdriveFolderId && (
+  <DriveFilesSection gameId={game.id} gameFolderId={game.gdriveFolderId} />
+)}
+{game.gdriveFolderId && (
+  <VersionBackupsSection gameId={game.id} />
+)}
+{/* Danger zone */}
+<div className={CARD}> ...
+```
 
 ---
 

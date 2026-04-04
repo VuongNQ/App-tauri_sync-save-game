@@ -1,5 +1,5 @@
 ---
-description: "Use when: syncing save-game files to Google Drive, implementing sync logic, modifying sync.rs, modifying watcher.rs, modifying gdrive.rs, adding file-watcher features, changing background tracking, extending sync algorithm, handling sync conflicts, adding sync Tauri commands, creating sync React Query hooks, building sync UI components, emitting or listening to sync events, syncing library.json or config.json to Google Drive as a file-based database, implementing cloud library restore on first login, forced-direction sync (restore from cloud, push to cloud), checking sync structure diff, SyncStructureDiff. Covers the full sync pipeline: local file collection, timestamp comparison, Drive upload/download, .sync-meta.json management, cloud DB library/settings sync, local-first strategy, file-watcher lifecycle, and frontend sync integration."
+description: "Use when: syncing save-game files to Google Drive, implementing sync logic, modifying sync.rs, modifying watcher.rs, modifying gdrive.rs, modifying drive_mgmt.rs, adding file-watcher features, changing background tracking, extending sync algorithm, handling sync conflicts, adding sync Tauri commands, creating sync React Query hooks, building sync UI components, emitting or listening to sync events, syncing library.json or config.json to Google Drive as a file-based database, implementing cloud library restore on first login, forced-direction sync (restore from cloud, push to cloud), checking sync structure diff, SyncStructureDiff, Drive file manager, list Drive files, rename Drive file, move Drive file, delete Drive file, version backup, create backup, restore version backup, delete version backup. Covers the full sync pipeline: local file collection, timestamp comparison, Drive upload/download, .sync-meta.json management, cloud DB library/settings sync, local-first strategy, file-watcher lifecycle, Drive file management, version snapshots, and frontend sync integration."
 ---
 
 # Save-Game Sync Service
@@ -10,10 +10,11 @@ The sync system spans four Rust modules and their frontend counterparts:
 
 | Module | Responsibility |
 |--------|---------------|
-| `gdrive.rs` | Google Drive REST API client (folders, upload, download, metadata) |
+| `gdrive.rs` | Google Drive REST API client (folders, upload, download, metadata, rename, move, copy) |
 | `sync.rs` | Per-game sync algorithm (collect → compare → transfer → update) |
 | `watcher.rs` | File-system watcher manager (per-game, debounced, with sync locks) |
 | `settings.rs` | Persistence for `AppSettings` and `GameEntry` state |
+| `drive_mgmt.rs` | Drive file manager + version backup commands (list, rename, move, delete, backup CRUD) |
 
 ## HTTP Client: `ureq` (Blocking)
 
@@ -61,14 +62,21 @@ appDataFolder/
     config.json                  ← AppSettings JSON (global configuration)
     library.json                 ← Vec<GameEntry> JSON (game library table)
     {game_id}/                   ← per-game folder (ensure_game_folder)
-      <save files...>
+      <save files...>            ← flat list; SyncMeta keys are relative paths (forward slashes)
       .sync-meta.json            ← sync metadata (timestamps + Drive file IDs)
+      backups/                   ← created on first backup; managed by drive_mgmt.rs
+        {ISO-ts}_{label}/        ← one subfolder per snapshot (ensure_subfolder)
+          <copied save files>    ← server-side copies of non-meta save files
+          .backup-meta.json      ← BackupMeta JSON (created_time, label, stats)
 ```
 
 - Root folder name: `"game-processing-sync"`, parent: `"appDataFolder"`.
 - Per-game folder name: matches `GameEntry.id` exactly.
 - Cache `gdrive_folder_id` in `GameEntry` — never search Drive for the same folder twice.
 - `library.json` and `config.json` are flat files directly under the root folder.
+- **Save files are stored flat** in the game root — no recursive subfolders except `backups/`.
+- `backups/` is treated as a protected name: shown in the file manager but rename/delete/move are disabled.
+- `.sync-meta.json` is treated as a protected name: shown but actions disabled.
 
 ## Cloud Library DB Sync (gdrive.rs)
 
@@ -219,6 +227,14 @@ fn toggle_track_changes(app: tauri::AppHandle, game_id: String, enabled: bool) -
 | `toggle_track_changes` | `Result<DashboardData, String>` |
 | `toggle_auto_sync` | `Result<DashboardData, String>` |
 | `get_settings` / `update_settings` | `Result<AppSettings, String>` |
+| `list_game_drive_files` | `Result<Vec<DriveFileItem>, String>` |
+| `rename_game_drive_file` | `Result<(), String>` |
+| `move_game_drive_file` | `Result<(), String>` |
+| `delete_game_drive_file` | `Result<(), String>` |
+| `create_version_backup` | `Result<DriveVersionBackup, String>` |
+| `list_version_backups` | `Result<Vec<DriveVersionBackup>, String>` |
+| `restore_version_backup` | `Result<SyncResult, String>` |
+| `delete_version_backup` | `Result<(), String>` |
 
 ## Rust Events
 
@@ -253,6 +269,32 @@ export async function pushToCloud(gameId: string): Promise<SyncResult> {
 export async function toggleTrackChanges(gameId: string, enabled: boolean): Promise<DashboardData> {
   return invoke<DashboardData>("toggle_track_changes", { gameId, enabled });
 }
+// Drive file manager:
+export async function listGameDriveFiles(gameId: string): Promise<DriveFileItem[]> {
+  return invoke<DriveFileItem[]>("list_game_drive_files", { gameId });
+}
+export async function renameGameDriveFile(gameId: string, fileId: string, oldName: string, newName: string, isFolder: boolean): Promise<void> {
+  return invoke("rename_game_drive_file", { gameId, fileId, oldName, newName, isFolder });
+}
+export async function moveGameDriveFile(gameId: string, fileId: string, fileName: string, newParentId: string, oldParentId: string): Promise<void> {
+  return invoke("move_game_drive_file", { gameId, fileId, fileName, newParentId, oldParentId });
+}
+export async function deleteGameDriveFile(gameId: string, fileId: string, fileName: string, isFolder: boolean): Promise<void> {
+  return invoke("delete_game_drive_file", { gameId, fileId, fileName, isFolder });
+}
+// Version backups:
+export async function createVersionBackup(gameId: string, label?: string): Promise<DriveVersionBackup> {
+  return invoke<DriveVersionBackup>("create_version_backup", { gameId, label: label ?? null });
+}
+export async function listVersionBackups(gameId: string): Promise<DriveVersionBackup[]> {
+  return invoke<DriveVersionBackup[]>("list_version_backups", { gameId });
+}
+export async function restoreVersionBackup(gameId: string, backupFolderId: string): Promise<SyncResult> {
+  return invoke<SyncResult>("restore_version_backup", { gameId, backupFolderId });
+}
+export async function deleteVersionBackup(gameId: string, backupFolderId: string): Promise<void> {
+  return invoke("delete_version_backup", { gameId, backupFolderId });
+}
 ```
 
 ### React Query Hooks (`src/queries/sync.ts`)
@@ -260,12 +302,20 @@ export async function toggleTrackChanges(gameId: string, enabled: boolean): Prom
 - `useSyncGameMutation()` — calls `syncGame()`, invalidates `DASHBOARD_KEY` on success.
 - `useSyncAllMutation()` — calls `syncAllGames()`, invalidates `DASHBOARD_KEY`.
 - `useCheckSyncDiffMutation()` — calls `checkSyncStructureDiff()`, returns `SyncStructureDiff` (no cache side-effect).
-- `useRestoreFromCloudMutation()` — calls `restoreFromCloud()`, invalidates `DASHBOARD_KEY` on success.
+- `useRestoreFromCloudMutation()` — calls `restoreFromCloud()`, invalidates `DASHBOARD_KEY` **and `VALIDATE_PATHS_KEY`** on success.
 - `usePushToCloudMutation()` — calls `pushToCloud()`, invalidates `DASHBOARD_KEY` on success.
 - `useToggleTrackChangesMutation()` — calls `toggleTrackChanges()`, directly sets dashboard cache.
 - `useToggleAutoSyncMutation()` — calls `toggleAutoSync()`, directly sets dashboard cache.
+- `useDriveFilesQuery(gameId, enabled?)` — lazy; only fetches when `enabled: true`. Key: `driveFilesKey(gameId)`.
+- `useRenameDriveFileMutation()` — invalidates `driveFilesKey(gameId)` on success.
+- `useMoveDriveFileMutation()` — invalidates `driveFilesKey(gameId)` on success.
+- `useDeleteDriveFileMutation()` — invalidates `driveFilesKey(gameId)` on success.
+- `useVersionBackupsQuery(gameId, enabled?)` — lazy. Key: `versionBackupsKey(gameId)`.
+- `useCreateVersionBackupMutation()` — invalidates `versionBackupsKey(gameId)` on success.
+- `useRestoreVersionBackupMutation()` — invalidates `DASHBOARD_KEY` + `driveFilesKey(gameId)` + **`VALIDATE_PATHS_KEY`** on success.
+- `useDeleteVersionBackupMutation()` — invalidates `versionBackupsKey(gameId)` on success.
 
-**Cache strategy**: Sync/restore/push mutations invalidate (refetch) because timestamps change server-side. Toggle mutations set cache directly because they return the full updated `DashboardData`. Diff check has no cache side-effect — result is used locally in the component flow.
+**Cache strategy**: Sync/restore/push mutations invalidate (refetch) because timestamps change server-side. Toggle mutations set cache directly because they return the full updated `DashboardData`. Diff check has no cache side-effect — result is used locally in the component flow. **Both restore paths (`restoreFromCloud` and `restoreVersionBackup`) invalidate `VALIDATE_PATHS_KEY`** so the save-path-missing warning clears automatically after files are written.
 
 ### Listening to Sync Events
 
@@ -323,6 +373,86 @@ export interface SyncStructureDiff {
 }
 ```
 
+---
+
+## Drive File Manager & Version Backups (`drive_mgmt.rs`)
+
+All commands in this module require the game to have been synced at least once (`gdrive_folder_id` must be set). Helper `require_game_folder()` enforces this gate.
+
+### Protected Items
+
+The following names must **not** be renamed, moved, or deleted via the file manager:
+- `.sync-meta.json` — sync algorithm depends on this file's presence and key names
+- `backups` — the backup subfolder; contents managed exclusively by backup commands
+
+Frontend shows these items but disables action buttons. Backend commands **do not** enforce this guard — it is frontend-only.
+
+### File Manager Commands
+
+#### `list_game_drive_files`
+Calls `gdrive::list_drive_items(app, game_folder_id)` and returns the flat list of items.
+
+#### `rename_game_drive_file`
+1. Call `gdrive::rename_drive_item(app, file_id, new_name)`.
+2. Download `.sync-meta.json` from the game folder.
+3. If `old_name` exists as a key in `SyncMeta.files` → rename it to `new_name`.
+4. Re-upload the updated `.sync-meta.json`.
+
+#### `move_game_drive_file`
+1. Call `gdrive::move_drive_file(app, file_id, new_parent_id, old_parent_id)`.
+2. If the file was moved **out of the game root** (i.e. `old_parent_id == game_folder_id`): download `.sync-meta.json`, remove `file_name` key from `SyncMeta.files`, re-upload.
+3. Moving a file already in a subfolder is a no-op for sync-meta.
+
+#### `delete_game_drive_file`
+1. Call `gdrive::delete_drive_file(app, file_id)` (recursive for folders).
+2. Download `.sync-meta.json`, remove `file_name` from `SyncMeta.files`, re-upload.
+
+### Version Backup Commands
+
+#### `create_version_backup`
+1. `gdrive::ensure_subfolder(app, game_folder_id, "backups")` → `backups_folder_id`.
+2. Generate folder name: `{ISO-8601}` or `{ISO-8601}_{slugified-label}` (colons replaced with `-`, spaces with `-`).
+3. `gdrive::ensure_subfolder(app, backups_folder_id, folder_name)` → `backup_folder_id`.
+4. List all files in game root; filter out `["backups", ".sync-meta.json"]`.
+5. Server-side copy each via `gdrive::copy_drive_file(app, file_id, backup_folder_id)` — no local I/O.
+6. Build `BackupMeta { created_time, label, total_files, total_size }` and upload as `.backup-meta.json`.
+7. Return `DriveVersionBackup { id: backup_folder_id, name: folder_name, created_time, total_files, total_size }`.
+
+#### `list_version_backups`
+1. Find or create `backups/` subfolder via `ensure_subfolder`.
+2. List items inside; keep only folders.
+3. For each, try downloading `.backup-meta.json`. Parse `BackupMeta`; fall back to folder metadata if missing.
+4. Return sorted newest-first by `created_time`.
+
+#### `restore_version_backup`
+1. List save files currently in game root; delete each (except `backups/`).
+2. List files in the backup folder; exclude `.backup-meta.json`.
+3. For each backup file: `gdrive::copy_drive_file(app, file_id, game_folder_id)` — server-side.
+4. Download each file to the local `save_path` (expanding `%VAR%` tokens).
+5. Rebuild `.sync-meta.json` with the restored files' metadata; upload.
+6. Update `GameEntry.last_local_modified` and `last_cloud_modified` to now via `settings::update_game_field()`.
+7. Returns `SyncResult` (files downloaded = count of restored files).
+8. **Frontend must invalidate `VALIDATE_PATHS_KEY`** — already handled by `useRestoreVersionBackupMutation`.
+
+#### `delete_version_backup`
+1. Verify `backup_folder_id` is a child of the game's `backups/` folder (security check — prevents deleting arbitrary Drive items).
+2. List all files inside the backup folder; delete each, then delete the folder itself.
+
+### gdrive.rs Primitives Used by drive_mgmt
+
+| Function | Purpose |
+|----------|---------|
+| `list_drive_items(app, folder_id)` | Returns `Vec<DriveFileItem>` for all items in a folder |
+| `rename_drive_item(app, file_id, new_name)` | PATCH metadata (name only) |
+| `move_drive_file(app, file_id, new_parent_id, old_parent_id)` | PATCH with `addParents`/`removeParents` |
+| `copy_drive_file(app, file_id, parent_id)` | POST `/drive/v3/files/{id}/copy` — server-side, no bandwidth |
+| `ensure_subfolder(app, parent_id, name)` | Find or create a named subfolder; returns folder ID |
+| `delete_drive_file(app, file_id)` | DELETE `/drive/v3/files/{id}` (pub) |
+| `upload_json_to_folder(app, folder_id, name, data)` | Upload/replace JSON file (pub) |
+| `download_json_from_drive(app, file_id)` | Download JSON bytes → deserialize (pub) |
+
+---
+
 ### Forced-Direction Sync Commands
 
 | Command | Behaviour |
@@ -332,6 +462,63 @@ export interface SyncStructureDiff {
 | `push_to_cloud` | Force-upload ALL local files unconditionally; cloud-only files left in Drive |
 
 All three emit `"sync-started"` / `"sync-completed"` / `"sync-error"` events and return `SyncResult`.
+
+### DriveFileItem
+
+```rust
+// models.rs
+pub struct DriveFileItem {
+    pub id: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size: Option<u64>,
+    pub modified_time: Option<String>, // ISO 8601
+    pub is_folder: bool,
+}
+```
+
+TypeScript mirror:
+```ts
+export interface DriveFileItem {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number | null;
+  modifiedTime: string | null;
+  isFolder: boolean;
+}
+```
+
+### DriveVersionBackup
+
+```rust
+// models.rs
+pub struct DriveVersionBackup {
+    pub id: String,          // Drive folder ID of the backup
+    pub name: String,        // folder name: "{ISO-ts}" or "{ISO-ts}_{label}"
+    pub created_time: String,// ISO 8601
+    pub total_files: u32,
+    pub total_size: u64,
+}
+
+pub struct BackupMeta {
+    pub created_time: String,
+    pub label: Option<String>,
+    pub total_files: u32,
+    pub total_size: u64,
+}
+```
+
+TypeScript mirror:
+```ts
+export interface DriveVersionBackup {
+  id: string;
+  name: string;
+  createdTime: string;
+  totalFiles: number;
+  totalSize: number;
+}
+```
 
 ### SyncMeta (Drive-side `.sync-meta.json`)
 
@@ -399,15 +586,17 @@ All sync modules log with structured prefix for grep-ability:
 println!("[gdrive] Root folder found: {id}");
 println!("[sync] Starting sync for game: {game_id}");
 println!("[watcher] Change detected for game: {gid}");
+println!("[drive_mgmt] Creating backup for game: {game_id}");
 ```
 
 ## Adding New Sync Features Checklist
 
 1. Add/modify struct in `models.rs` with `#[serde(rename_all = "camelCase")]`.
 2. Mirror the type in `src/types/dashboard.ts` (TypeScript names are canonical).
-3. Implement Rust logic in the appropriate module (`gdrive.rs`, `sync.rs`, or `watcher.rs`).
+3. Implement Rust logic in the appropriate module (`gdrive.rs`, `sync.rs`, `watcher.rs`, or `drive_mgmt.rs`).
 4. Add Tauri command in `lib.rs` — use `spawn_blocking` for any I/O.
 5. Register in `tauri::generate_handler![...]`.
 6. Add typed wrapper in `src/services/tauri.ts`.
 7. Add React Query hook in `src/queries/sync.ts` or `src/queries/settings.ts`.
 8. Re-export from `src/queries/index.ts`.
+9. If the command writes files locally (restore): invalidate `VALIDATE_PATHS_KEY` in `onSuccess` so the save-path warning refreshes.

@@ -1,3 +1,4 @@
+mod drive_mgmt;
 mod gdrive;
 mod gdrive_auth;
 mod models;
@@ -11,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 use models::{
-    AddGamePayload, AppSettings, AuthStatus, DashboardData, GoogleUserInfo,
-    OAuthCredentials, PathValidation, SaveInfo, SaveTokensPayload, SyncResult,
+    AddGamePayload, AppSettings, AuthStatus, DashboardData, DriveFileItem, DriveVersionBackup,
+    GoogleUserInfo, OAuthCredentials, PathValidation, SaveInfo, SaveTokensPayload, SyncResult,
     SyncStructureDiff, UpdateGamePayload,
 };
 
@@ -161,6 +162,119 @@ async fn upload_game_logo(
         .map_err(|e| format!("Logo upload task failed: {e}"))?
 }
 
+// ── Drive file management commands ────────────────────────
+
+#[tauri::command]
+async fn list_game_drive_files(
+    app: tauri::AppHandle,
+    game_id: String,
+) -> Result<Vec<DriveFileItem>, String> {
+    tokio::task::spawn_blocking(move || drive_mgmt::list_game_drive_files(&app, &game_id))
+        .await
+        .map_err(|e| format!("List drive files task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn rename_game_drive_file(
+    app: tauri::AppHandle,
+    game_id: String,
+    file_id: String,
+    old_name: String,
+    new_name: String,
+    is_folder: bool,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        drive_mgmt::rename_game_drive_file(&app, &game_id, &file_id, &old_name, &new_name, is_folder)
+    })
+    .await
+    .map_err(|e| format!("Rename task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn move_game_drive_file(
+    app: tauri::AppHandle,
+    game_id: String,
+    file_id: String,
+    file_name: String,
+    new_parent_id: String,
+    old_parent_id: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        drive_mgmt::move_game_drive_file(
+            &app,
+            &game_id,
+            &file_id,
+            &file_name,
+            &new_parent_id,
+            &old_parent_id,
+        )
+    })
+    .await
+    .map_err(|e| format!("Move task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn delete_game_drive_file(
+    app: tauri::AppHandle,
+    game_id: String,
+    file_id: String,
+    file_name: String,
+    is_folder: bool,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        drive_mgmt::delete_game_drive_file(&app, &game_id, &file_id, &file_name, is_folder)
+    })
+    .await
+    .map_err(|e| format!("Delete task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn create_version_backup(
+    app: tauri::AppHandle,
+    game_id: String,
+    label: Option<String>,
+) -> Result<DriveVersionBackup, String> {
+    tokio::task::spawn_blocking(move || drive_mgmt::create_version_backup(&app, &game_id, label))
+        .await
+        .map_err(|e| format!("Create backup task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn list_version_backups(
+    app: tauri::AppHandle,
+    game_id: String,
+) -> Result<Vec<DriveVersionBackup>, String> {
+    tokio::task::spawn_blocking(move || drive_mgmt::list_version_backups(&app, &game_id))
+        .await
+        .map_err(|e| format!("List backups task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn restore_version_backup(
+    app: tauri::AppHandle,
+    game_id: String,
+    backup_folder_id: String,
+) -> Result<SyncResult, String> {
+    tokio::task::spawn_blocking(move || {
+        drive_mgmt::restore_version_backup(&app, &game_id, &backup_folder_id)
+    })
+    .await
+    .map_err(|e| format!("Restore backup task failed: {e}"))?
+}
+
+#[tauri::command]
+async fn delete_version_backup(
+    app: tauri::AppHandle,
+    game_id: String,
+    backup_folder_id: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        drive_mgmt::delete_version_backup(&app, &game_id, &backup_folder_id)
+    })
+    .await
+    .map_err(|e| format!("Delete backup task failed: {e}"))?
+}
+
 #[tauri::command]
 async fn sync_game(app: tauri::AppHandle, game_id: String) -> Result<SyncResult, String> {
     tokio::task::spawn_blocking(move || sync::sync_game(&app, &game_id))
@@ -291,6 +405,14 @@ pub fn run() {
             get_browse_default_path,
             expand_save_path,
             upload_game_logo,
+            list_game_drive_files,
+            rename_game_drive_file,
+            move_game_drive_file,
+            delete_game_drive_file,
+            create_version_backup,
+            list_version_backups,
+            restore_version_backup,
+            delete_version_backup,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
