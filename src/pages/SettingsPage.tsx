@@ -96,12 +96,6 @@ export function SettingsPage() {
         <h3 className="m-0 mb-4 font-semibold">Sync preferences</h3>
         {settings ? (
           <div className="flex flex-col gap-4">
-            <ToggleRow
-              label="Global auto-sync"
-              description="Master switch — automatically sync all games when changes are detected"
-              checked={settings.globalAutoSync}
-              onChange={(v) => toggleSetting("globalAutoSync", v)}
-            />
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="m-0 text-[0.92rem] text-[#c7d3f7]">Sync interval (minutes)</p>

@@ -58,7 +58,6 @@ export interface GoogleUserInfo {
 // ── Settings ──────────────────────────────────────────────
 
 export interface AppSettings {
-  globalAutoSync: boolean;
   syncIntervalMinutes: number;
   startMinimised: boolean;
   runOnStartup: boolean;

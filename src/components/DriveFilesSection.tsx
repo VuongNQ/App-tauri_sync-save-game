@@ -26,18 +26,49 @@ interface Props {
   gameFolderId: string;
 }
 
+// A single entry in the folder-navigation breadcrumb stack.
+interface NavEntry {
+  id: string;
+  name: string;
+}
+
 export function DriveFilesSection({ gameId, gameFolderId }: Props) {
   const [isOpen, setIsOpen] = useState(false);
+  const [navStack, setNavStack] = useState<NavEntry[]>([{ id: gameFolderId, name: "/" }]);
+
+  const currentFolder = navStack[navStack.length - 1];
+  const isAtRoot = navStack.length === 1;
+
+  function handleToggle() {
+    if (isOpen) {
+      // Reset navigation when collapsing.
+      setNavStack([{ id: gameFolderId, name: "/" }]);
+    }
+    setIsOpen((v) => !v);
+  }
 
   // Only fetch when the section is expanded.
-  const { data: items, isLoading, isError, error, refetch } = useDriveFilesQuery(gameId, isOpen);
+  const { data: items, isLoading, isError, error, refetch } = useDriveFilesQuery(
+    gameId,
+    currentFolder.id,
+    isOpen,
+  );
+
+  function navigateInto(folder: DriveFileItem) {
+    if (PROTECTED_NAMES.has(folder.name)) return;
+    setNavStack((prev) => [...prev, { id: folder.id, name: folder.name }]);
+  }
+
+  function navigateTo(index: number) {
+    setNavStack((prev) => prev.slice(0, index + 1));
+  }
 
   return (
     <div className={CARD}>
       <button
         type="button"
         className="w-full flex items-center justify-between gap-3 text-left"
-        onClick={() => setIsOpen((v) => !v)}
+        onClick={handleToggle}
         aria-expanded={isOpen}
       >
         <div>
@@ -49,6 +80,31 @@ export function DriveFilesSection({ gameId, gameFolderId }: Props) {
 
       {isOpen && (
         <div className="mt-5">
+          {/* Breadcrumb navigation */}
+          <nav
+            aria-label="Folder navigation"
+            className="flex items-center gap-1 mb-3 text-sm flex-wrap min-h-7"
+          >
+            {navStack.map((entry, index) => (
+              <span key={entry.id} className="flex items-center gap-1">
+                {index > 0 && (
+                  <span className="text-[#4a5568] select-none mx-0.5">/</span>
+                )}
+                {index < navStack.length - 1 ? (
+                  <button
+                    type="button"
+                    className="text-[#7dc9ff] hover:underline"
+                    onClick={() => navigateTo(index)}
+                  >
+                    {entry.name}
+                  </button>
+                ) : (
+                  <span className="text-[#c7d3f7] font-medium">{entry.name}</span>
+                )}
+              </span>
+            ))}
+          </nav>
+
           {isLoading && (
             <p className={`${MUTED} text-sm`}>Loading Drive files…</p>
           )}
@@ -58,18 +114,26 @@ export function DriveFilesSection({ gameId, gameFolderId }: Props) {
           {!isLoading && !isError && items && (
             <>
               {items.length === 0 ? (
-                <p className={`${MUTED} text-sm`}>No files found in this game's Drive folder.</p>
+                <p className={`${MUTED} text-sm`}>No files found in this folder.</p>
               ) : (
                 <ul className="list-none p-0 grid gap-2">
-                  {items.map((item) => (
-                    <DriveFileRow
-                      key={item.id}
-                      item={item}
-                      gameId={gameId}
-                      gameFolderId={gameFolderId}
-                      allItems={items}
-                    />
-                  ))}
+                  {items.map((item) => {
+                    const fullPath =
+                      navStack.map((e) => e.name).join(" / ") + " / " + item.name;
+                    return (
+                      <DriveFileRow
+                        key={item.id}
+                        item={item}
+                        gameId={gameId}
+                        gameFolderId={gameFolderId}
+                        allItems={items}
+                        currentFolderId={currentFolder.id}
+                        isAtRoot={isAtRoot}
+                        fullPath={fullPath}
+                        onNavigate={navigateInto}
+                      />
+                    );
+                  })}
                 </ul>
               )}
               <button
@@ -94,11 +158,25 @@ interface RowProps {
   gameId: string;
   gameFolderId: string;
   allItems: DriveFileItem[];
+  currentFolderId: string;
+  isAtRoot: boolean;
+  /** Full path string for this item, e.g. "/ backups / save.zip" */
+  fullPath: string;
+  onNavigate: (folder: DriveFileItem) => void;
 }
 
 const PROTECTED_NAMES = new Set([".sync-meta.json", "backups"]);
 
-function DriveFileRow({ item, gameId, gameFolderId, allItems }: RowProps) {
+function DriveFileRow({
+  item,
+  gameId,
+  gameFolderId,
+  allItems,
+  currentFolderId,
+  isAtRoot,
+  fullPath,
+  onNavigate,
+}: RowProps) {
   const isProtected = PROTECTED_NAMES.has(item.name);
 
   const [isRenaming, setIsRenaming] = useState(false);
@@ -148,8 +226,14 @@ function DriveFileRow({ item, gameId, gameFolderId, allItems }: RowProps) {
 
   return (
     <li className="flex items-center gap-3 px-3 py-2.5 rounded-[14px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]">
-      {/* Icon */}
-      <span className="text-lg shrink-0" aria-hidden="true">
+      {/* Icon — clicking a non-protected folder navigates into it */}
+      <span
+        className={`text-lg shrink-0 ${
+          item.isFolder && !isProtected ? "cursor-pointer" : ""
+        }`}
+        aria-hidden="true"
+        onClick={() => item.isFolder && !isProtected && onNavigate(item)}
+      >
         {item.isFolder ? "📁" : "📄"}
       </span>
 
@@ -183,8 +267,21 @@ function DriveFileRow({ item, gameId, gameFolderId, allItems }: RowProps) {
               Cancel
             </button>
           </div>
+        ) : item.isFolder && !isProtected ? (
+          <button
+            type="button"
+            className="truncate text-sm text-[#7dc9ff] hover:underline text-left"
+            onClick={() => onNavigate(item)}
+          >
+            {item.name}
+          </button>
         ) : (
           <span className="truncate text-sm text-[#c7d3f7]">{item.name}</span>
+        )}
+        {!isRenaming && (
+          <p className="m-0 mt-0.5 text-xs text-[#4a5568] truncate" title={fullPath}>
+            {fullPath}
+          </p>
         )}
         {renameError && (
           <p className="m-0 mt-0.5 text-xs text-[#ff9e9e]">{renameError}</p>
@@ -229,7 +326,7 @@ function DriveFileRow({ item, gameId, gameFolderId, allItems }: RowProps) {
           >
             ✏️
           </button>
-          {!item.isFolder && (
+          {!item.isFolder && isAtRoot && (
             <button
               type="button"
               title="Move to subfolder"
@@ -254,8 +351,8 @@ function DriveFileRow({ item, gameId, gameFolderId, allItems }: RowProps) {
         </div>
       )}
 
-      {/* Move modal */}
-      {showMoveModal && (
+      {/* Move modal — only shown when at root level */}
+      {showMoveModal && isAtRoot && (
         <MoveFileModal
           item={item}
           gameId={gameId}
@@ -270,7 +367,7 @@ function DriveFileRow({ item, gameId, gameFolderId, allItems }: RowProps) {
               fileId: item.id,
               fileName: item.name,
               newParentId,
-              oldParentId: gameFolderId,
+              oldParentId: currentFolderId,
             });
           }}
           onCancel={() => setShowMoveModal(false)}
@@ -317,7 +414,7 @@ function MoveFileModal({
   return (
     <dialog
       open
-      className="m-auto max-w-[420px] w-full rounded-3xl border border-[rgba(165,185,255,0.12)] bg-[rgba(14,22,40,0.97)] p-6 text-[#eef4ff] shadow-[0_32px_80px_rgba(0,0,0,0.5)] backdrop:bg-[rgba(0,0,0,0.55)]"
+      className="m-auto max-w-105 w-full rounded-3xl border border-[rgba(165,185,255,0.12)] bg-[rgba(14,22,40,0.97)] p-6 text-[#eef4ff] shadow-[0_32px_80px_rgba(0,0,0,0.5)] backdrop:bg-[rgba(0,0,0,0.55)]"
     >
       <h3 className="m-0 mb-2 text-lg font-semibold">Move "{item.name}"</h3>
       <p className="m-0 mb-4 text-sm text-[#9aa8c7]">

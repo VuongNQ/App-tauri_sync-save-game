@@ -181,8 +181,8 @@ Content-Type: application/octet-stream
 ### Auto-Sync Decision
 
 On file change event (after debounce):
-1. Check `game.auto_sync && state.settings.global_auto_sync`.
-2. If both true → `try_lock()` the per-game sync lock (non-blocking), then `sync::sync_game()`.
+1. Check `game.auto_sync`.
+2. If true → `try_lock()` the per-game sync lock (non-blocking), then `sync::sync_game()`.
 3. If lock unavailable → skip (sync already in progress).
 4. If auto-sync disabled → emit `"game-sync-pending"` event for frontend notification.
 
@@ -539,7 +539,6 @@ pub struct SyncFileMeta {
 
 ```rust
 pub struct AppSettings {
-    pub global_auto_sync: bool,       // master switch for auto-sync
     pub sync_interval_minutes: u32,   // 0 = only on change
     pub start_minimised: bool,
     pub run_on_startup: bool,

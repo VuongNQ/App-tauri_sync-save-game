@@ -97,7 +97,6 @@ pub struct GoogleUserInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
-    pub global_auto_sync: bool,
     pub sync_interval_minutes: u32,
     pub start_minimised: bool,
     pub run_on_startup: bool,
@@ -106,7 +105,6 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            global_auto_sync: false,
             sync_interval_minutes: 0,
             start_minimised: false,
             run_on_startup: false,

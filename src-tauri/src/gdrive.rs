@@ -482,6 +482,53 @@ pub fn upload_file(
 
     let status = resp.status().as_u16();
     let resp_body = resp.into_body().read_to_string().unwrap_or_default();
+
+    // If PATCH returned 404 the stored file ID is stale — retry as a fresh POST.
+    if status == 404 && method_is_patch {
+        eprintln!(
+            "[gdrive] PATCH 404 for {file_name} (stale ID); retrying as POST (new file)"
+        );
+        let post_meta = serde_json::json!({
+            "name": file_name,
+            "parents": [folder_id]
+        });
+        let post_boundary = format!("----boundary{}", fastrand::u64(..));
+        let mut post_body = Vec::new();
+        post_body.extend_from_slice(format!("--{post_boundary}\r\n").as_bytes());
+        post_body.extend_from_slice(b"Content-Type: application/json; charset=UTF-8\r\n\r\n");
+        post_body.extend_from_slice(post_meta.to_string().as_bytes());
+        post_body.extend_from_slice(b"\r\n");
+        post_body.extend_from_slice(format!("--{post_boundary}\r\n").as_bytes());
+        post_body.extend_from_slice(b"Content-Type: application/octet-stream\r\n\r\n");
+        post_body.extend_from_slice(&file_bytes);
+        post_body.extend_from_slice(b"\r\n");
+        post_body.extend_from_slice(format!("--{post_boundary}--").as_bytes());
+
+        let post_ct = format!("multipart/related; boundary={post_boundary}");
+        let post_url = format!(
+            "{DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,modifiedTime,size"
+        );
+        let token2 = gdrive_auth::get_access_token(app)?;
+        let post_resp = agent()
+            .post(&post_url)
+            .header("Authorization", &format!("Bearer {token2}"))
+            .header("Content-Type", &post_ct)
+            .send(&post_body[..])
+            .map_err(|e| format!("Upload POST (retry) failed: {e}"))?;
+
+        let post_status = post_resp.status().as_u16();
+        let post_body_str = post_resp.into_body().read_to_string().unwrap_or_default();
+        if post_status != 200 {
+            return Err(format!(
+                "Upload failed for {file_name} (HTTP {post_status}): {post_body_str}"
+            ));
+        }
+        let raw: DriveFileRaw = serde_json::from_str(&post_body_str)
+            .map_err(|e| format!("Parse upload (retry) response: {e}"))?;
+        println!("[gdrive] Uploaded {file_name} (retry POST) → {}", raw.id);
+        return Ok(DriveFile::from(raw));
+    }
+
     if status != 200 {
         return Err(format!(
             "Upload failed for {} (HTTP {status}): {resp_body}",

@@ -168,10 +168,13 @@ async fn upload_game_logo(
 async fn list_game_drive_files(
     app: tauri::AppHandle,
     game_id: String,
+    folder_id: Option<String>,
 ) -> Result<Vec<DriveFileItem>, String> {
-    tokio::task::spawn_blocking(move || drive_mgmt::list_game_drive_files(&app, &game_id))
-        .await
-        .map_err(|e| format!("List drive files task failed: {e}"))?
+    tokio::task::spawn_blocking(move || {
+        drive_mgmt::list_game_drive_files(&app, &game_id, folder_id.as_deref())
+    })
+    .await
+    .map_err(|e| format!("List drive files task failed: {e}"))?
 }
 
 #[tauri::command]

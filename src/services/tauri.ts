@@ -154,9 +154,9 @@ export async function uploadGameLogo(
 
 // ── Drive file management ─────────────────────────────────────────────────────
 
-/** List all items (files + folders) in the game's Google Drive folder root. */
-export async function listGameDriveFiles(gameId: string): Promise<DriveFileItem[]> {
-  return invoke<DriveFileItem[]>("list_game_drive_files", { gameId });
+/** List all items (files + folders) in the game's Drive folder, or a subfolder when `folderId` is given. */
+export async function listGameDriveFiles(gameId: string, folderId?: string): Promise<DriveFileItem[]> {
+  return invoke<DriveFileItem[]>("list_game_drive_files", { gameId, folderId });
 }
 
 /** Rename a Drive file or folder. Updates .sync-meta.json for regular files. */

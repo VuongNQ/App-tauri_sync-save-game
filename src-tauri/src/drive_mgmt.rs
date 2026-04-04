@@ -31,10 +31,18 @@ fn require_game_folder(app: &AppHandle, game_id: &str) -> Result<String, String>
 
 // ── Drive file management commands ───────────────────────
 
-/// List all items (files + folders) in the game's Google Drive folder root.
-pub fn list_game_drive_files(app: &AppHandle, game_id: &str) -> Result<Vec<DriveFileItem>, String> {
-    let folder_id = require_game_folder(app, game_id)?;
-    gdrive::list_drive_items(app, &folder_id)
+/// List all items (files + folders) in the game's Google Drive folder root,
+/// or in a specific subfolder when `folder_id` is provided.
+pub fn list_game_drive_files(
+    app: &AppHandle,
+    game_id: &str,
+    folder_id: Option<&str>,
+) -> Result<Vec<DriveFileItem>, String> {
+    let target = match folder_id {
+        Some(id) => id.to_string(),
+        None => require_game_folder(app, game_id)?,
+    };
+    gdrive::list_drive_items(app, &target)
 }
 
 /// Rename a Drive file (or folder) inside the game's Drive folder.

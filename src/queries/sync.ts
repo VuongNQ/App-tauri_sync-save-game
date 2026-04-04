@@ -19,7 +19,7 @@ import {
   toggleTrackChanges,
 } from "../services/tauri";
 import type { DashboardData } from "../types/dashboard";
-import { DASHBOARD_KEY, VALIDATE_PATHS_KEY, driveFilesKey, versionBackupsKey } from "./keys";
+import { DASHBOARD_KEY, VALIDATE_PATHS_KEY, driveFilesFolderKey, driveFilesKey, versionBackupsKey } from "./keys";
 
 function useSetDashboardCache() {
   const queryClient = useQueryClient();
@@ -94,11 +94,11 @@ export function usePushToCloudMutation() {
 
 // ── Drive file management hooks ────────────────────────────────────────────────
 
-/** Lazily fetch the list of Drive items for a game. Pass `enabled: false` to skip. */
-export function useDriveFilesQuery(gameId: string, enabled = true) {
+/** Lazily fetch the list of Drive items for a game folder or subfolder. Pass `enabled: false` to skip. */
+export function useDriveFilesQuery(gameId: string, folderId: string, enabled = true) {
   return useQuery({
-    queryKey: driveFilesKey(gameId),
-    queryFn: () => listGameDriveFiles(gameId),
+    queryKey: driveFilesFolderKey(gameId, folderId),
+    queryFn: () => listGameDriveFiles(gameId, folderId),
     enabled,
     staleTime: Infinity,
   });
