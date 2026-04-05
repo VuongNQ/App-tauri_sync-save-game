@@ -61,12 +61,16 @@ type GameSettingsFormValues = z.infer<typeof gameSettingsSchema>;
 // ── GameSettingsForm ──────────────────────────────────────────────────────────
 
 interface GameSettingsFormProps {
+  open: boolean;
+  onClose: () => void;
   game: GameEntry;
   isSyncing: boolean;
   isPathInvalid: boolean;
 }
 
 export function GameSettingsForm({
+  open,
+  onClose,
   game,
   isSyncing,
   isPathInvalid,
@@ -90,7 +94,6 @@ export function GameSettingsForm({
   const {
     handleSubmit,
     reset,
-    formState: { isDirty },
   } = methods;
 
   useEffect(() => {
@@ -110,6 +113,15 @@ export function GameSettingsForm({
     game.autoSync,
     reset,
   ]);
+
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = "hidden";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [open]);
 
   async function onSaveSettings(values: GameSettingsFormValues) {
     setLogoUploadError(null);
@@ -136,75 +148,78 @@ export function GameSettingsForm({
       trackChanges: values.trackChanges,
       autoSync: values.autoSync,
     });
+    onClose();
   }
 
+  if (!open) return null;
+
+  const isSaving = isUploadingLogo || updateMutation.isPending;
+  const saveError =
+    logoUploadError ??
+    (updateMutation.isError
+      ? msg(updateMutation.error, "Unable to save.")
+      : null);
+
   return (
-    <FormProvider {...methods}>
-      <form
-        onSubmit={handleSubmit(onSaveSettings)}
-        className="flex flex-col gap-4"
-      >
-        {isDirty && (
-          <SaveBar
-            isSaving={isUploadingLogo || updateMutation.isPending}
-            onDiscard={() => reset()}
-            error={
-              logoUploadError ??
-              (updateMutation.isError
-                ? msg(updateMutation.error, "Unable to save.")
-                : null)
-            }
-          />
-        )}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-5xl max-h-[90vh] flex flex-col rounded-3xl border border-[rgba(165,185,255,0.15)] bg-[rgba(9,14,28,0.97)] shadow-2xl overflow-hidden">
+        {/* Modal header */}
+        <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-[rgba(165,185,255,0.1)] shrink-0">
+          <h3 className="m-0 font-semibold text-[#c7d3f7]">Edit settings</h3>
+          <button
+            type="button"
+            className="text-[#9aa8c7] hover:text-[#c7d3f7] text-xl leading-none p-1 transition-colors"
+            onClick={() => { reset(); onClose(); }}
+          >
+            ✕
+          </button>
+        </div>
 
-        {/* Logo / Thumbnail */}
-        <ThumbnailSection isSyncing={isSyncing} />
+        <FormProvider {...methods}>
+          <form
+            onSubmit={handleSubmit(onSaveSettings)}
+            className="flex flex-col min-h-0 flex-1"
+          >
+            {/* Scrollable body */}
+            <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
+              {/* Logo / Thumbnail */}
+              <ThumbnailSection isSyncing={isSyncing} />
 
-        {/* Description */}
-        <DescriptionSection />
+              {/* Description */}
+              <DescriptionSection />
 
-        {/* Save folder */}
-        <SaveFolderSection
-          game={game}
-          isSyncing={isSyncing}
-          isPathInvalid={isPathInvalid}
-        />
+              {/* Save folder */}
+              <SaveFolderSection
+                game={game}
+                isSyncing={isSyncing}
+                isPathInvalid={isPathInvalid}
+              />
 
-        {/* Tracking & Sync */}
-        <TrackingSettingsSection isSyncing={isSyncing} />
-      </form>
-    </FormProvider>
-  );
-}
+              {/* Tracking & Sync */}
+              <TrackingSettingsSection isSyncing={isSyncing} />
+            </div>
 
-// ── SaveBar ───────────────────────────────────────────────────────────────────
-
-interface SaveBarProps {
-  isSaving: boolean;
-  onDiscard: () => void;
-  error: string | null;
-}
-
-function SaveBar({ isSaving, onDiscard, error }: SaveBarProps) {
-  return (
-    <div className="sticky top-0 z-50 mb-5 px-4 py-3 rounded-2xl border border-[rgba(120,180,255,0.25)] bg-[rgba(9,14,28,0.97)] backdrop-blur-sm flex items-center justify-between gap-4 max-[720px]:flex-col max-[720px]:items-stretch">
-      <div className="flex items-center gap-3">
-        <span className="h-2 w-2 rounded-full bg-[#7dc9ff] shrink-0" />
-        <span className="text-sm text-[#c7d3f7]">You have unsaved changes</span>
-        {error && <span className="text-sm text-[#ffd5d5]">{error}</span>}
-      </div>
-      <div className="flex items-center gap-3 shrink-0">
-        <button
-          type="button"
-          className={GHOST_BTN}
-          onClick={onDiscard}
-          disabled={isSaving}
-        >
-          Discard
-        </button>
-        <button type="submit" className={PRIMARY_BTN} disabled={isSaving}>
-          {isSaving ? "Saving…" : "Save"}
-        </button>
+            {/* Modal footer */}
+            <div className="shrink-0 px-6 py-4 border-t border-[rgba(165,185,255,0.1)] flex items-center gap-3">
+              {saveError && (
+                <span className="text-sm text-[#ffd5d5] mr-auto">{saveError}</span>
+              )}
+              <div className="flex items-center gap-3 ml-auto">
+                <button
+                  type="button"
+                  className={GHOST_BTN}
+                  onClick={() => { reset(); onClose(); }}
+                  disabled={isSaving}
+                >
+                  Discard
+                </button>
+                <button type="submit" className={PRIMARY_BTN} disabled={isSaving}>
+                  {isSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          </form>
+        </FormProvider>
       </div>
     </div>
   );

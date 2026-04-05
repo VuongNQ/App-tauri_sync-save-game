@@ -40,6 +40,7 @@ export function GameDetailPage() {
   const removeMutation = useRemoveGameMutation();
 
   const [showRemoveModal, setShowRemoveModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   const game = dashboard?.games.find((g) => g.id === id) ?? null;
 
@@ -146,17 +147,20 @@ export function GameDetailPage() {
       </div>
 
       {/* Settings form */}
-      <GameSettingsForm
-        game={game}
-        isSyncing={isSyncing}
-        isPathInvalid={isPathInvalid}
-      />
 
       {/* Actions */}
       <div className={CARD}>
         <h3 className="m-0 mb-4 font-semibold">Actions</h3>
 
-        <div className="grid gap-4 grid-cols-3 max-[900px]:grid-cols-1">
+        <div className="grid gap-4 grid-cols-2 max-[900px]:grid-cols-1">
+          <button
+            className={SECONDARY_BTN}
+            type="button"
+            disabled={isSyncing}
+            onClick={() => setShowSettingsModal(true)}
+          >
+            Edit settings
+          </button>
           <button
             className={SECONDARY_BTN}
             type="button"
@@ -294,6 +298,14 @@ export function GameDetailPage() {
           onCancel={restoreFlow.closeModal}
         />
       )}
+
+      <GameSettingsForm
+        open={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        game={game}
+        isSyncing={isSyncing}
+        isPathInvalid={isPathInvalid}
+      />
 
       <ConfirmModal
         open={showRemoveModal}
