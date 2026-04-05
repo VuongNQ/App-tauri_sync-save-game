@@ -290,7 +290,17 @@ pub fn validate_save_paths(app: &AppHandle) -> Result<Vec<PathValidation>, Strin
         .iter()
         .map(|g| {
             let valid = match &g.save_path {
-                Some(p) => std::path::Path::new(&expand_env_vars(p)).exists(),
+                Some(p) => {
+                    let expanded = expand_env_vars(p);
+                    let path = std::path::Path::new(&expanded);
+                    if path.exists() {
+                        true
+                    } else {
+                        // Try to create the folder so it is ready for tracking.
+                        // If creation succeeds the path is now valid on this OS.
+                        fs::create_dir_all(path).is_ok()
+                    }
+                }
                 None => true, // no path set yet — not an error
             };
             PathValidation {
