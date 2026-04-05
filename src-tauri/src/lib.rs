@@ -45,8 +45,46 @@ fn update_game(
 
 #[tauri::command]
 fn remove_game(app: tauri::AppHandle, game_id: String) -> Result<DashboardData, String> {
+    // Capture the Drive folder ID before removing from local state.
+    let drive_folder_id = settings::load_state(&app)
+        .ok()
+        .and_then(|s| s.games.into_iter().find(|g| g.id == game_id))
+        .and_then(|g| g.gdrive_folder_id);
+
     settings::remove_game(&app, &game_id)?;
+
+    // Delete the game's Drive folder (and all saves inside it) in the background.
+    if let Some(folder_id) = drive_folder_id {
+        let app_clone = app.clone();
+        std::thread::spawn(move || {
+            match gdrive::delete_drive_file(&app_clone, &folder_id) {
+                Ok(_) => println!("[gdrive] Deleted Drive folder for removed game: {folder_id}"),
+                Err(e) => eprintln!("[gdrive] Failed to delete Drive folder {folder_id}: {e}"),
+            }
+        });
+    }
+
     let state = settings::load_state(&app)?;
+    Ok(DashboardData { games: state.games })
+}
+
+#[tauri::command]
+fn clear_all_drive_data(app: tauri::AppHandle) -> Result<DashboardData, String> {
+    // Delete the entire game-processing-sync root folder on Drive.
+    let root_folder_id = gdrive::ensure_root_folder(&app)?;
+    gdrive::delete_drive_file(&app, &root_folder_id)?;
+
+    // Clear all cloud metadata from every game in local state.
+    let mut state = settings::load_state(&app)?;
+    for game in state.games.iter_mut() {
+        game.gdrive_folder_id = None;
+        game.cloud_storage_bytes = None;
+        game.last_cloud_modified = None;
+    }
+    state.last_cloud_library_modified = None;
+    settings::save_state(&app, &state)?;
+
+    println!("[gdrive] Cleared all Drive data for current account");
     Ok(DashboardData { games: state.games })
 }
 
@@ -389,6 +427,7 @@ pub fn run() {
             add_manual_game,
             update_game,
             remove_game,
+            clear_all_drive_data,
             check_auth_status,
             save_auth_tokens,
             get_oauth_credentials,

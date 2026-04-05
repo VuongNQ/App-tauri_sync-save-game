@@ -39,6 +39,10 @@ export async function removeGame(gameId: string): Promise<DashboardData> {
   return invoke<DashboardData>("remove_game", { gameId });
 }
 
+export async function clearAllDriveData(): Promise<DashboardData> {
+  return invoke<DashboardData>("clear_all_drive_data");
+}
+
 // ── Auth (plugin-based OAuth) ─────────────────────────────────────────────
 
 export async function checkAuthStatus(): Promise<AuthStatus> {
