@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { useForm, useFormContext, FormProvider, Controller } from "react-hook-form";
+import {
+  useForm,
+  useFormContext,
+  FormProvider,
+  Controller,
+} from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useParams, Link, useNavigate } from "react-router";
@@ -18,7 +23,11 @@ import {
 } from "../queries";
 import type { GameEntry } from "../types/dashboard";
 import type { SaveInfo, SyncStructureDiff } from "../types/dashboard";
-import { getBrowseDefaultPath, expandSavePath, uploadGameLogo } from "../services/tauri";
+import {
+  getBrowseDefaultPath,
+  expandSavePath,
+  uploadGameLogo,
+} from "../services/tauri";
 import { norm, msg, formatLocalTime, toImgSrc } from "../utils";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DriveFilesSection } from "../components/DriveFilesSection";
@@ -49,15 +58,19 @@ import {
 // ── Unified settings schema ───────────────────────────────────────────────────
 
 const gameSettingsSchema = z.object({
-  thumbnail: z.string().refine(
-    (v) =>
-      !v ||
-      v.startsWith("https://") ||
-      v.startsWith("http://") ||
-      /^[A-Za-z]:[\\//]/.test(v),
-    "Enter a valid image URL (https://…) or browse a local file.",
-  ),
-  description: z.string().max(1000, "Description must be 1000 characters or fewer."),
+  thumbnail: z
+    .string()
+    .refine(
+      (v) =>
+        !v ||
+        v.startsWith("https://") ||
+        v.startsWith("http://") ||
+        /^[A-Za-z]:[\\//]/.test(v),
+      "Enter a valid image URL (https://…) or browse a local file.",
+    ),
+  description: z
+    .string()
+    .max(1000, "Description must be 1000 characters or fewer."),
   savePath: z.string(),
   trackChanges: z.boolean(),
   autoSync: z.boolean(),
@@ -72,8 +85,6 @@ export function GameDetailPage() {
 
   const { data: dashboard } = useDashboardQuery();
 
-  const updateMutation = useUpdateGameMutation();
-
   const removeMutation = useRemoveGameMutation();
 
   const [showRemoveModal, setShowRemoveModal] = useState(false);
@@ -82,43 +93,21 @@ export function GameDetailPage() {
 
   // console.log("[GameDetailPage] game:", game);
 
-  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
-  const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
-
   const saveInfoMutation = useGetSaveInfoMutation();
 
   const syncMutation = useSyncGameMutation();
 
   const validateQuery = useValidatePathsQuery();
 
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    type: "success" | "error";
+  } | null>(null);
 
   const restoreFlow = useRestoreFromDriveFlow(id ?? "", setToast);
 
-  const isSyncing = syncMutation.isPending || restoreFlow.isChecking || restoreFlow.isExecuting;
-
-  const methods = useForm<GameSettingsFormValues>({
-    defaultValues: {
-      thumbnail: game?.thumbnail ?? "",
-      description: game?.description ?? "",
-      savePath: game?.savePath ?? "",
-      trackChanges: game?.trackChanges ?? false,
-      autoSync: game?.autoSync ?? false,
-    },
-    resolver: zodResolver(gameSettingsSchema),
-  });
-
-  const { handleSubmit, reset, formState: { isDirty } } = methods;
-
-  useEffect(() => {
-    reset({
-      thumbnail: game?.thumbnail ?? "",
-      description: game?.description ?? "",
-      savePath: game?.savePath ?? "",
-      trackChanges: game?.trackChanges ?? false,
-      autoSync: game?.autoSync ?? false,
-    });
-  }, [game?.id, game?.thumbnail, game?.description, game?.savePath, game?.trackChanges, game?.autoSync, reset]);
+  const isSyncing =
+    syncMutation.isPending || restoreFlow.isChecking || restoreFlow.isExecuting;
 
   const isPathInvalid =
     game != null &&
@@ -136,34 +125,6 @@ export function GameDetailPage() {
   }
 
   const sourceBadge = SOURCE_BADGE[game.source] ?? SOFT_BADGE;
-
-  async function onSaveSettings(values: GameSettingsFormValues) {
-    if (!game) return;
-    setLogoUploadError(null);
-    const src = norm(values.thumbnail);
-
-    if (methods.formState.dirtyFields.thumbnail && src) {
-      setIsUploadingLogo(true);
-      try {
-        await uploadGameLogo(game.id, src);
-      } catch (err) {
-        setLogoUploadError(msg(err, "Logo upload failed."));
-        setIsUploadingLogo(false);
-        return;
-      }
-      setIsUploadingLogo(false);
-    }
-
-    const trimmed = values.description.trim().slice(0, 1000);
-    await updateMutation.mutateAsync({
-      ...game,
-      thumbnail: src || null,
-      description: trimmed || null,
-      savePath: norm(values.savePath),
-      trackChanges: values.trackChanges,
-      autoSync: values.autoSync,
-    });
-  }
 
   return (
     <>
@@ -208,9 +169,18 @@ export function GameDetailPage() {
         <dl className="grid gap-[14px] grid-cols-2 m-0 max-[720px]:grid-cols-1">
           {[
             { label: "Save folder", value: game.savePath ?? "Not set" },
-            { label: "Last local save", value: formatLocalTime(game.lastLocalModified) },
-            { label: "Last cloud save", value: formatLocalTime(game.lastCloudModified) },
-            { label: "Google Drive folder", value: game.gdriveFolderId ?? "Not synced" },
+            {
+              label: "Last local save",
+              value: formatLocalTime(game.lastLocalModified),
+            },
+            {
+              label: "Last cloud save",
+              value: formatLocalTime(game.lastCloudModified),
+            },
+            {
+              label: "Google Drive folder",
+              value: game.gdriveFolderId ?? "Not synced",
+            },
           ].map(({ label, value }) => (
             <div
               key={label}
@@ -224,29 +194,11 @@ export function GameDetailPage() {
       </div>
 
       {/* Settings form */}
-      <FormProvider {...methods}>
-        <form onSubmit={handleSubmit(onSaveSettings)}>
-          {isDirty && (
-            <SaveBar
-              isSaving={isUploadingLogo || updateMutation.isPending}
-              onDiscard={() => reset()}
-              error={logoUploadError ?? (updateMutation.isError ? msg(updateMutation.error, "Unable to save.") : null)}
-            />
-          )}
-
-          {/* Logo / Thumbnail */}
-          <ThumbnailSection isSyncing={isSyncing} />
-
-          {/* Description */}
-          <DescriptionSection />
-
-          {/* Save folder */}
-          <SaveFolderSection game={game} isSyncing={isSyncing} isPathInvalid={isPathInvalid} />
-
-          {/* Tracking & Sync */}
-          <TrackingSettingsSection isSyncing={isSyncing} />
-        </form>
-      </FormProvider>
+      <GameSettingsForm
+        game={game}
+        isSyncing={isSyncing}
+        isPathInvalid={isPathInvalid}
+      />
 
       {/* Actions */}
       <div className={CARD}>
@@ -287,7 +239,10 @@ export function GameDetailPage() {
                   }
                 },
                 onError: (err) => {
-                  setToast({ message: msg(err, "Sync failed."), type: "error" });
+                  setToast({
+                    message: msg(err, "Sync failed."),
+                    type: "error",
+                  });
                 },
               })
             }
@@ -334,9 +289,7 @@ export function GameDetailPage() {
         )}
 
         {/* Sync Result */}
-        {syncMutation.data && (
-          <SyncResultPanel result={syncMutation.data} />
-        )}
+        {syncMutation.data && <SyncResultPanel result={syncMutation.data} />}
         {syncMutation.isError && (
           <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
             {msg(syncMutation.error, "Sync failed.")}
@@ -346,13 +299,14 @@ export function GameDetailPage() {
 
       {/* Drive file manager */}
       {game.gdriveFolderId && (
-        <DriveFilesSection gameId={game.id} gameFolderId={game.gdriveFolderId} />
+        <DriveFilesSection
+          gameId={game.id}
+          gameFolderId={game.gdriveFolderId}
+        />
       )}
 
       {/* Version backups */}
-      {game.gdriveFolderId && (
-        <VersionBackupsSection gameId={game.id} />
-      )}
+      {game.gdriveFolderId && <VersionBackupsSection gameId={game.id} />}
 
       {/* Danger zone */}
       <div className={CARD}>
@@ -396,11 +350,125 @@ export function GameDetailPage() {
         confirmLabel="Remove"
         onConfirm={() => {
           setShowRemoveModal(false);
-          removeMutation.mutate(game.id, { onSuccess: () => navigate("/", { replace: true }) });
+          removeMutation.mutate(game.id, {
+            onSuccess: () => navigate("/", { replace: true }),
+          });
         }}
         onCancel={() => setShowRemoveModal(false)}
       />
     </>
+  );
+}
+
+// ── GameSettingsForm ─────────────────────────────────────────────────────────
+
+interface GameSettingsFormProps {
+  game: GameEntry;
+  isSyncing: boolean;
+  isPathInvalid: boolean;
+}
+
+function GameSettingsForm({ game, isSyncing, isPathInvalid }: GameSettingsFormProps) {
+  const updateMutation = useUpdateGameMutation();
+
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
+
+  const methods = useForm<GameSettingsFormValues>({
+    defaultValues: {
+      thumbnail: game.thumbnail ?? "",
+      description: game.description ?? "",
+      savePath: game.savePath ?? "",
+      trackChanges: game.trackChanges,
+      autoSync: game.autoSync,
+    },
+    resolver: zodResolver(gameSettingsSchema),
+  });
+
+  const {
+    handleSubmit,
+    reset,
+    formState: { isDirty },
+  } = methods;
+
+  useEffect(() => {
+    reset({
+      thumbnail: game.thumbnail ?? "",
+      description: game.description ?? "",
+      savePath: game.savePath ?? "",
+      trackChanges: game.trackChanges,
+      autoSync: game.autoSync,
+    });
+  }, [
+    game.id,
+    game.thumbnail,
+    game.description,
+    game.savePath,
+    game.trackChanges,
+    game.autoSync,
+    reset,
+  ]);
+
+  async function onSaveSettings(values: GameSettingsFormValues) {
+    setLogoUploadError(null);
+    const src = norm(values.thumbnail);
+
+    if (methods.formState.dirtyFields.thumbnail && src) {
+      setIsUploadingLogo(true);
+      try {
+        await uploadGameLogo(game.id, src);
+      } catch (err) {
+        setLogoUploadError(msg(err, "Logo upload failed."));
+        setIsUploadingLogo(false);
+        return;
+      }
+      setIsUploadingLogo(false);
+    }
+
+    const trimmed = values.description.trim().slice(0, 1000);
+    await updateMutation.mutateAsync({
+      ...game,
+      thumbnail: src || null,
+      description: trimmed || null,
+      savePath: norm(values.savePath),
+      trackChanges: values.trackChanges,
+      autoSync: values.autoSync,
+    });
+  }
+
+  return (
+    <FormProvider {...methods}>
+      <form onSubmit={handleSubmit(onSaveSettings)} className="flex flex-col gap-4">
+        {isDirty && (
+          <SaveBar
+            isSaving={isUploadingLogo || updateMutation.isPending}
+            onDiscard={() => reset()}
+            error={
+              logoUploadError ??
+              (updateMutation.isError
+                ? msg(updateMutation.error, "Unable to save.")
+                : null)
+            }
+          />
+        )}
+
+        {/* Logo / Thumbnail */}
+        <ThumbnailSection isSyncing={isSyncing} />
+
+        {/* Description */}
+        <DescriptionSection />
+
+        {/* Save folder */}
+        <SaveFolderSection
+          game={game}
+          isSyncing={isSyncing}
+          isPathInvalid={isPathInvalid}
+        />
+
+        {/* Tracking & Sync */}
+        <TrackingSettingsSection isSyncing={isSyncing} />
+      </form>
+    </FormProvider>
   );
 }
 
@@ -414,7 +482,13 @@ interface ToggleRowProps {
   onChange: (value: boolean) => void;
 }
 
-function ToggleRow({ label, description, enabled, disabled, onChange }: ToggleRowProps) {
+function ToggleRow({
+  label,
+  description,
+  enabled,
+  disabled,
+  onChange,
+}: ToggleRowProps) {
   return (
     <div className="flex items-center justify-between gap-4 p-4 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]">
       <div>
@@ -468,7 +542,9 @@ function SaveInfoPanel({ info }: { info: SaveInfo }) {
                 key={f.relativePath}
                 className="flex items-center justify-between gap-2 text-xs px-2 py-1 rounded-lg bg-[rgba(255,255,255,0.03)]"
               >
-                <span className="text-[#c7d3f7] truncate">{f.relativePath}</span>
+                <span className="text-[#c7d3f7] truncate">
+                  {f.relativePath}
+                </span>
                 <span className={MUTED}>{formatBytes(f.size)}</span>
               </li>
             ))}
@@ -479,9 +555,20 @@ function SaveInfoPanel({ info }: { info: SaveInfo }) {
   );
 }
 
-function SyncResultPanel({ result }: { result: { uploaded: number; downloaded: number; skipped: number; error: string | null } }) {
+function SyncResultPanel({
+  result,
+}: {
+  result: {
+    uploaded: number;
+    downloaded: number;
+    skipped: number;
+    error: string | null;
+  };
+}) {
   return (
-    <div className={`mt-4 p-4 rounded-[18px] border ${result.error ? "bg-[rgba(40,10,10,0.75)] border-[rgba(255,120,120,0.2)]" : "bg-[rgba(9,14,28,0.75)] border-[rgba(165,185,255,0.08)]"}`}>
+    <div
+      className={`mt-4 p-4 rounded-[18px] border ${result.error ? "bg-[rgba(40,10,10,0.75)] border-[rgba(255,120,120,0.2)]" : "bg-[rgba(9,14,28,0.75)] border-[rgba(165,185,255,0.08)]"}`}
+    >
       <p className={EYEBROW}>{result.error ? "Sync error" : "Sync complete"}</p>
       {result.error ? (
         <p className="m-0 text-sm text-[#ffd5d5]">{result.error}</p>
@@ -508,7 +595,10 @@ function SyncResultPanel({ result }: { result: { uploaded: number; downloaded: n
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const i = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1,
+  );
   const val = bytes / Math.pow(1024, i);
   return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
@@ -530,7 +620,12 @@ function SaveBar({ isSaving, onDiscard, error }: SaveBarProps) {
         {error && <span className="text-sm text-[#ffd5d5]">{error}</span>}
       </div>
       <div className="flex items-center gap-3 shrink-0">
-        <button type="button" className={GHOST_BTN} onClick={onDiscard} disabled={isSaving}>
+        <button
+          type="button"
+          className={GHOST_BTN}
+          onClick={onDiscard}
+          disabled={isSaving}
+        >
           Discard
         </button>
         <button type="submit" className={PRIMARY_BTN} disabled={isSaving}>
@@ -548,14 +643,21 @@ interface ThumbnailSectionProps {
 }
 
 function ThumbnailSection({ isSyncing }: ThumbnailSectionProps) {
-  const { control, setValue, watch, formState: { errors } } = useFormContext<GameSettingsFormValues>();
+  const {
+    control,
+    setValue,
+    watch,
+    formState: { errors },
+  } = useFormContext<GameSettingsFormValues>();
   const thumbnailValue = watch("thumbnail");
 
   async function handleBrowse() {
     const p = await open({
       multiple: false,
       title: "Choose a thumbnail image",
-      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+      filters: [
+        { name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] },
+      ],
     });
     if (typeof p === "string") {
       setValue("thumbnail", p, { shouldValidate: true, shouldDirty: true });
@@ -615,7 +717,10 @@ function ThumbnailSection({ isSyncing }: ThumbnailSectionProps) {
 // ── Description section ───────────────────────────────────────────────────────
 
 function DescriptionSection() {
-  const { control, formState: { errors } } = useFormContext<GameSettingsFormValues>();
+  const {
+    control,
+    formState: { errors },
+  } = useFormContext<GameSettingsFormValues>();
 
   return (
     <div className={CARD}>
@@ -626,7 +731,9 @@ function DescriptionSection() {
           control={control}
           render={({ field }) => (
             <label className={FORM_LABEL}>
-              <span className={LABEL_SPAN}>Game description (max 1000 characters)</span>
+              <span className={LABEL_SPAN}>
+                Game description (max 1000 characters)
+              </span>
               <textarea
                 className={`${INPUT_CLS} resize-y min-h-[60px]`}
                 {...field}
@@ -634,9 +741,13 @@ function DescriptionSection() {
                 rows={4}
                 placeholder="Brief description of the game…"
               />
-              <span className={MUTED + " text-xs mt-1"}>{field.value.length}/1000</span>
+              <span className={MUTED + " text-xs mt-1"}>
+                {field.value.length}/1000
+              </span>
               {errors.description && (
-                <span className={FIELD_ERROR}>{errors.description.message}</span>
+                <span className={FIELD_ERROR}>
+                  {errors.description.message}
+                </span>
               )}
             </label>
           )}
@@ -654,7 +765,11 @@ interface SaveFolderSectionProps {
   isPathInvalid: boolean;
 }
 
-function SaveFolderSection({ game, isSyncing, isPathInvalid }: SaveFolderSectionProps) {
+function SaveFolderSection({
+  game,
+  isSyncing,
+  isPathInvalid,
+}: SaveFolderSectionProps) {
   const { control, setValue } = useFormContext<GameSettingsFormValues>();
 
   async function handleBrowse() {
@@ -685,7 +800,8 @@ function SaveFolderSection({ game, isSyncing, isPathInvalid }: SaveFolderSection
 
       {isPathInvalid && (
         <div className="mb-4 p-3 rounded-2xl border border-[rgba(255,100,100,0.3)] bg-[rgba(62,18,22,0.5)] text-[#ff9e9e] text-sm flex items-center gap-2">
-          <span>⚠</span> The configured save path does not exist on this machine.
+          <span>⚠</span> The configured save path does not exist on this
+          machine.
         </div>
       )}
 
@@ -782,7 +898,9 @@ function useRestoreFromDriveFlow(
 
   const isChecking = checkDiffMutation.isPending;
   const isExecuting =
-    restoreMutation.isPending || pushMutation.isPending || syncMutation.isPending;
+    restoreMutation.isPending ||
+    pushMutation.isPending ||
+    syncMutation.isPending;
 
   function start() {
     checkDiffMutation.mutate(gameId, {
@@ -796,7 +914,8 @@ function useRestoreFromDriveFlow(
         }
         if (!diff.hasDiff) {
           setToast({
-            message: "Drive and local are already identical — nothing to restore.",
+            message:
+              "Drive and local are already identical — nothing to restore.",
             type: "success",
           });
           return;
@@ -805,7 +924,10 @@ function useRestoreFromDriveFlow(
         setShowModal(true);
       },
       onError: (err) => {
-        setToast({ message: msg(err, "Failed to check sync status."), type: "error" });
+        setToast({
+          message: msg(err, "Failed to check sync status."),
+          type: "error",
+        });
       },
     });
   }
@@ -826,7 +948,8 @@ function useRestoreFromDriveFlow(
               type: "success",
             });
         },
-        onError: (err) => setToast({ message: msg(err, "Sync failed."), type: "error" }),
+        onError: (err) =>
+          setToast({ message: msg(err, "Sync failed."), type: "error" }),
       });
     } else if (method === "restore") {
       restoreMutation.mutate(gameId, {
@@ -838,7 +961,8 @@ function useRestoreFromDriveFlow(
               type: "success",
             });
         },
-        onError: (err) => setToast({ message: msg(err, "Restore failed."), type: "error" }),
+        onError: (err) =>
+          setToast({ message: msg(err, "Restore failed."), type: "error" }),
       });
     } else {
       pushMutation.mutate(gameId, {
@@ -851,12 +975,23 @@ function useRestoreFromDriveFlow(
             });
         },
         onError: (err) =>
-          setToast({ message: msg(err, "Push to Drive failed."), type: "error" }),
+          setToast({
+            message: msg(err, "Push to Drive failed."),
+            type: "error",
+          }),
       });
     }
   }
 
-  return { start, isChecking, isExecuting, syncDiff, showModal, closeModal, executeMethod };
+  return {
+    start,
+    isChecking,
+    isExecuting,
+    syncDiff,
+    showModal,
+    closeModal,
+    executeMethod,
+  };
 }
 
 // ── SyncConflictModal ─────────────────────────────────────────────────────────
@@ -868,33 +1003,56 @@ interface SyncConflictModalProps {
   onCancel: () => void;
 }
 
-function SyncConflictModal({ open, diff, onConfirm, onCancel }: SyncConflictModalProps) {
+function SyncConflictModal({
+  open,
+  diff,
+  onConfirm,
+  onCancel,
+}: SyncConflictModalProps) {
   const [selected, setSelected] = useState<SyncMethod>("auto");
 
   if (!open) return null;
 
   const rows: Array<{ label: string; count: number; warn?: boolean }> = [
     { label: "Local files not on Drive", count: diff.localOnlyFiles.length },
-    { label: "Drive files not found locally", count: diff.cloudOnlyFiles.length },
-    { label: "Local files newer than Drive", count: diff.localNewerFiles.length, warn: true },
-    { label: "Drive files newer than local", count: diff.cloudNewerFiles.length, warn: true },
+    {
+      label: "Drive files not found locally",
+      count: diff.cloudOnlyFiles.length,
+    },
+    {
+      label: "Local files newer than Drive",
+      count: diff.localNewerFiles.length,
+      warn: true,
+    },
+    {
+      label: "Drive files newer than local",
+      count: diff.cloudNewerFiles.length,
+      warn: true,
+    },
   ].filter((r) => r.count > 0);
 
-  const methods: Array<{ value: SyncMethod; label: string; description: string }> = [
+  const methods: Array<{
+    value: SyncMethod;
+    label: string;
+    description: string;
+  }> = [
     {
       value: "auto",
       label: "Auto-sync (newest wins)",
-      description: "Each file keeps whichever version was modified most recently.",
+      description:
+        "Each file keeps whichever version was modified most recently.",
     },
     {
       value: "restore",
       label: "Restore from Drive",
-      description: "Overwrite local files with the Drive version — even if local is newer.",
+      description:
+        "Overwrite local files with the Drive version — even if local is newer.",
     },
     {
       value: "push",
       label: "Push local to Drive",
-      description: "Overwrite Drive files with local versions — even if Drive is newer.",
+      description:
+        "Overwrite Drive files with local versions — even if Drive is newer.",
     },
   ];
 
@@ -926,7 +1084,9 @@ function SyncConflictModal({ open, diff, onConfirm, onCancel }: SyncConflictModa
 
         {/* Method picker */}
         <div className="grid gap-2">
-          <p className={`${MUTED} text-xs uppercase tracking-wider`}>Choose sync method</p>
+          <p className={`${MUTED} text-xs uppercase tracking-wider`}>
+            Choose sync method
+          </p>
           {methods.map((m) => (
             <button
               key={m.value}
@@ -938,7 +1098,9 @@ function SyncConflictModal({ open, diff, onConfirm, onCancel }: SyncConflictModa
                   : "border-[rgba(165,185,255,0.08)] bg-[rgba(255,255,255,0.02)] hover:border-[rgba(165,185,255,0.2)]"
               }`}
             >
-              <p className="m-0 font-medium text-[#c7d3f7] text-sm">{m.label}</p>
+              <p className="m-0 font-medium text-[#c7d3f7] text-sm">
+                {m.label}
+              </p>
               <p className={`${MUTED} m-0 text-xs mt-0.5`}>{m.description}</p>
             </button>
           ))}
