@@ -54,6 +54,8 @@ export function DriveFilesSection({ gameId, gameFolderId }: Props) {
     isOpen,
   );
 
+  // console.log("[DriveFilesSection] gameId:", gameId, "folder:", currentFolder, "items:", items);
+
   function navigateInto(folder: DriveFileItem) {
     if (PROTECTED_NAMES.has(folder.name)) return;
     setNavStack((prev) => [...prev, { id: folder.id, name: folder.name }]);

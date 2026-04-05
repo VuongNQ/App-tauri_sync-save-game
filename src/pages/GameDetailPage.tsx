@@ -80,6 +80,8 @@ export function GameDetailPage() {
 
   const game = dashboard?.games.find((g) => g.id === id) ?? null;
 
+  // console.log("[GameDetailPage] game:", game);
+
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
 

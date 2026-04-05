@@ -1,8 +1,12 @@
-import { useGoogleUserInfoQuery, useLogoutMutation } from "../queries";
+import { useState } from "react";
+
+import { useClearAllDriveMutation, useGoogleUserInfoQuery, useLogoutMutation } from "../queries";
 import { useSettingsQuery, useUpdateSettingsMutation } from "../queries/settings";
+import { ConfirmModal } from "../components/ConfirmModal";
 import {
   BTN,
   CARD,
+  DANGER_BTN,
   EYEBROW,
   MUTED,
   TOGGLE_TRACK_ON,
@@ -17,6 +21,8 @@ export function SettingsPage() {
   const logoutMutation = useLogoutMutation();
   const { data: settings } = useSettingsQuery();
   const updateSettings = useUpdateSettingsMutation();
+  const clearAllDrive = useClearAllDriveMutation();
+  const [showClearModal, setShowClearModal] = useState(false);
 
   const toggleSetting = (key: keyof AppSettings, value: boolean) => {
     if (!settings) return;
@@ -153,6 +159,46 @@ export function SettingsPage() {
           <p className={MUTED}>Loading…</p>
         )}
       </div>
+
+      {/* Danger Zone */}
+      <div className={CARD}>
+        <h3 className="m-0 mb-1 font-semibold text-[#ff9e9e]">Danger zone</h3>
+        <p className={`m-0 mb-4 text-sm ${MUTED}`}>
+          Permanently delete all synced save files, game folders, and configuration stored on Google Drive for this account. Your local game library is not affected.
+        </p>
+        <button
+          type="button"
+          className={DANGER_BTN}
+          disabled={clearAllDrive.isPending}
+          onClick={() => setShowClearModal(true)}
+        >
+          {clearAllDrive.isPending ? "Clearing…" : "Clear all Drive data"}
+        </button>
+        {clearAllDrive.isError && (
+          <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
+            {clearAllDrive.error instanceof Error
+              ? clearAllDrive.error.message
+              : "Failed to clear Drive data."}
+          </p>
+        )}
+        {clearAllDrive.isSuccess && (
+          <p className="m-0 mt-3 text-sm text-[#9effc3]">
+            All Drive data has been cleared.
+          </p>
+        )}
+      </div>
+
+      <ConfirmModal
+        open={showClearModal}
+        title="Clear all Drive data"
+        message="This will permanently delete all synced save files, game folders, and library data from Google Drive for your account. This cannot be undone. Your local game list will be preserved."
+        confirmLabel="Clear all Drive data"
+        onConfirm={() => {
+          setShowClearModal(false);
+          clearAllDrive.mutate();
+        }}
+        onCancel={() => setShowClearModal(false)}
+      />
     </>
   );
 }

@@ -13,6 +13,7 @@ export {
   useLogoutMutation,
 } from "./auth";
 export {
+  useClearAllDriveMutation,
   useSettingsQuery,
   useUpdateSettingsMutation,
 } from "./settings";
