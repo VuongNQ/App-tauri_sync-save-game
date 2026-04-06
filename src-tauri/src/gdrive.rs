@@ -8,7 +8,7 @@ use tauri::AppHandle;
 
 use crate::{
     gdrive_auth,
-    models::{AppSettings, DriveFile, DriveFileItem, GameEntry, SyncMeta},
+    models::{AppSettings, DriveFile, DriveFileFlatItem, DriveFileItem, GameEntry, SyncMeta},
     settings,
 };
 
@@ -292,6 +292,40 @@ pub fn list_drive_items(app: &AppHandle, folder_id: &str) -> Result<Vec<DriveFil
         .into_iter()
         .map(DriveFileItem::from)
         .collect())
+}
+
+/// Recursively list every item inside a Drive folder, each carrying its relative path.
+///
+/// `prefix` is the path prefix accumulated so far (empty string for the game root).
+/// Both files and folders are included; folder entries appear before their children.
+pub fn list_drive_items_recursive(
+    app: &AppHandle,
+    folder_id: &str,
+    prefix: &str,
+) -> Result<Vec<DriveFileFlatItem>, String> {
+    let items = list_drive_items(app, folder_id)?;
+    let mut result = Vec::new();
+    for item in items {
+        let relative_path = if prefix.is_empty() {
+            item.name.clone()
+        } else {
+            format!("{}/{}", prefix, item.name)
+        };
+        result.push(DriveFileFlatItem {
+            id: item.id.clone(),
+            name: item.name.clone(),
+            relative_path: relative_path.clone(),
+            size: item.size,
+            modified_time: item.modified_time.clone(),
+            is_folder: item.is_folder,
+            parent_folder_id: folder_id.to_string(),
+        });
+        if item.is_folder {
+            let children = list_drive_items_recursive(app, &item.id, &relative_path)?;
+            result.extend(children);
+        }
+    }
+    Ok(result)
 }
 
 /// Rename a Drive file or folder in-place (does NOT move it).

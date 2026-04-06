@@ -230,6 +230,7 @@ fn toggle_track_changes(app: tauri::AppHandle, game_id: String, enabled: bool) -
 | `upload_game_logo` | `Result<(), String>` |
 | `clear_all_drive_data` | `Result<DashboardData, String>` |
 | `list_game_drive_files` | `Result<Vec<DriveFileItem>, String>` — `folder_id` param is optional; defaults to game root |
+| `list_game_drive_files_flat` | `Result<Vec<DriveFileFlatItem>, String>` — full recursive listing with relative paths |
 | `rename_game_drive_file` | `Result<(), String>` |
 | `move_game_drive_file` | `Result<(), String>` |
 | `delete_game_drive_file` | `Result<(), String>` |
@@ -278,6 +279,9 @@ export async function uploadGameLogo(gameId: string, logoSource: string): Promis
 export async function listGameDriveFiles(gameId: string, folderId?: string): Promise<DriveFileItem[]> {
   return invoke<DriveFileItem[]>("list_game_drive_files", { gameId, folderId });
 }
+export async function listGameDriveFilesFlat(gameId: string): Promise<DriveFileFlatItem[]> {
+  return invoke<DriveFileFlatItem[]>("list_game_drive_files_flat", { gameId });
+}
 export async function renameGameDriveFile(gameId: string, fileId: string, oldName: string, newName: string, isFolder: boolean): Promise<void> {
   return invoke("rename_game_drive_file", { gameId, fileId, oldName, newName, isFolder });
 }
@@ -313,9 +317,10 @@ export async function deleteVersionBackup(gameId: string, backupFolderId: string
 - `useToggleTrackChangesMutation()` — calls `toggleTrackChanges()`, directly sets dashboard cache.
 - `useToggleAutoSyncMutation()` — calls `toggleAutoSync()`, directly sets dashboard cache.
 - `useDriveFilesQuery(gameId, folderId, enabled?)` — lazy; only fetches when `enabled: true`. Key: `driveFilesFolderKey(gameId, folderId)`.
-- `useRenameDriveFileMutation()` — invalidates `driveFilesKey(gameId)` on success.
-- `useMoveDriveFileMutation()` — invalidates `driveFilesKey(gameId)` on success.
-- `useDeleteDriveFileMutation()` — invalidates `driveFilesKey(gameId)` on success.
+- `useDriveFilesFlatQuery(gameId, enabled?)` — lazy; fetches full recursive flat listing. Key: `driveFilesFlatKey(gameId)`. `staleTime: Infinity`.
+- `useRenameDriveFileMutation()` — invalidates `driveFilesKey(gameId)` **and `driveFilesFlatKey(gameId)`** on success.
+- `useMoveDriveFileMutation()` — invalidates `driveFilesKey(gameId)` **and `driveFilesFlatKey(gameId)`** on success.
+- `useDeleteDriveFileMutation()` — invalidates `driveFilesKey(gameId)` **and `driveFilesFlatKey(gameId)`** on success.
 - `useVersionBackupsQuery(gameId, enabled?)` — lazy. Key: `versionBackupsKey(gameId)`.
 - `useCreateVersionBackupMutation()` — invalidates `versionBackupsKey(gameId)` on success.
 - `useRestoreVersionBackupMutation()` — invalidates `DASHBOARD_KEY` + `driveFilesKey(gameId)` + **`VALIDATE_PATHS_KEY`** on success.
@@ -396,7 +401,10 @@ Frontend shows these items but disables action buttons. Backend commands **do no
 ### File Manager Commands
 
 #### `list_game_drive_files`
-Calls `gdrive::list_drive_items(app, game_folder_id)` and returns the flat list of items.
+Calls `gdrive::list_drive_items(app, game_folder_id)` and returns the flat list of items in the game root only.
+
+#### `list_game_drive_files_flat`
+Calls `gdrive::list_drive_items_recursive(app, &folder_id, "")` to walk the entire folder tree and returns `Vec<DriveFileFlatItem>` with each item's `relative_path` built from the folder hierarchy. Sub-folders appear as entries with `is_folder: true`. Used by `DriveFilesSection` to render the full tree in a single request.
 
 #### `rename_game_drive_file`
 1. Call `gdrive::rename_drive_item(app, file_id, new_name)`.
@@ -449,6 +457,7 @@ Calls `gdrive::list_drive_items(app, game_folder_id)` and returns the flat list 
 | Function | Purpose |
 |----------|---------|
 | `list_drive_items(app, folder_id)` | Returns `Vec<DriveFileItem>` for all items in a folder |
+| `list_drive_items_recursive(app, folder_id, prefix)` | Recursively walks folder tree; returns `Vec<DriveFileFlatItem>` with `relative_path` built from `prefix/item.name` |
 | `rename_drive_item(app, file_id, new_name)` | PATCH metadata (name only) |
 | `move_drive_file(app, file_id, new_parent_id, old_parent_id)` | PATCH with `addParents`/`removeParents` |
 | `copy_drive_file(app, file_id, parent_id)` | POST `/drive/v3/files/{id}/copy` — server-side, no bandwidth |
@@ -492,6 +501,36 @@ export interface DriveFileItem {
   size: number | null;
   modifiedTime: string | null;
   isFolder: boolean;
+}
+```
+
+### DriveFileFlatItem
+
+Returned by `list_game_drive_files_flat`. Contains a `relative_path` for every item in the recursive tree.
+
+```rust
+// models.rs
+pub struct DriveFileFlatItem {
+    pub id: String,
+    pub name: String,
+    pub relative_path: String,     // e.g. "subfolder/save.dat" — forward slashes
+    pub size: Option<u64>,
+    pub modified_time: Option<String>, // ISO 8601
+    pub is_folder: bool,
+    pub parent_folder_id: String,  // Drive folder ID of immediate parent
+}
+```
+
+TypeScript mirror:
+```ts
+export interface DriveFileFlatItem {
+  id: string;
+  name: string;
+  relativePath: string;       // e.g. "76561197960271872/Default_0.sav"
+  size: number | null;
+  modifiedTime: string | null;
+  isFolder: boolean;
+  parentFolderId: string;
 }
 ```
 

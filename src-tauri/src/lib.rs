@@ -12,9 +12,9 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 use models::{
-    AddGamePayload, AppSettings, AuthStatus, DashboardData, DriveFileItem, DriveVersionBackup,
-    GoogleUserInfo, OAuthCredentials, PathValidation, SaveInfo, SaveTokensPayload, SyncResult,
-    SyncStructureDiff, UpdateGamePayload, UpdateInfo,
+    AddGamePayload, AppSettings, AuthStatus, DashboardData, DriveFileFlatItem, DriveFileItem,
+    DriveVersionBackup, GoogleUserInfo, OAuthCredentials, PathValidation, SaveInfo,
+    SaveTokensPayload, SyncResult, SyncStructureDiff, UpdateGamePayload, UpdateInfo,
 };
 
 #[tauri::command]
@@ -201,6 +201,16 @@ async fn upload_game_logo(
 }
 
 // ── Drive file management commands ────────────────────────
+
+#[tauri::command]
+async fn list_game_drive_files_flat(
+    app: tauri::AppHandle,
+    game_id: String,
+) -> Result<Vec<DriveFileFlatItem>, String> {
+    tokio::task::spawn_blocking(move || drive_mgmt::list_game_drive_files_flat(&app, &game_id))
+        .await
+        .map_err(|e| format!("List flat drive files task failed: {e}"))?
+}
 
 #[tauri::command]
 async fn list_game_drive_files(
@@ -508,6 +518,7 @@ pub fn run() {
             get_browse_default_path,
             expand_save_path,
             upload_game_logo,
+            list_game_drive_files_flat,
             list_game_drive_files,
             rename_game_drive_file,
             move_game_drive_file,

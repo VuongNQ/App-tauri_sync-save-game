@@ -3,7 +3,7 @@ import { Link } from "react-router";
 
 import { useRemoveGameMutation } from "../queries";
 import type { GameEntry } from "../types/dashboard";
-import { toImgSrc } from "../utils";
+import { toImgSrc, formatBytes } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
 import { CARD, MUTED, SEC_HDR, SOURCE_BADGE, SOFT_BADGE } from "./styles";
 
@@ -113,8 +113,11 @@ export function GamesList({ games, invalidGameIds }: Props) {
                     )}
                     {g.description && (
                       <p className={`${MUTED} m-0 text-xs truncate`}>{g.description}</p>
-                    )}
-                  </div>
+                    )}                    {g.cloudStorageBytes != null && (
+                      <p className="m-0 text-xs text-[#7dc9ff] flex items-center gap-1">
+                        <span>☁</span> {formatBytes(g.cloudStorageBytes)} on Drive
+                      </p>
+                    )}                  </div>
                 </Link>
 
                 {/* Remove button */}

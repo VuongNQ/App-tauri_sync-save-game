@@ -33,3 +33,14 @@ export function formatLocalTime(iso: string | null | undefined): string {
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleString();
 }
+
+/** Format a byte count into a human-readable string (B, KB, MB, GB). */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null) return "—";
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log2(bytes) / 10);
+  const clamped = Math.min(i, units.length - 1);
+  const value = bytes / Math.pow(1024, clamped);
+  return `${value % 1 === 0 ? value : value.toFixed(1)} ${units[clamped]}`;
+}

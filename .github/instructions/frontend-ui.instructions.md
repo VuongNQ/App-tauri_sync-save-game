@@ -227,6 +227,8 @@ export const SAVE_INFO_KEY = ["save-info"] as const;
 export const driveFilesKey = (gameId: string) => ["drive-files", gameId] as const;
 /** Specific key for a given folder inside a game's Drive folder tree. */
 export const driveFilesFolderKey = (gameId: string, folderId: string) => ["drive-files", gameId, folderId] as const;
+/** Full recursive flat listing of all files/folders in a game's Drive folder tree. */
+export const driveFilesFlatKey = (gameId: string) => ["drive-files-flat", gameId] as const;
 export const versionBackupsKey = (gameId: string) => ["version-backups", gameId] as const;
 ```
 
@@ -497,12 +499,15 @@ Save paths in `game.savePath` may contain Windows env-var tokens (`%LOCALAPPDATA
 **Props**: `{ gameId: string; gameFolderId: string }`  
 **Used in**: `GameDetailPage` — only rendered when `game.gdriveFolderId !== null`.
 
-- Collapsible section; `useDriveFilesQuery(gameId, gameFolderId, isOpen)` — lazy fetch using `driveFilesFolderKey(gameId, gameFolderId)`, only runs when open.
-- Rows list every file/folder in the game's Drive folder root.
-- **Protected items** (`.sync-meta.json`, `backups/`): displayed but actions (rename/move/delete) are disabled; show a `"protected"` badge.
-- **Rename**: pencil button → inline input replaces name text; `Enter` commits, `Escape` cancels.
-- **Move**: folder icon button → `MoveFileModal` with radio list of available subfolders within the game folder; includes "game root" option.
-- **Delete**: trash icon → `ConfirmModal` before calling `useDeleteDriveFileMutation`.
+- Collapsible section; `useDriveFilesFlatQuery(gameId, isOpen)` — **single recursive fetch** when the section is first opened. Key: `driveFilesFlatKey(gameId)`. `staleTime: Infinity`.
+- `buildDriveTree(items: DriveFileFlatItem[]): DriveTreeItem[]` — client-side tree builder that splits each `relativePath` on `/` to produce a typed union:
+  - `DriveTreeLeaf { kind: "file", id, name, relativePath, size, modifiedTime, parentFolderId }`
+  - `DriveTreeDir { kind: "folder", id | null, name, relativePath, children, totalSize, parentFolderId | null }`
+- **Protected items** (`.sync-meta.json`, `backups` and anything under `backups/`): displayed but actions (rename/move/delete) are disabled; show a `"protected"` badge. Check via `isProtected(relativePath)`.
+- **Rename**: pencil button ✏️ → inline input replaces name text; `Enter` commits, `Escape` cancels.
+- **Move**: folder icon button 📂 → `MoveFileModal` with radio list of **top-level subfolders** (items where `isFolder && !relativePath.includes("/")` and not protected); includes “game root” option. Receives `DriveFileFlatItem[]`.
+- **Delete**: trash icon 🗑️ → `ConfirmModal` before calling `useDeleteDriveFileMutation`.
+- Compact list rows inside a single `<ul>` with `border-b` separators: folder rows show `▼/►` toggle + blue `name/` + size badge; file rows show `↳` + name + size + formatted date.
 - Move warning: files moved out of game root are removed from `.sync-meta.json` and will be re-uploaded on next sync.
 
 ### VersionBackupsSection
@@ -531,6 +536,24 @@ Both sections are placed **between** the Sync actions card and the Danger Zone c
 )}
 {/* Danger zone */}
 <div className={CARD}> ...
+```
+
+### Local Save Info (`SaveTreeNode`)
+
+`SaveTreeNode` is a co-located component inside `GameDetailPage.tsx`. File-leaf nodes detect nested files by checking whether `node.relativePath` contains `/` or `\\`. When nested:
+
+```tsx
+const hasSubdir = node.relativePath.includes("/") || node.relativePath.includes("\\\\");
+// ...
+<span className="text-[#c7d3f7] truncate block">{node.name}</span>
+{hasSubdir && (
+  <span className="text-[0.65rem] text-[#9aa8c7]/60 truncate block" title={node.relativePath}>
+    {node.relativePath.replace(/\\\\/g, "/")}
+  </span>
+)}
+```
+
+This shows the portable relative path (forward-slash normalised) as small muted secondary text below the filename so users can identify which subdirectory a save file belongs to.
 ```
 
 ---

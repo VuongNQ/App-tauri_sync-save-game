@@ -5,6 +5,7 @@ import type {
   AppSettings,
   AuthStatus,
   DashboardData,
+  DriveFileFlatItem,
   DriveFileItem,
   DriveVersionBackup,
   GameEntry,
@@ -162,6 +163,11 @@ export async function uploadGameLogo(
 /** List all items (files + folders) in the game's Drive folder, or a subfolder when `folderId` is given. */
 export async function listGameDriveFiles(gameId: string, folderId?: string): Promise<DriveFileItem[]> {
   return invoke<DriveFileItem[]>("list_game_drive_files", { gameId, folderId });
+}
+
+/** Recursively list every item in the game's Drive folder with relative paths (flat list, full tree). */
+export async function listGameDriveFilesFlat(gameId: string): Promise<DriveFileFlatItem[]> {
+  return invoke<DriveFileFlatItem[]>("list_game_drive_files_flat", { gameId });
 }
 
 /** Rename a Drive file or folder. Updates .sync-meta.json for regular files. */

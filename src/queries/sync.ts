@@ -7,6 +7,7 @@ import {
   deleteVersionBackup,
   getSaveInfo,
   listGameDriveFiles,
+  listGameDriveFilesFlat,
   listVersionBackups,
   moveGameDriveFile,
   pushToCloud,
@@ -19,7 +20,7 @@ import {
   toggleTrackChanges,
 } from "../services/tauri";
 import type { DashboardData } from "../types/dashboard";
-import { DASHBOARD_KEY, VALIDATE_PATHS_KEY, driveFilesFolderKey, driveFilesKey, versionBackupsKey } from "./keys";
+import { DASHBOARD_KEY, VALIDATE_PATHS_KEY, driveFilesKey, driveFilesFlatKey, driveFilesFolderKey, versionBackupsKey } from "./keys";
 
 function useSetDashboardCache() {
   const queryClient = useQueryClient();
@@ -104,6 +105,16 @@ export function useDriveFilesQuery(gameId: string, folderId: string, enabled = t
   });
 }
 
+/** Recursively list all items in the game's Drive folder as a flat list with relative paths. */
+export function useDriveFilesFlatQuery(gameId: string, enabled = true) {
+  return useQuery({
+    queryKey: driveFilesFlatKey(gameId),
+    queryFn: () => listGameDriveFilesFlat(gameId),
+    enabled,
+    staleTime: Infinity,
+  });
+}
+
 export function useRenameDriveFileMutation() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -120,8 +131,10 @@ export function useRenameDriveFileMutation() {
       newName: string;
       isFolder: boolean;
     }) => renameGameDriveFile(gameId, fileId, oldName, newName, isFolder),
-    onSuccess: (_data, { gameId }) =>
-      queryClient.invalidateQueries({ queryKey: driveFilesKey(gameId) }),
+    onSuccess: (_data, { gameId }) => {
+      queryClient.invalidateQueries({ queryKey: driveFilesKey(gameId) });
+      queryClient.invalidateQueries({ queryKey: driveFilesFlatKey(gameId) });
+    },
   });
 }
 
@@ -141,8 +154,10 @@ export function useMoveDriveFileMutation() {
       newParentId: string;
       oldParentId: string;
     }) => moveGameDriveFile(gameId, fileId, fileName, newParentId, oldParentId),
-    onSuccess: (_data, { gameId }) =>
-      queryClient.invalidateQueries({ queryKey: driveFilesKey(gameId) }),
+    onSuccess: (_data, { gameId }) => {
+      queryClient.invalidateQueries({ queryKey: driveFilesKey(gameId) });
+      queryClient.invalidateQueries({ queryKey: driveFilesFlatKey(gameId) });
+    },
   });
 }
 
@@ -160,8 +175,10 @@ export function useDeleteDriveFileMutation() {
       fileName: string;
       isFolder: boolean;
     }) => deleteGameDriveFile(gameId, fileId, fileName, isFolder),
-    onSuccess: (_data, { gameId }) =>
-      queryClient.invalidateQueries({ queryKey: driveFilesKey(gameId) }),
+    onSuccess: (_data, { gameId }) => {
+      queryClient.invalidateQueries({ queryKey: driveFilesKey(gameId) });
+      queryClient.invalidateQueries({ queryKey: driveFilesFlatKey(gameId) });
+    },
   });
 }
 
