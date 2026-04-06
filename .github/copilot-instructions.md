@@ -108,7 +108,7 @@ For sync-specific commands, a `SyncResult` type may be returned alongside or ins
 ```rust
 tauri::generate_handler![
     // Dashboard
-    load_dashboard, add_manual_game, update_game, remove_game,
+    load_dashboard, add_manual_game, update_game, remove_game, clear_all_drive_data,
     // Auth
     check_auth_status, save_auth_tokens, get_oauth_credentials, logout, get_google_user_info,
     // Settings
@@ -120,6 +120,11 @@ tauri::generate_handler![
     toggle_track_changes, toggle_auto_sync,
     // Validation
     validate_save_paths, get_browse_default_path, expand_save_path,
+    // Logo
+    upload_game_logo,
+    // Drive file management
+    list_game_drive_files, rename_game_drive_file, move_game_drive_file, delete_game_drive_file,
+    create_version_backup, list_version_backups, restore_version_backup, delete_version_backup,
 ]
 ```
 
@@ -413,6 +418,7 @@ The Rust backend emits these events that the frontend can listen to:
 | Event | Payload | Emitted by |
 |---|---|---|
 | `"auth-status-changed"` | — | `gdrive_auth.rs` on login/logout |
+| `"library-restored"` | — | `lib.rs` when first-login cloud library restore succeeds |
 | `"sync-started"` | `{ gameId }` | `sync.rs` before sync begins |
 | `"sync-completed"` | `SyncResult` | `sync.rs` after successful sync |
 | `"sync-error"` | `{ gameId, error }` | `sync.rs` on sync failure |

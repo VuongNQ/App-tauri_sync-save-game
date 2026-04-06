@@ -65,7 +65,7 @@ appDataFolder/
       <save files...>            ← flat list; SyncMeta keys are relative paths (forward slashes)
       .sync-meta.json            ← sync metadata (timestamps + Drive file IDs)
       backups/                   ← created on first backup; managed by drive_mgmt.rs
-        {ISO-ts}_{label}/        ← one subfolder per snapshot (ensure_subfolder)
+        {ISO-ts} — {label}/  ← one subfolder per snapshot (ensure_subfolder)
           <copied save files>    ← server-side copies of non-meta save files
           .backup-meta.json      ← BackupMeta JSON (created_time, label, stats)
 ```
@@ -270,9 +270,13 @@ export async function pushToCloud(gameId: string): Promise<SyncResult> {
 export async function toggleTrackChanges(gameId: string, enabled: boolean): Promise<DashboardData> {
   return invoke<DashboardData>("toggle_track_changes", { gameId, enabled });
 }
+// Logo upload (validates ≤ 3 MB; uploads to game's Drive folder as logo.<ext>):
+export async function uploadGameLogo(gameId: string, logoSource: string): Promise<void> {
+  return invoke<void>("upload_game_logo", { gameId, logoSource });
+}
 // Drive file manager:
-export async function listGameDriveFiles(gameId: string): Promise<DriveFileItem[]> {
-  return invoke<DriveFileItem[]>("list_game_drive_files", { gameId });
+export async function listGameDriveFiles(gameId: string, folderId?: string): Promise<DriveFileItem[]> {
+  return invoke<DriveFileItem[]>("list_game_drive_files", { gameId, folderId });
 }
 export async function renameGameDriveFile(gameId: string, fileId: string, oldName: string, newName: string, isFolder: boolean): Promise<void> {
   return invoke("rename_game_drive_file", { gameId, fileId, oldName, newName, isFolder });
@@ -497,7 +501,7 @@ export interface DriveFileItem {
 // models.rs
 pub struct DriveVersionBackup {
     pub id: String,          // Drive folder ID of the backup
-    pub name: String,        // folder name: "{ISO-ts}" or "{ISO-ts}_{label}"
+    pub name: String,        // folder name: "{ISO-ts}" or "{ISO-ts} — {label}"
     pub created_time: String,// ISO 8601
     pub total_files: u32,
     pub total_size: u64,
