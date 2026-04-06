@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { clearAllDriveData, getSettings, updateSettings } from "../services/tauri";
+import { checkForUpdate, clearAllDriveData, downloadAndInstallUpdate, getSettings, updateSettings } from "../services/tauri";
 import type { AppSettings, DashboardData } from "../types/dashboard";
 import { DASHBOARD_KEY, SETTINGS_KEY } from "./keys";
 
@@ -27,4 +27,12 @@ export function useClearAllDriveMutation() {
     onSuccess: (data: DashboardData) =>
       queryClient.setQueryData<DashboardData>(DASHBOARD_KEY, data),
   });
+}
+
+export function useCheckForUpdateMutation() {
+  return useMutation({ mutationFn: checkForUpdate });
+}
+
+export function useInstallUpdateMutation() {
+  return useMutation({ mutationFn: downloadAndInstallUpdate });
 }

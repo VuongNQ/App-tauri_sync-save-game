@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+import { listen } from "@tauri-apps/api/event";
 
 import { useClearAllDriveMutation, useGoogleUserInfoQuery, useLogoutMutation } from "../queries";
-import { useSettingsQuery, useUpdateSettingsMutation } from "../queries/settings";
+import { useCheckForUpdateMutation, useInstallUpdateMutation, useSettingsQuery, useUpdateSettingsMutation } from "../queries/settings";
 import { ConfirmModal } from "../components/ConfirmModal";
 import {
   BTN,
@@ -14,7 +16,7 @@ import {
   TOGGLE_THUMB,
   TOGGLE_THUMB_ON,
 } from "../components/styles";
-import type { AppSettings } from "../types/dashboard";
+import type { AppSettings, UpdateInfo } from "../types/dashboard";
 
 export function SettingsPage() {
   const { data: userInfo, isLoading, error, refetch } = useGoogleUserInfoQuery();
@@ -23,6 +25,7 @@ export function SettingsPage() {
   const updateSettings = useUpdateSettingsMutation();
   const clearAllDrive = useClearAllDriveMutation();
   const [showClearModal, setShowClearModal] = useState(false);
+  const { updateInfo, progress, checkMutation, installMutation, handleCheck, handleInstall } = useAppUpdater();
 
   const toggleSetting = (key: keyof AppSettings, value: boolean) => {
     if (!settings) return;
@@ -160,6 +163,101 @@ export function SettingsPage() {
         )}
       </div>
 
+      {/* App Updates */}
+      <div className={CARD}>
+        <h3 className="m-0 mb-4 font-semibold">App Updates</h3>
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="m-0 text-[0.92rem] text-[#c7d3f7]">Current version</p>
+              {updateInfo && (
+                <p className={`m-0 mt-0.5 font-mono text-xs ${MUTED}`}>
+                  v{updateInfo.currentVersion}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              className={`${BTN} rounded-xl bg-white/10 px-4 py-2 text-sm font-medium text-[#eef4ff] hover:bg-white/15 disabled:opacity-50`}
+              disabled={checkMutation.isPending || installMutation.isPending}
+              onClick={handleCheck}
+            >
+              {checkMutation.isPending ? "Checking…" : "Check for Updates"}
+            </button>
+          </div>
+
+          {updateInfo?.available && !installMutation.isPending && !installMutation.isSuccess && (
+            <div className="rounded-xl border border-[rgba(140,165,241,0.2)] bg-[rgba(99,125,255,0.08)] p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="m-0 text-sm font-semibold text-[#9effc3]">
+                    v{updateInfo.version} is available
+                  </p>
+                  {updateInfo.body && (
+                    <p className={`m-0 mt-1 whitespace-pre-wrap text-xs ${MUTED}`}>
+                      {updateInfo.body}
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className={`${BTN} shrink-0 rounded-xl bg-indigo-500/20 px-4 py-2 text-sm font-medium text-indigo-300 hover:bg-indigo-500/30`}
+                  onClick={handleInstall}
+                >
+                  Download &amp; Install
+                </button>
+              </div>
+            </div>
+          )}
+
+          {installMutation.isPending && (
+            <div>
+              <p className={`m-0 mb-1 text-sm ${MUTED}`}>
+                Downloading update…
+                {progress && progress.total > 0
+                  ? ` ${Math.round((progress.downloaded / progress.total) * 100)}%`
+                  : ""}
+              </p>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-indigo-400 transition-all duration-300"
+                  style={{
+                    width:
+                      progress && progress.total > 0
+                        ? `${Math.round((progress.downloaded / progress.total) * 100)}%`
+                        : "10%",
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {installMutation.isSuccess && (
+            <p className="m-0 text-sm text-[#9effc3]">Restarting to apply update…</p>
+          )}
+
+          {!checkMutation.isPending && updateInfo && !updateInfo.available && (
+            <p className={`m-0 text-sm ${MUTED}`}>You&apos;re up to date.</p>
+          )}
+
+          {checkMutation.isError && (
+            <p className="m-0 text-sm text-[#ffd5d5]">
+              {checkMutation.error instanceof Error
+                ? checkMutation.error.message
+                : "Failed to check for updates."}
+            </p>
+          )}
+
+          {installMutation.isError && (
+            <p className="m-0 text-sm text-[#ffd5d5]">
+              {installMutation.error instanceof Error
+                ? installMutation.error.message
+                : "Failed to download update."}
+            </p>
+          )}
+        </div>
+      </div>
+
       {/* Danger Zone */}
       <div className={CARD}>
         <h3 className="m-0 mb-1 font-semibold text-[#ff9e9e]">Danger zone</h3>
@@ -230,4 +328,48 @@ function ToggleRow({ label, description, checked, onChange }: ToggleRowProps) {
       </button>
     </div>
   );
+}
+
+// ── useAppUpdater (same-file hook) ────────────────────────
+
+interface DownloadProgress {
+  downloaded: number;
+  total: number;
+}
+
+function useAppUpdater() {
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [progress, setProgress] = useState<DownloadProgress | null>(null);
+
+  const checkMutation = useCheckForUpdateMutation();
+  const installMutation = useInstallUpdateMutation();
+
+  const handleCheck = () => {
+    checkMutation.mutate(undefined, {
+      onSuccess: (data) => setUpdateInfo(data),
+    });
+  };
+
+  const handleInstall = () => {
+    setProgress(null);
+    installMutation.mutate();
+  };
+
+  useEffect(() => {
+    if (!installMutation.isPending) return;
+
+    let unlisten: (() => void) | undefined;
+
+    listen<DownloadProgress>("update-download-progress", (event) => {
+      setProgress(event.payload);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, [installMutation.isPending]);
+
+  return { updateInfo, progress, checkMutation, installMutation, handleCheck, handleInstall };
 }
