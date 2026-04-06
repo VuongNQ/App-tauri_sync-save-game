@@ -20,11 +20,17 @@ import type { AppSettings, UpdateInfo } from "../types/dashboard";
 
 export function SettingsPage() {
   const { data: userInfo, isLoading, error, refetch } = useGoogleUserInfoQuery();
+
   const logoutMutation = useLogoutMutation();
+
   const { data: settings } = useSettingsQuery();
+
   const updateSettings = useUpdateSettingsMutation();
+
   const clearAllDrive = useClearAllDriveMutation();
+
   const [showClearModal, setShowClearModal] = useState(false);
+
   const { updateInfo, progress, checkMutation, installMutation, handleCheck, handleInstall } = useAppUpdater();
 
   const toggleSetting = (key: keyof AppSettings, value: boolean) => {
@@ -236,24 +242,16 @@ export function SettingsPage() {
             <p className="m-0 text-sm text-[#9effc3]">Restarting to apply update…</p>
           )}
 
-          {!checkMutation.isPending && updateInfo && !updateInfo.available && (
+          {!checkMutation.isPending && updateInfo && !updateInfo.available && !updateInfo.error && (
             <p className={`m-0 text-sm ${MUTED}`}>You&apos;re up to date.</p>
           )}
 
-          {checkMutation.isError && (
-            <p className="m-0 text-sm text-[#ffd5d5]">
-              {checkMutation.error instanceof Error
-                ? checkMutation.error.message
-                : "Failed to check for updates."}
-            </p>
+          {updateInfo?.error && (
+            <p className="m-0 text-sm text-[#ffd5d5]">{updateInfo.error}</p>
           )}
 
           {installMutation.isError && (
-            <p className="m-0 text-sm text-[#ffd5d5]">
-              {installMutation.error instanceof Error
-                ? installMutation.error.message
-                : "Failed to download update."}
-            </p>
+            <p className="m-0 text-sm text-[#ffd5d5]">Download failed. Please try again.</p>
           )}
         </div>
       </div>

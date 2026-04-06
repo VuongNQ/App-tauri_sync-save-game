@@ -407,27 +407,58 @@ fn toggle_auto_sync(
 // ── Updater commands ──────────────────────────────────────
 
 /// Check GitHub Releases for a newer version of the app.
-/// Returns `UpdateInfo` with `available: true` and `version` if an update exists.
+/// Always returns Ok — errors are reported as a soft `error` field inside UpdateInfo.
 #[tauri::command]
 async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
     use tauri_plugin_updater::UpdaterExt;
 
     let current_version = app.package_info().version.to_string();
-    let updater = app.updater().map_err(|e| e.to_string())?;
 
-    match updater.check().await.map_err(|e| e.to_string())? {
-        Some(update) => Ok(UpdateInfo {
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            return Ok(UpdateInfo {
+                available: false,
+                version: None,
+                current_version,
+                body: None,
+                error: Some(format!("Updater not configured: {e}")),
+            });
+        }
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => Ok(UpdateInfo {
             available: true,
             version: Some(update.version),
             current_version,
             body: update.body,
+            error: None,
         }),
-        None => Ok(UpdateInfo {
+        Ok(None) => Ok(UpdateInfo {
             available: false,
             version: None,
             current_version,
             body: None,
+            error: None,
         }),
+        Err(e) => {
+            let msg = e.to_string();
+            // Distinguish between "no release published yet" (404) and true errors
+            let friendly = if msg.contains("404") || msg.contains("Not Found") || msg.contains("not found") {
+                "No update release found. Push to main and publish a GitHub Release to enable updates.".to_string()
+            } else {
+                format!("Could not reach update server: {msg}")
+            };
+            eprintln!("[updater] Check failed: {msg}");
+            Ok(UpdateInfo {
+                available: false,
+                version: None,
+                current_version,
+                body: None,
+                error: Some(friendly),
+            })
+        }
     }
 }
 
