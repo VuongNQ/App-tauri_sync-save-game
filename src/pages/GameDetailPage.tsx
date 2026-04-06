@@ -11,7 +11,7 @@ import {
   useRestoreFromCloudMutation,
   usePushToCloudMutation,
 } from "../queries";
-import type { SaveInfo, SyncStructureDiff } from "../types/dashboard";
+import type { SaveFileInfo, SaveInfo, SyncStructureDiff } from "../types/dashboard";
 import { msg, formatLocalTime, toImgSrc } from "../utils";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DriveFilesSection } from "../components/DriveFilesSection";
@@ -133,6 +133,13 @@ export function GameDetailPage() {
             {
               label: "Google Drive folder",
               value: game.gdriveFolderId ?? "Not synced",
+            },
+            {
+              label: "Drive storage used",
+              value:
+                game.cloudStorageBytes != null
+                  ? formatBytes(game.cloudStorageBytes)
+                  : "Never synced",
             },
           ].map(({ label, value }) => (
             <div
@@ -326,11 +333,158 @@ export function GameDetailPage() {
 
 // ── Co-located components ─────────────────────────────────────────────────────
 
+// ── Save-file tree ────────────────────────────────────────
+
+type SaveTreeLeaf = {
+  kind: "file";
+  name: string;
+  relativePath: string;
+  size: number;
+};
+
+type SaveTreeDir = {
+  kind: "folder";
+  name: string;
+  children: SaveTreeItem[];
+  totalSize: number;
+};
+
+type SaveTreeItem = SaveTreeLeaf | SaveTreeDir;
+
+function buildSaveTree(files: SaveFileInfo[]): SaveTreeItem[] {
+  function insert(
+    nodes: SaveTreeItem[],
+    parts: string[],
+    file: SaveFileInfo,
+  ): void {
+    if (parts.length === 1) {
+      nodes.push({
+        kind: "file",
+        name: parts[0],
+        relativePath: file.relativePath,
+        size: file.size,
+      });
+      return;
+    }
+    const dirName = parts[0];
+    let dir = nodes.find(
+      (n): n is SaveTreeDir => n.kind === "folder" && n.name === dirName,
+    );
+    if (!dir) {
+      dir = { kind: "folder", name: dirName, children: [], totalSize: 0 };
+      nodes.push(dir);
+    }
+    dir.totalSize += file.size;
+    insert(dir.children, parts.slice(1), file);
+  }
+
+  const roots: SaveTreeItem[] = [];
+  for (const file of files) {
+    const parts = file.relativePath
+      .replace(/\\/g, "/")
+      .split("/")
+      .filter(Boolean);
+    insert(roots, parts, file);
+  }
+  return roots;
+}
+
+function SaveTreeNode({
+  node,
+  depth,
+}: {
+  node: SaveTreeItem;
+  depth: number;
+}) {
+  const [open, setOpen] = useState(true);
+  const indent = depth * 14;
+
+  if (node.kind === "file") {
+    return (
+      <li
+        className="flex items-center justify-between gap-2 text-xs py-1.25 pr-2 rounded-lg hover:bg-white/4"
+        style={{ paddingLeft: `${6 + indent}px` }}
+      >
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[#9aa8c7] shrink-0 select-none">↳</span>
+          <span className="text-[#c7d3f7] truncate" title={node.relativePath}>
+            {node.name}
+          </span>
+        </div>
+        <span className="shrink-0 text-[0.72rem] text-[#9aa8c7] bg-white/6 px-1.75 py-0.5 rounded-full whitespace-nowrap">
+          {formatBytes(node.size)}
+        </span>
+      </li>
+    );
+  }
+
+  return (
+    <>
+      <li
+        className="flex items-center justify-between gap-2 text-xs py-1.25 pr-2 rounded-lg cursor-pointer hover:bg-white/6 select-none"
+        style={{ paddingLeft: `${6 + indent}px` }}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[#9aa8c7] shrink-0 w-3 text-center text-[0.6rem]">
+            {open ? "▼" : "►"}
+          </span>
+          <span className="text-[#7dc9ff] font-medium truncate">
+            {node.name}/
+          </span>
+        </div>
+        <span className="shrink-0 text-[0.72rem] text-[#9aa8c7] bg-white/6 px-1.75 py-0.5 rounded-full whitespace-nowrap">
+          {formatBytes(node.totalSize)}
+        </span>
+      </li>
+      {open &&
+        node.children.map((child, i) => (
+          <SaveTreeNode key={i} node={child} depth={depth + 1} />
+        ))}
+    </>
+  );
+}
+
+function SaveFolderTree({ info }: { info: SaveInfo }) {
+  const [open, setOpen] = useState(true);
+  const tree = buildSaveTree(info.files);
+
+  return (
+    <ul className="mt-3 list-none p-0 text-xs rounded-[14px] bg-[rgba(255,255,255,0.02)] border border-[rgba(165,185,255,0.06)] overflow-hidden">
+      {/* Root save-path row */}
+      <li
+        className="flex items-center justify-between gap-2 px-2 py-1.75 cursor-pointer hover:bg-white/5 select-none border-b border-[rgba(165,185,255,0.06)]"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[#9aa8c7] shrink-0 w-3 text-center text-[0.6rem]">
+            {open ? "▼" : "►"}
+          </span>
+          <span className="text-[#7dc9ff] font-medium truncate" title={info.savePath}>
+            {info.savePath}
+          </span>
+        </div>
+        <span className="shrink-0 text-[0.72rem] text-[#9aa8c7] bg-white/6 px-1.75 py-0.5 rounded-full whitespace-nowrap">
+          {formatBytes(info.totalSize)}
+        </span>
+      </li>
+      {/* Tree children */}
+      {open && (
+        <div className="py-1 max-h-65 overflow-y-auto">
+          {tree.map((node, i) => (
+            <SaveTreeNode key={i} node={node} depth={1} />
+          ))}
+        </div>
+      )}
+    </ul>
+  );
+}
+
 function SaveInfoPanel({ info }: { info: SaveInfo }) {
   return (
     <div className="mt-4 p-4 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]">
       <p className={EYEBROW}>Local save info</p>
-      <dl className="grid gap-2 grid-cols-2 m-0 max-[720px]:grid-cols-1">
+      <dl className="grid gap-2 grid-cols-3 m-0 max-[720px]:grid-cols-1">
         <div>
           <dt className="text-[#c7d3f7] text-sm">Total files</dt>
           <dd className={`${MUTED} m-0`}>{info.totalFiles}</dd>
@@ -343,31 +497,8 @@ function SaveInfoPanel({ info }: { info: SaveInfo }) {
           <dt className="text-[#c7d3f7] text-sm">Last modified</dt>
           <dd className={`${MUTED} m-0`}>{info.lastModified ?? "N/A"}</dd>
         </div>
-        <div>
-          <dt className="text-[#c7d3f7] text-sm">Save path</dt>
-          <dd className={`${MUTED} m-0 break-all text-xs`}>{info.savePath}</dd>
-        </div>
       </dl>
-      {info.files.length > 0 && (
-        <details className="mt-3">
-          <summary className="cursor-pointer text-sm text-[#7dc9ff]">
-            Show files ({info.files.length})
-          </summary>
-          <ul className="mt-2 list-none p-0 grid gap-1 max-h-[240px] overflow-y-auto">
-            {info.files.map((f) => (
-              <li
-                key={f.relativePath}
-                className="flex items-center justify-between gap-2 text-xs px-2 py-1 rounded-lg bg-[rgba(255,255,255,0.03)]"
-              >
-                <span className="text-[#c7d3f7] truncate">
-                  {f.relativePath}
-                </span>
-                <span className={MUTED}>{formatBytes(f.size)}</span>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+      {info.files.length > 0 && <SaveFolderTree info={info} />}
     </div>
   );
 }
