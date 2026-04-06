@@ -65,6 +65,18 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      - name: Debug Secret Visibility
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            Write-Error "Error: TAURI_SIGNING_PRIVATE_KEY is empty or not set"
+            exit 1
+          } else {
+            Write-Host "TAURI_SIGNING_PRIVATE_KEY is set"
+          }
+
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
         env:
