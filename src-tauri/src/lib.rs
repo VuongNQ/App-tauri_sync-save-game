@@ -14,7 +14,7 @@ use tauri::Manager;
 use models::{
     AddGamePayload, AppSettings, AuthStatus, DashboardData, DriveFileItem, DriveVersionBackup,
     GoogleUserInfo, OAuthCredentials, PathValidation, SaveInfo, SaveTokensPayload, SyncResult,
-    SyncStructureDiff, UpdateGamePayload,
+    SyncStructureDiff, UpdateGamePayload, UpdateInfo,
 };
 
 #[tauri::command]
@@ -394,12 +394,73 @@ fn toggle_auto_sync(
     Ok(DashboardData { games: state.games })
 }
 
+// ── Updater commands ──────────────────────────────────────
+
+/// Check GitHub Releases for a newer version of the app.
+/// Returns `UpdateInfo` with `available: true` and `version` if an update exists.
+#[tauri::command]
+async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let current_version = app.package_info().version.to_string();
+    let updater = app.updater().map_err(|e| e.to_string())?;
+
+    match updater.check().await.map_err(|e| e.to_string())? {
+        Some(update) => Ok(UpdateInfo {
+            available: true,
+            version: Some(update.version),
+            current_version,
+            body: update.body,
+        }),
+        None => Ok(UpdateInfo {
+            available: false,
+            version: None,
+            current_version,
+            body: None,
+        }),
+    }
+}
+
+/// Download the latest update from GitHub Releases and install it.
+/// Emits `update-download-progress { downloaded: u64, total: u64 }` events during download.
+/// The app restarts automatically once installation completes.
+#[tauri::command]
+async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+        return Err("No update available".to_string());
+    };
+
+    let app_clone = app.clone();
+    let mut downloaded: u64 = 0;
+
+    update
+        .download_and_install(
+            move |chunk_length, total| {
+                downloaded += chunk_length as u64;
+                let _ = tauri::Emitter::emit(
+                    &app_clone,
+                    "update-download-progress",
+                    serde_json::json!({ "downloaded": downloaded, "total": total.unwrap_or(0) }),
+                );
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_google_auth::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // Initialize the WatcherManager as managed state
             let manager = watcher::WatcherManager::new(app.handle().clone());
@@ -455,6 +516,8 @@ pub fn run() {
             list_version_backups,
             restore_version_backup,
             delete_version_backup,
+            check_for_update,
+            download_and_install_update,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

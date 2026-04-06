@@ -221,8 +221,12 @@ export const AUTH_STATUS_KEY = ["auth-status"] as const;
 export const VALIDATE_PATHS_KEY = ["validate-paths"] as const;
 export const SETTINGS_KEY = ["settings"] as const;
 export const GOOGLE_USER_INFO_KEY = ["google-user-info"] as const;
+export const SAVE_INFO_KEY = ["save-info"] as const;
 // Per-game dynamic keys — factory functions:
+/** Prefix key — use for invalidating all cached folder queries of a game. */
 export const driveFilesKey = (gameId: string) => ["drive-files", gameId] as const;
+/** Specific key for a given folder inside a game's Drive folder tree. */
+export const driveFilesFolderKey = (gameId: string, folderId: string) => ["drive-files", gameId, folderId] as const;
 export const versionBackupsKey = (gameId: string) => ["version-backups", gameId] as const;
 ```
 
@@ -287,7 +291,7 @@ export function useRestoreVersionBackupMutation() {
 | Pattern | Example |
 |---|---|
 | Read: `use{Feature}Query` | `useDashboardQuery`, `useSettingsQuery` |
-| Write: `use{Feature}Mutation` | `useAddGameMutation`, `useSyncGameMutation` |
+| Write: `use{Feature}Mutation` | `useAddGameMutation`, `useSyncGameMutation`, `useGetSaveInfoMutation` |
 
 ---
 
@@ -302,12 +306,14 @@ export interface GameEntry {
   id: string;
   name: string;
   description: string | null;       // null, not undefined (Rust Option<T>)
+  thumbnail: string | null;         // local file path or remote URL for logo
+  source: GameSource;               // "manual" | "emulator"
   savePath: string | null;
   trackChanges: boolean;
   autoSync: boolean;
   lastLocalModified: string | null; // ISO 8601
   lastCloudModified: string | null;
-  gdriveFolder: string | null;
+  gdriveFolderId: string | null;
   cloudStorageBytes: number | null; // total bytes synced to Drive; null = never synced
 }
 
@@ -429,7 +435,21 @@ function useAuthStatusCallbacks() {
     const unlistenPromise = listen<AuthStatus>("auth-status-changed", ({ payload }) => {
       queryClient.setQueryData<AuthStatus>(AUTH_STATUS_KEY, payload);
     });
-    return () => { void unlistenPromise.then(fn => fn()); };
+    // After first-login cloud restore, refresh the game library.
+    const unlistenRestorePromise = listen("library-restored", () => {
+      void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
+    });
+    // Re-validate auth status when the window regains focus.
+    const syncAuthStatus = () => { void queryClient.invalidateQueries({ queryKey: AUTH_STATUS_KEY }); };
+    const handleVisibilityChange = () => { if (document.visibilityState === "visible") syncAuthStatus(); };
+    window.addEventListener("focus", syncAuthStatus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", syncAuthStatus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      void unlistenPromise.then(fn => fn());
+      void unlistenRestorePromise.then(fn => fn());
+    };
   }, [queryClient]);
 }
 ```
@@ -439,6 +459,7 @@ function useAuthStatusCallbacks() {
 | Event | Payload | Cache action |
 |---|---|---|
 | `auth-status-changed` | `AuthStatus` | `setQueryData(AUTH_STATUS_KEY, payload)` |
+| `library-restored` | — | `invalidateQueries(DASHBOARD_KEY)` — fires after first-login cloud restore |
 | `sync-completed` | `SyncResult` | `invalidateQueries(DASHBOARD_KEY)` |
 | `sync-error` | `{ gameId, error }` | display error toast |
 | `game-sync-pending` | `{ gameId }` | show pending indicator |
@@ -476,7 +497,7 @@ Save paths in `game.savePath` may contain Windows env-var tokens (`%LOCALAPPDATA
 **Props**: `{ gameId: string; gameFolderId: string }`  
 **Used in**: `GameDetailPage` — only rendered when `game.gdriveFolderId !== null`.
 
-- Collapsible section; `useDriveFilesQuery(gameId, isOpen)` — lazy fetch, only runs when open.
+- Collapsible section; `useDriveFilesQuery(gameId, gameFolderId, isOpen)` — lazy fetch using `driveFilesFolderKey(gameId, gameFolderId)`, only runs when open.
 - Rows list every file/folder in the game's Drive folder root.
 - **Protected items** (`.sync-meta.json`, `backups/`): displayed but actions (rename/move/delete) are disabled; show a `"protected"` badge.
 - **Rename**: pencil button → inline input replaces name text; `Enter` commits, `Escape` cancels.
@@ -495,7 +516,7 @@ Save paths in `game.savePath` may contain Windows env-var tokens (`%LOCALAPPDATA
 - Backup rows show: ISO 8601 timestamp, optional label, file count, total size.
 - **Restore**: `ConfirmModal` with strong warning (overwrites both Drive and local saves) → `useRestoreVersionBackupMutation`.
 - **Delete**: `ConfirmModal` → `useDeleteVersionBackupMutation`.
-- Backup name format: `"{ISO-ts}"` or `"{ISO-ts}_{label}"` — extract label as `name.slice(name.indexOf('_') + 1).replace(/-/g, ' ')`.
+- Backup `name` field: `"{ISO-ts}"` or `"{ISO-ts} — {label}"` (em dash separator). Extract label as `name.includes(' — ') ? name.slice(name.indexOf(' — ') + 4) : null`.
 
 ### GameDetailPage Integration
 
