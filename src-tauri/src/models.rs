@@ -212,6 +212,22 @@ pub struct DriveFileItem {
     pub is_folder: bool,
 }
 
+/// A file/folder item with its relative path within the game's Drive folder.
+/// Returned by `list_game_drive_files_flat` (recursive listing).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveFileFlatItem {
+    pub id: String,
+    pub name: String,
+    /// Relative path within the game's Drive folder, e.g. `"subfolder/file.txt"`.
+    pub relative_path: String,
+    pub size: Option<u64>,
+    pub modified_time: Option<String>,
+    pub is_folder: bool,
+    /// Drive ID of the parent folder that directly contains this item.
+    pub parent_folder_id: String,
+}
+
 /// Metadata written as `.backup-meta.json` inside each version-backup folder on Drive.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

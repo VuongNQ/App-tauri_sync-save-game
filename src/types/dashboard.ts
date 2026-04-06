@@ -120,6 +120,22 @@ export interface DriveFileItem {
   isFolder: boolean;
 }
 
+/**
+ * A file/folder item with its **relative path** within the game's Drive folder.
+ * Returned by `list_game_drive_files_flat` (recursive, full-tree listing).
+ */
+export interface DriveFileFlatItem {
+  id: string;
+  name: string;
+  /** Relative path within the game's Drive folder, e.g. `"76561197960271872/Default_0.sav"`. */
+  relativePath: string;
+  size: number | null;
+  modifiedTime: string | null;
+  isFolder: boolean;
+  /** Drive ID of the parent folder that directly contains this item. */
+  parentFolderId: string;
+}
+
 // ── Updater ──────────────────────────────────────────────
 
 export interface UpdateInfo {

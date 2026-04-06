@@ -6,7 +6,7 @@ use tauri::AppHandle;
 
 use crate::{
     gdrive,
-    models::{BackupMeta, DriveFileItem, DriveVersionBackup, SyncFileMeta, SyncMeta, SyncResult},
+    models::{BackupMeta, DriveFileFlatItem, DriveFileItem, DriveVersionBackup, SyncFileMeta, SyncMeta, SyncResult},
     settings,
 };
 
@@ -30,6 +30,17 @@ fn require_game_folder(app: &AppHandle, game_id: &str) -> Result<String, String>
 }
 
 // ── Drive file management commands ───────────────────────
+
+/// Recursively list every item in the game's Drive folder with relative paths.
+/// Files inside subfolders are included; each item's `relative_path` is relative
+/// to the game's Drive root folder (e.g. `"76561197960271872/Default_0.sav"`).
+pub fn list_game_drive_files_flat(
+    app: &AppHandle,
+    game_id: &str,
+) -> Result<Vec<DriveFileFlatItem>, String> {
+    let folder_id = require_game_folder(app, game_id)?;
+    gdrive::list_drive_items_recursive(app, &folder_id, "")
+}
 
 /// List all items (files + folders) in the game's Google Drive folder root,
 /// or in a specific subfolder when `folder_id` is provided.

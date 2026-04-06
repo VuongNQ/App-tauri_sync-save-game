@@ -23,4 +23,6 @@ export const driveFilesKey = (gameId: string) => ["drive-files", gameId] as cons
 /** Specific key for a given folder inside a game's Drive folder tree. */
 export const driveFilesFolderKey = (gameId: string, folderId: string) =>
   ["drive-files", gameId, folderId] as const;
+/** Flat (recursive) listing of all files in a game's Drive folder. */
+export const driveFilesFlatKey = (gameId: string) => ["drive-files-flat", gameId] as const;
 export const versionBackupsKey = (gameId: string) => ["version-backups", gameId] as const;

@@ -1,18 +1,5 @@
 import { useState } from "react";
-import { useParams, Link, useNavigate } from "react-router";
-
-import {
-  useDashboardQuery,
-  useRemoveGameMutation,
-  useGetSaveInfoMutation,
-  useSyncGameMutation,
-  useValidatePathsQuery,
-  useCheckSyncDiffMutation,
-  useRestoreFromCloudMutation,
-  usePushToCloudMutation,
-} from "../queries";
-import type { SaveFileInfo, SaveInfo, SyncStructureDiff } from "../types/dashboard";
-import { msg, formatLocalTime, toImgSrc } from "../utils";
+import { Link, useNavigate, useParams } from "react-router";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DriveFilesSection } from "../components/DriveFilesSection";
 import { GameSettingsForm } from "../components/GameSettingsForm";
@@ -29,6 +16,22 @@ import {
   SOFT_BADGE,
   SOURCE_BADGE,
 } from "../components/styles";
+import {
+  useCheckSyncDiffMutation,
+  useDashboardQuery,
+  useGetSaveInfoMutation,
+  usePushToCloudMutation,
+  useRemoveGameMutation,
+  useRestoreFromCloudMutation,
+  useSyncGameMutation,
+  useValidatePathsQuery,
+} from "../queries";
+import type {
+  SaveFileInfo,
+  SaveInfo,
+  SyncStructureDiff,
+} from "../types/dashboard";
+import { formatLocalTime, msg, toImgSrc } from "../utils";
 
 export function GameDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -40,6 +43,7 @@ export function GameDetailPage() {
   const removeMutation = useRemoveGameMutation();
 
   const [showRemoveModal, setShowRemoveModal] = useState(false);
+  
   const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   const game = dashboard?.games.find((g) => g.id === id) ?? null;
@@ -389,13 +393,7 @@ function buildSaveTree(files: SaveFileInfo[]): SaveTreeItem[] {
   return roots;
 }
 
-function SaveTreeNode({
-  node,
-  depth,
-}: {
-  node: SaveTreeItem;
-  depth: number;
-}) {
+function SaveTreeNode({ node, depth }: { node: SaveTreeItem; depth: number }) {
   const [open, setOpen] = useState(true);
   const indent = depth * 14;
 
@@ -407,9 +405,9 @@ function SaveTreeNode({
       >
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-[#9aa8c7] shrink-0 select-none">↳</span>
-          <span className="text-[#c7d3f7] truncate" title={node.relativePath}>
-            {node.name}
-          </span>
+          <div className="min-w-0">
+            <span className="text-[#c7d3f7] truncate block">{node.name}</span>
+          </div>
         </div>
         <span className="shrink-0 text-[0.72rem] text-[#9aa8c7] bg-white/6 px-1.75 py-0.5 rounded-full whitespace-nowrap">
           {formatBytes(node.size)}
@@ -460,7 +458,10 @@ function SaveFolderTree({ info }: { info: SaveInfo }) {
           <span className="text-[#9aa8c7] shrink-0 w-3 text-center text-[0.6rem]">
             {open ? "▼" : "►"}
           </span>
-          <span className="text-[#7dc9ff] font-medium truncate" title={info.savePath}>
+          <span
+            className="text-[#7dc9ff] font-medium truncate"
+            title={info.savePath}
+          >
             {info.savePath}
           </span>
         </div>

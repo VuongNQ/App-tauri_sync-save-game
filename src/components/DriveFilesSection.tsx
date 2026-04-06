@@ -1,17 +1,16 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   useDeleteDriveFileMutation,
-  useDriveFilesQuery,
+  useDriveFilesFlatQuery,
   useMoveDriveFileMutation,
   useRenameDriveFileMutation,
 } from "../queries";
-import type { DriveFileItem } from "../types/dashboard";
+import type { DriveFileFlatItem } from "../types/dashboard";
 import { msg } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
 import {
   CARD,
-  DANGER_BTN,
   EYEBROW,
   GHOST_BTN,
   INPUT_CLS,
@@ -26,20 +25,32 @@ interface Props {
   gameFolderId: string;
 }
 
-const PROTECTED_NAMES = new Set([".sync-meta.json", "backups"]);
+const PROTECTED_PATHS = new Set([".sync-meta.json", "backups"]);
+
+function isProtected(relativePath: string): boolean {
+  return PROTECTED_PATHS.has(relativePath) || relativePath.startsWith("backups/");
+}
 
 export function DriveFilesSection({ gameId, gameFolderId }: Props) {
   const [isOpen, setIsOpen] = useState(false);
 
-  function handleToggle() {
-    setIsOpen((v) => !v);
-  }
-
-  // Only fetch root items when the section is expanded.
-  const { data: items, isLoading, isError, error, refetch } = useDriveFilesQuery(
+  const { data: flatItems, isLoading, isError, error, refetch } = useDriveFilesFlatQuery(
     gameId,
-    gameFolderId,
     isOpen,
+  );
+
+  const tree = useMemo(() => (flatItems ? buildDriveTree(flatItems) : null), [flatItems]);
+
+  // Top-level subfolders available for file move operations.
+  const topSubfolders = useMemo(
+    () =>
+      flatItems?.filter(
+        (item) =>
+          item.isFolder &&
+          !item.relativePath.includes("/") &&
+          !PROTECTED_PATHS.has(item.relativePath),
+      ) ?? [],
+    [flatItems],
   );
 
   return (
@@ -47,7 +58,7 @@ export function DriveFilesSection({ gameId, gameFolderId }: Props) {
       <button
         type="button"
         className="w-full flex items-center justify-between gap-3 text-left"
-        onClick={handleToggle}
+        onClick={() => setIsOpen((v) => !v)}
         aria-expanded={isOpen}
       >
         <div>
@@ -59,26 +70,26 @@ export function DriveFilesSection({ gameId, gameFolderId }: Props) {
 
       {isOpen && (
         <div className="mt-5">
-          {isLoading && (
-            <p className={`${MUTED} text-sm`}>Loading Drive files…</p>
-          )}
+          {isLoading && <p className={`${MUTED} text-sm`}>Loading Drive files…</p>}
           {isError && (
-            <p className="text-sm text-[#ff9e9e]">{msg(error, "Failed to load Drive files.")}</p>
+            <p className="text-sm text-[#ff9e9e]">
+              {msg(error, "Failed to load Drive files.")}
+            </p>
           )}
-          {!isLoading && !isError && items && (
+          {!isLoading && !isError && tree && (
             <>
-              {items.length === 0 ? (
+              {tree.length === 0 ? (
                 <p className={`${MUTED} text-sm`}>No files found in this folder.</p>
               ) : (
-                <ul className="list-none p-0 grid gap-1.5">
-                  {items.map((item) => (
+                <ul className="list-none p-0 rounded-[14px] bg-[rgba(255,255,255,0.02)] border border-[rgba(165,185,255,0.06)] overflow-hidden">
+                  {tree.map((node, i) => (
                     <DriveTreeNode
-                      key={item.id}
-                      item={item}
+                      key={i}
+                      node={node}
+                      depth={0}
                       gameId={gameId}
                       gameFolderId={gameFolderId}
-                      depth={0}
-                      siblingItems={items}
+                      topSubfolders={topSubfolders}
                     />
                   ))}
                 </ul>
@@ -98,39 +109,135 @@ export function DriveFilesSection({ gameId, gameFolderId }: Props) {
   );
 }
 
-// ── DriveTreeNode ─────────────────────────────────────────────────────────────
+// ── Tree types ─────────────────────────────────────────────────────────────────
 
-interface TreeNodeProps {
-  item: DriveFileItem;
-  gameId: string;
-  /** The game's Drive root folder ID — passed down for move validation. */
-  gameFolderId: string;
-  /** 0 = root child, 1 = inside a subfolder, etc. */
-  depth: number;
-  /** Sibling items at the same level — used by the move modal. */
-  siblingItems: DriveFileItem[];
+type DriveTreeLeaf = {
+  kind: "file";
+  name: string;
+  relativePath: string;
+  size: number | null;
+  modifiedTime: string | null;
+  id: string;
+  parentFolderId: string;
+};
+
+type DriveTreeDir = {
+  kind: "folder";
+  name: string;
+  relativePath: string;
+  children: DriveTreeItem[];
+  totalSize: number;
+  /** Drive folder ID; null when the folder node was inferred (not explicit in flat list). */
+  id: string | null;
+  parentFolderId: string | null;
+};
+
+type DriveTreeItem = DriveTreeLeaf | DriveTreeDir;
+
+// ── Tree builder ───────────────────────────────────────────────────────────────
+
+function buildDriveTree(items: DriveFileFlatItem[]): DriveTreeItem[] {
+  // Build a lookup map from relative path → folder item for ID resolution.
+  const folderIdMap = new Map<string, DriveFileFlatItem>();
+  for (const item of items) {
+    if (item.isFolder) folderIdMap.set(item.relativePath, item);
+  }
+
+  function insertFile(
+    nodes: DriveTreeItem[],
+    parts: string[],
+    item: DriveFileFlatItem,
+    pathPrefix: string,
+  ): void {
+    if (parts.length === 1) {
+      nodes.push({
+        kind: "file",
+        name: parts[0],
+        relativePath: item.relativePath,
+        size: item.size,
+        modifiedTime: item.modifiedTime,
+        id: item.id,
+        parentFolderId: item.parentFolderId,
+      });
+      return;
+    }
+    const dirName = parts[0];
+    const dirPath = pathPrefix ? `${pathPrefix}/${dirName}` : dirName;
+    let dir = nodes.find((n): n is DriveTreeDir => n.kind === "folder" && n.name === dirName);
+    if (!dir) {
+      const folderItem = folderIdMap.get(dirPath);
+      dir = {
+        kind: "folder",
+        name: dirName,
+        relativePath: dirPath,
+        children: [],
+        totalSize: 0,
+        id: folderItem?.id ?? null,
+        parentFolderId: folderItem?.parentFolderId ?? null,
+      };
+      nodes.push(dir);
+    }
+    dir.totalSize += item.size ?? 0;
+    insertFile(dir.children, parts.slice(1), item, dirPath);
+  }
+
+  const roots: DriveTreeItem[] = [];
+
+  // First pass: insert all files to build folder hierarchy and sizes.
+  for (const item of items) {
+    if (!item.isFolder) {
+      const parts = item.relativePath.split("/").filter(Boolean);
+      insertFile(roots, parts, item, "");
+    }
+  }
+
+  // Second pass: ensure top-level empty folders are present.
+  for (const item of items) {
+    if (item.isFolder && !item.relativePath.includes("/")) {
+      if (!roots.find((n) => n.kind === "folder" && n.name === item.name)) {
+        roots.push({
+          kind: "folder",
+          name: item.name,
+          relativePath: item.relativePath,
+          children: [],
+          totalSize: 0,
+          id: item.id,
+          parentFolderId: item.parentFolderId,
+        });
+      }
+    }
+  }
+
+  return roots;
 }
 
-function DriveTreeNode({ item, gameId, gameFolderId, depth, siblingItems }: TreeNodeProps) {
-  const isProtected = PROTECTED_NAMES.has(item.name);
-  const isAtRoot = depth === 0;
+// ── Formatters ─────────────────────────────────────────────────────────────────
 
-  // ── Folder expand ─────────────────────────────────────
-  const [isExpanded, setIsExpanded] = useState(false);
+function formatDriveBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
 
-  // Always call the hook; enabled only when this is a folder and it's expanded.
-  const { data: childItems, isLoading: childrenLoading } = useDriveFilesQuery(
-    gameId,
-    item.id,
-    item.isFolder && isExpanded,
-  );
+// ── DriveTreeNode ──────────────────────────────────────────────────────────────
 
-  // ── Rename ────────────────────────────────────────────
+interface TreeNodeProps {
+  node: DriveTreeItem;
+  depth: number;
+  gameId: string;
+  gameFolderId: string;
+  topSubfolders: DriveFileFlatItem[];
+}
+
+function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: TreeNodeProps) {
+  const indent = depth * 14;
+  const protected_ = isProtected(node.relativePath);
+
+  const [isExpanded, setIsExpanded] = useState(true);
   const [isRenaming, setIsRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState(item.name);
+  const [renameValue, setRenameValue] = useState(node.name);
   const [renameError, setRenameError] = useState<string | null>(null);
-
-  // ── Modals ────────────────────────────────────────────
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
@@ -138,25 +245,24 @@ function DriveTreeNode({ item, gameId, gameFolderId, depth, siblingItems }: Tree
   const moveMutation = useMoveDriveFileMutation();
   const deleteMutation = useDeleteDriveFileMutation();
 
+  const isBusy = renameMutation.isPending || moveMutation.isPending || deleteMutation.isPending;
+  const isAtRoot = depth === 0;
+
   function startRename() {
-    setRenameValue(item.name);
+    setRenameValue(node.name);
     setRenameError(null);
     setIsRenaming(true);
   }
 
-  async function commitRename() {
+  function commitRename() {
     const trimmed = renameValue.trim();
-    if (trimmed === item.name) {
-      setIsRenaming(false);
-      return;
-    }
-    if (!trimmed) {
-      setRenameError("Name cannot be empty");
-      return;
-    }
+    if (trimmed === node.name) { setIsRenaming(false); return; }
+    if (!trimmed) { setRenameError("Name cannot be empty"); return; }
+    const fileId = node.kind === "folder" ? (node.id ?? "") : node.id;
+    if (!fileId) return;
     setRenameError(null);
     renameMutation.mutate(
-      { gameId, fileId: item.id, oldName: item.name, newName: trimmed, isFolder: item.isFolder },
+      { gameId, fileId, oldName: node.name, newName: trimmed, isFolder: node.kind === "folder" },
       {
         onSuccess: () => setIsRenaming(false),
         onError: (err) => setRenameError(msg(err, "Rename failed.")),
@@ -166,44 +272,157 @@ function DriveTreeNode({ item, gameId, gameFolderId, depth, siblingItems }: Tree
 
   function handleDeleteConfirm() {
     setShowDeleteModal(false);
-    deleteMutation.mutate({ gameId, fileId: item.id, fileName: item.name, isFolder: item.isFolder });
+    const fileId = node.kind === "folder" ? (node.id ?? "") : node.id;
+    if (!fileId) return;
+    deleteMutation.mutate({
+      gameId,
+      fileId,
+      fileName: node.name,
+      isFolder: node.kind === "folder",
+    });
   }
 
-  const isBusy = renameMutation.isPending || moveMutation.isPending || deleteMutation.isPending;
-  const rowIndent = { paddingLeft: `${depth * 20}px` };
+  const rowBase =
+    "flex items-center gap-2 text-xs py-1.5 pr-3 border-b border-[rgba(165,185,255,0.04)] last:border-b-0";
 
-  return (
-    <li className="grid gap-0">
-      {/* ── Row ── */}
-      <div
-        className="flex items-center gap-3 px-3 py-2.5 rounded-[14px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]"
-        style={rowIndent}
-      >
-        {/* Expand toggle (folders) or spacer (files) */}
-        {item.isFolder ? (
-          <button
-            type="button"
-            className="shrink-0 w-5 h-5 flex items-center justify-center text-[10px] text-[#7dc9ff] hover:text-white transition-colors"
-            aria-label={isExpanded ? "Collapse folder" : "Expand folder"}
+  if (node.kind === "folder") {
+    return (
+      <>
+        <li
+          className={`${rowBase} select-none`}
+          style={{ paddingLeft: `${8 + indent}px` }}
+        >
+          {/* Expand toggle + name */}
+          <div
+            className="flex items-center gap-1.5 min-w-0 flex-1 cursor-pointer"
             onClick={() => setIsExpanded((v) => !v)}
           >
-            {isExpanded ? "▼" : "▶"}
-          </button>
-        ) : (
-          <span className="shrink-0 w-5" aria-hidden="true" />
+            <span className="shrink-0 w-3 text-center text-[0.56rem] text-[#9aa8c7]">
+              {isExpanded ? "▼" : "►"}
+            </span>
+            {isRenaming ? (
+              <div
+                className="flex items-center gap-1.5 flex-1"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  className={`${INPUT_CLS} text-xs py-0.5 min-h-0 h-7`}
+                  value={renameValue}
+                  autoFocus
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitRename();
+                    if (e.key === "Escape") setIsRenaming(false);
+                  }}
+                />
+                <button
+                  type="button"
+                  className={`${PRIMARY_BTN} text-xs px-2 min-h-0 h-7`}
+                  onClick={commitRename}
+                  disabled={renameMutation.isPending}
+                >
+                  {renameMutation.isPending ? "…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  className={`${GHOST_BTN} text-xs px-2 min-h-0 h-7`}
+                  onClick={() => setIsRenaming(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <span className="text-[#7dc9ff] font-medium truncate">{node.name}/</span>
+            )}
+          </div>
+
+          {/* Size + protected badge + actions */}
+          <div className="flex items-center gap-2 shrink-0">
+            {node.totalSize > 0 && (
+              <span className="text-[0.68rem] text-[#9aa8c7] bg-white/5 px-1.5 py-0.5 rounded-full">
+                {formatDriveBytes(node.totalSize)}
+              </span>
+            )}
+            {protected_ ? (
+              <span className="text-[0.68rem] px-2 py-0.5 rounded-xl bg-[rgba(255,196,91,0.14)] text-[#ffd98a]">
+                protected
+              </span>
+            ) : !isRenaming && (
+              <div className="flex items-center">
+                <button
+                  type="button"
+                  title="Rename"
+                  disabled={isBusy}
+                  className="p-1 rounded-lg text-[#7dc9ff] hover:bg-[rgba(125,201,255,0.1)] transition-colors disabled:opacity-40"
+                  onClick={(e) => { e.stopPropagation(); startRename(); }}
+                >
+                  ✏️
+                </button>
+                <button
+                  type="button"
+                  title="Delete from Drive"
+                  disabled={isBusy}
+                  className="p-1 rounded-lg text-[#ff9e9e] hover:bg-[rgba(255,100,100,0.1)] transition-colors disabled:opacity-40"
+                  onClick={(e) => { e.stopPropagation(); setShowDeleteModal(true); }}
+                >
+                  🗑️
+                </button>
+              </div>
+            )}
+          </div>
+
+          <ConfirmModal
+            open={showDeleteModal}
+            title={`Delete "${node.name}"?`}
+            message={`Delete the folder "${node.name}" and all its contents from Google Drive? This cannot be undone.`}
+            confirmLabel="Delete"
+            onConfirm={handleDeleteConfirm}
+            onCancel={() => setShowDeleteModal(false)}
+          />
+        </li>
+
+        {renameError && (
+          <li style={{ paddingLeft: `${8 + indent + 20}px` }} className="pb-1">
+            <p className="m-0 text-xs text-[#ff9e9e]">{renameError}</p>
+          </li>
+        )}
+        {(moveMutation.isError || deleteMutation.isError) && (
+          <li style={{ paddingLeft: `${8 + indent + 20}px` }} className="pb-1">
+            <p className="m-0 text-xs text-[#ff9e9e]">
+              {msg(moveMutation.error ?? deleteMutation.error, "Operation failed.")}
+            </p>
+          </li>
         )}
 
-        {/* Icon */}
-        <span className="text-lg shrink-0" aria-hidden="true">
-          {item.isFolder ? "📁" : "📄"}
-        </span>
+        {isExpanded &&
+          node.children.map((child, i) => (
+            <DriveTreeNode
+              key={i}
+              node={child}
+              depth={depth + 1}
+              gameId={gameId}
+              gameFolderId={gameFolderId}
+              topSubfolders={topSubfolders}
+            />
+          ))}
+      </>
+    );
+  }
 
-        {/* Name / inline rename */}
-        <div className="flex-1 min-w-0">
+  // ── File leaf ───────────────────────────────────────────────────────────────
+
+  return (
+    <>
+      <li
+        className={`${rowBase} hover:bg-white/2`}
+        style={{ paddingLeft: `${8 + indent}px` }}
+      >
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          <span className="text-[#9aa8c7] shrink-0 select-none">↳</span>
           {isRenaming ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 flex-1">
               <input
-                className={`${INPUT_CLS} text-sm py-1 min-h-0 h-8`}
+                className={`${INPUT_CLS} text-xs py-0.5 min-h-0 h-7`}
                 value={renameValue}
                 autoFocus
                 onChange={(e) => setRenameValue(e.target.value)}
@@ -214,7 +433,7 @@ function DriveTreeNode({ item, gameId, gameFolderId, depth, siblingItems }: Tree
               />
               <button
                 type="button"
-                className={`${PRIMARY_BTN} text-xs px-3 min-h-0 h-8`}
+                className={`${PRIMARY_BTN} text-xs px-2 min-h-0 h-7`}
                 onClick={commitRename}
                 disabled={renameMutation.isPending}
               >
@@ -222,170 +441,125 @@ function DriveTreeNode({ item, gameId, gameFolderId, depth, siblingItems }: Tree
               </button>
               <button
                 type="button"
-                className={`${GHOST_BTN} text-xs px-3 min-h-0 h-8`}
+                className={`${GHOST_BTN} text-xs px-2 min-h-0 h-7`}
                 onClick={() => setIsRenaming(false)}
               >
                 Cancel
               </button>
             </div>
           ) : (
-            <span className="truncate text-sm text-[#c7d3f7] block">{item.name}</span>
-          )}
-          {renameError && (
-            <p className="m-0 mt-0.5 text-xs text-[#ff9e9e]">{renameError}</p>
-          )}
-          {(moveMutation.isError || deleteMutation.isError) && (
-            <p className="m-0 mt-0.5 text-xs text-[#ff9e9e]">
-              {msg(moveMutation.error ?? deleteMutation.error, "Operation failed.")}
-            </p>
+            <span className="text-[#c7d3f7] truncate" title={node.relativePath}>
+              {node.name}
+            </span>
           )}
         </div>
 
-        {/* Metadata */}
-        <div className="hidden sm:flex items-center gap-4 shrink-0 text-xs text-[#9aa8c7]">
-          {!item.isFolder && item.size != null && (
-            <span>{formatBytes(item.size)}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          {node.size != null && (
+            <span className="text-[0.68rem] text-[#9aa8c7]">{formatDriveBytes(node.size)}</span>
           )}
-          {item.modifiedTime && (
-            <span>{new Date(item.modifiedTime).toLocaleString()}</span>
+          {node.modifiedTime && (
+            <span className="hidden sm:block text-[0.66rem] text-[#9aa8c7]">
+              {new Date(node.modifiedTime).toLocaleString()}
+            </span>
           )}
-        </div>
-
-        {/* Protected badge */}
-        {isProtected && (
-          <span className="shrink-0 text-xs px-2 py-0.5 rounded-xl bg-[rgba(255,196,91,0.14)] text-[#ffd98a]">
-            protected
-          </span>
-        )}
-
-        {/* Actions */}
-        {!isProtected && !isRenaming && (
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              type="button"
-              title="Rename"
-              aria-label={`Rename ${item.name}`}
-              disabled={isBusy}
-              className="p-1.5 rounded-lg text-[#7dc9ff] hover:bg-[rgba(125,201,255,0.1)] transition-colors disabled:opacity-40"
-              onClick={startRename}
-            >
-              ✏️
-            </button>
-            {!item.isFolder && isAtRoot && (
+          {protected_ ? (
+            <span className="text-[0.68rem] px-2 py-0.5 rounded-xl bg-[rgba(255,196,91,0.14)] text-[#ffd98a]">
+              protected
+            </span>
+          ) : !isRenaming && (
+            <div className="flex items-center">
               <button
                 type="button"
-                title="Move to subfolder"
-                aria-label={`Move ${item.name}`}
+                title="Rename"
                 disabled={isBusy}
-                className="p-1.5 rounded-lg text-[#7dc9ff] hover:bg-[rgba(125,201,255,0.1)] transition-colors disabled:opacity-40"
-                onClick={() => setShowMoveModal(true)}
+                className="p-1 rounded-lg text-[#7dc9ff] hover:bg-[rgba(125,201,255,0.1)] transition-colors disabled:opacity-40"
+                onClick={startRename}
               >
-                📂
+                ✏️
               </button>
-            )}
-            <button
-              type="button"
-              title="Delete from Drive"
-              aria-label={`Delete ${item.name}`}
-              disabled={isBusy || deleteMutation.isPending}
-              className="p-1.5 rounded-lg text-[#ff9e9e] hover:bg-[rgba(255,100,100,0.1)] transition-colors disabled:opacity-40"
-              onClick={() => setShowDeleteModal(true)}
-            >
-              🗑️
-            </button>
-          </div>
-        )}
+              {isAtRoot && (
+                <button
+                  type="button"
+                  title="Move to subfolder"
+                  disabled={isBusy}
+                  className="p-1 rounded-lg text-[#7dc9ff] hover:bg-[rgba(125,201,255,0.1)] transition-colors disabled:opacity-40"
+                  onClick={() => setShowMoveModal(true)}
+                >
+                  📂
+                </button>
+              )}
+              <button
+                type="button"
+                title="Delete from Drive"
+                disabled={isBusy}
+                className="p-1 rounded-lg text-[#ff9e9e] hover:bg-[rgba(255,100,100,0.1)] transition-colors disabled:opacity-40"
+                onClick={() => setShowDeleteModal(true)}
+              >
+                🗑️
+              </button>
+            </div>
+          )}
+        </div>
 
-        {/* Move modal — only at root depth */}
         {showMoveModal && isAtRoot && (
           <MoveFileModal
-            item={item}
+            fileName={node.name}
             gameId={gameId}
             gameFolderId={gameFolderId}
-            subfolders={siblingItems.filter(
-              (f) => f.isFolder && !PROTECTED_NAMES.has(f.name),
-            )}
+            subfolders={topSubfolders}
             onMove={(newParentId) => {
               setShowMoveModal(false);
               moveMutation.mutate({
                 gameId,
-                fileId: item.id,
-                fileName: item.name,
+                fileId: node.id,
+                fileName: node.name,
                 newParentId,
-                oldParentId: gameFolderId,
+                oldParentId: node.parentFolderId,
               });
             }}
             onCancel={() => setShowMoveModal(false)}
           />
         )}
 
-        {/* Delete confirm */}
         <ConfirmModal
           open={showDeleteModal}
-          title={`Delete "${item.name}"?`}
-          message={
-            item.isFolder
-              ? `Delete the folder "${item.name}" and all its contents from Google Drive? This cannot be undone.`
-              : `Delete "${item.name}" from Google Drive? The file will no longer be synced and cannot be recovered.`
-          }
+          title={`Delete "${node.name}"?`}
+          message={`Delete "${node.name}" from Google Drive? The file will no longer be synced and cannot be recovered.`}
           confirmLabel="Delete"
           onConfirm={handleDeleteConfirm}
           onCancel={() => setShowDeleteModal(false)}
         />
-      </div>
+      </li>
 
-      {/* ── Children (rendered inside parent li when folder is expanded) ── */}
-      {item.isFolder && isExpanded && (
-        <div className="mt-1.5">
-          {childrenLoading ? (
-            <p className={`${MUTED} text-xs`} style={{ paddingLeft: `${(depth + 1) * 20 + 28}px` }}>
-              Loading…
-            </p>
-          ) : childItems && childItems.length > 0 ? (
-            <ul className="list-none p-0 grid gap-1.5">
-              {childItems.map((child) => (
-                <DriveTreeNode
-                  key={child.id}
-                  item={child}
-                  gameId={gameId}
-                  gameFolderId={gameFolderId}
-                  depth={depth + 1}
-                  siblingItems={childItems}
-                />
-              ))}
-            </ul>
-          ) : (
-            <p
-              className={`${MUTED} text-xs`}
-              style={{ paddingLeft: `${(depth + 1) * 20 + 28}px` }}
-            >
-              Empty folder
-            </p>
-          )}
-        </div>
+      {renameError && (
+        <li style={{ paddingLeft: `${8 + indent + 20}px` }} className="pb-1">
+          <p className="m-0 text-xs text-[#ff9e9e]">{renameError}</p>
+        </li>
       )}
-    </li>
+      {(moveMutation.isError || deleteMutation.isError) && (
+        <li style={{ paddingLeft: `${8 + indent + 20}px` }} className="pb-1">
+          <p className="m-0 text-xs text-[#ff9e9e]">
+            {msg(moveMutation.error ?? deleteMutation.error, "Operation failed.")}
+          </p>
+        </li>
+      )}
+    </>
   );
 }
 
-// ── MoveFileModal ─────────────────────────────────────────────────────────────
+// ── MoveFileModal ──────────────────────────────────────────────────────────────
 
 interface MoveModalProps {
-  item: DriveFileItem;
+  fileName: string;
   gameId: string;
   gameFolderId: string;
-  subfolders: DriveFileItem[];
+  subfolders: DriveFileFlatItem[];
   onMove: (newParentId: string) => void;
   onCancel: () => void;
 }
 
-function MoveFileModal({
-  item,
-  gameFolderId,
-  subfolders,
-  onMove,
-  onCancel,
-}: MoveModalProps) {
+function MoveFileModal({ fileName, gameFolderId, subfolders, onMove, onCancel }: MoveModalProps) {
   const [selected, setSelected] = useState(gameFolderId);
 
   return (
@@ -393,75 +567,56 @@ function MoveFileModal({
       open
       className="m-auto max-w-105 w-full rounded-3xl border border-[rgba(165,185,255,0.12)] bg-[rgba(14,22,40,0.97)] p-6 text-[#eef4ff] shadow-[0_32px_80px_rgba(0,0,0,0.5)] backdrop:bg-[rgba(0,0,0,0.55)]"
     >
-      <h3 className="m-0 mb-2 text-lg font-semibold">Move "{item.name}"</h3>
+      <h3 className="m-0 mb-2 text-lg font-semibold">Move "{fileName}"</h3>
       <p className="m-0 mb-4 text-sm text-[#9aa8c7]">
         Choose a destination folder within this game's Drive folder.
       </p>
-
-      <div className="grid gap-2 mb-5">
-        {/* Root option */}
-        <label className="flex items-center gap-3 cursor-pointer p-3 rounded-xl border border-[rgba(165,185,255,0.10)] hover:bg-[rgba(125,201,255,0.06)] transition-colors">
-          <input
-            type="radio"
-            name="move-target"
-            value={gameFolderId}
-            checked={selected === gameFolderId}
-            onChange={() => setSelected(gameFolderId)}
-            className="accent-[#7dc9ff]"
-          />
-          <span className="text-sm text-[#c7d3f7]">📁 / (game root)</span>
-        </label>
-
-        {subfolders.map((folder) => (
-          <label
-            key={folder.id}
-            className="flex items-center gap-3 cursor-pointer p-3 rounded-xl border border-[rgba(165,185,255,0.10)] hover:bg-[rgba(125,201,255,0.06)] transition-colors"
-          >
+      <ul className="list-none p-0 grid gap-2 mb-5">
+        <li>
+          <label className="flex items-center gap-3 p-3 rounded-xl cursor-pointer hover:bg-white/5">
             <input
               type="radio"
               name="move-target"
-              value={folder.id}
-              checked={selected === folder.id}
-              onChange={() => setSelected(folder.id)}
-              className="accent-[#7dc9ff]"
+              value={gameFolderId}
+              checked={selected === gameFolderId}
+              onChange={() => setSelected(gameFolderId)}
+              className="accent-[#6d7dff]"
             />
-            <span className="text-sm text-[#c7d3f7]">📁 {folder.name}</span>
+            <span className="text-sm text-[#c7d3f7]">📁 Game root</span>
           </label>
+        </li>
+        {subfolders.map((folder) => (
+          <li key={folder.id}>
+            <label className="flex items-center gap-3 p-3 rounded-xl cursor-pointer hover:bg-white/5">
+              <input
+                type="radio"
+                name="move-target"
+                value={folder.id}
+                checked={selected === folder.id}
+                onChange={() => setSelected(folder.id)}
+                className="accent-[#6d7dff]"
+              />
+              <span className="text-sm text-[#c7d3f7]">📁 {folder.name}/</span>
+            </label>
+          </li>
         ))}
-
-        {subfolders.length === 0 && (
-          <p className="text-sm text-[#9aa8c7]">
-            No subfolders available. Only the game root folder is listed.
-          </p>
-        )}
-      </div>
-
-      <p className="m-0 mb-4 text-xs text-[#ffd98a]">
-        ⚠ Files moved out of the root folder will no longer be tracked by the sync algorithm. A
-        manual "Sync to Google Drive" will re-upload the local version to the root on next sync.
+      </ul>
+      <p className="m-0 mb-5 text-xs text-[#9aa8c7]">
+        ⚠️ Files moved out of the game root are removed from sync metadata and will be
+        re-uploaded on next sync.
       </p>
-
-      <div className="flex items-center gap-3">
-        <button type="button" className={`${GHOST_BTN} flex-1`} onClick={onCancel}>
+      <div className="flex gap-3 justify-end">
+        <button type="button" className={`${SECONDARY_BTN} text-sm`} onClick={onCancel}>
           Cancel
         </button>
         <button
           type="button"
-          className={`${DANGER_BTN} flex-1`}
+          className={`${PRIMARY_BTN} text-sm`}
           onClick={() => onMove(selected)}
         >
-          Move
+          Move here
         </button>
       </div>
     </dialog>
   );
-}
-
-// ── Utility ───────────────────────────────────────────────────────────────────
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
