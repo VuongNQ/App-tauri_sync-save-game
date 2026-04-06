@@ -88,28 +88,42 @@ jobs:
           $version = "${{ steps.bump.outputs.NEW_VERSION }}"
           $tag = "v$version"
           $repo = "VuongNQ/App-tauri_sync-save-game"
-          $bundleDir = "src-tauri/target/release/bundle/nsis"
+          $bundleRoot = "src-tauri/target/release/bundle"
 
-          # Find the NSIS updater signature file
-          $sigFile = Get-ChildItem $bundleDir `
+          Write-Host "Searching for .sig files under $bundleRoot ..."
+          Get-ChildItem $bundleRoot -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
+
+          # Prefer NSIS (.nsis.zip.sig), fall back to MSI (.msi.zip.sig)
+          $sigFile = Get-ChildItem $bundleRoot -Recurse `
             | Where-Object { $_.Name -like "*.nsis.zip.sig" } `
             | Select-Object -First 1
 
           if (-not $sigFile) {
-            Write-Warning "No .nsis.zip.sig found — TAURI_SIGNING_PRIVATE_KEY may not be configured."
+            $sigFile = Get-ChildItem $bundleRoot -Recurse `
+              | Where-Object { $_.Name -like "*.msi.zip.sig" } `
+              | Select-Object -First 1
+          }
+
+          if (-not $sigFile) {
+            Write-Error "No .sig file found. Ensure TAURI_SIGNING_PRIVATE_KEY is set in GitHub Secrets."
             exit 1
           }
 
-          # BaseName strips the last extension: "app_x64-setup.nsis.zip.sig" -> "app_x64-setup.nsis.zip"
-          $zipName  = $sigFile.BaseName
+          Write-Host "Using sig file: $($sigFile.FullName)"
+
+          # Strip the trailing .sig to get the zip asset name
+          $zipName  = [System.IO.Path]::GetFileNameWithoutExtension($sigFile.Name)
           $signature = (Get-Content $sigFile.FullName -Raw).Trim()
           $downloadUrl = "https://github.com/$repo/releases/download/$tag/$zipName"
           $pubDate     = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
 
+          Write-Host "Zip asset : $zipName"
+          Write-Host "Download  : $downloadUrl"
+
           $manifest = [ordered]@{
-            version  = $version
-            notes    = "See https://github.com/$repo/releases/tag/$tag"
-            pub_date = $pubDate
+            version   = $version
+            notes     = "See https://github.com/$repo/releases/tag/$tag"
+            pub_date  = $pubDate
             platforms = [ordered]@{
               "windows-x86_64" = [ordered]@{
                 signature = $signature
@@ -117,6 +131,12 @@ jobs:
               }
             }
           } | ConvertTo-Json -Depth 5
+
+          $manifest | Out-File "latest.json" -Encoding utf8NoBOM
+          Write-Host "Generated latest.json:"
+          Get-Content "latest.json"
+
+          gh release upload $tag "latest.json" --repo $repo --clobber
 
           $manifest | Out-File "latest.json" -Encoding utf8NoBOM
           Write-Host "Generated latest.json:"
