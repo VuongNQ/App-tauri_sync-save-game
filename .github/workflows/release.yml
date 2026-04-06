@@ -77,5 +77,49 @@ jobs:
           tagName: v__VERSION__
           releaseName: "Save Game Sync v__VERSION__"
           releaseBody: "Automated release from main branch."
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
+
+      - name: Upload latest.json for updater
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ steps.bump.outputs.NEW_VERSION }}"
+          $tag = "v$version"
+          $repo = "VuongNQ/App-tauri_sync-save-game"
+          $bundleDir = "src-tauri/target/release/bundle/nsis"
+
+          # Find the NSIS updater signature file
+          $sigFile = Get-ChildItem $bundleDir `
+            | Where-Object { $_.Name -like "*.nsis.zip.sig" } `
+            | Select-Object -First 1
+
+          if (-not $sigFile) {
+            Write-Warning "No .nsis.zip.sig found — TAURI_SIGNING_PRIVATE_KEY may not be configured."
+            exit 1
+          }
+
+          # BaseName strips the last extension: "app_x64-setup.nsis.zip.sig" -> "app_x64-setup.nsis.zip"
+          $zipName  = $sigFile.BaseName
+          $signature = (Get-Content $sigFile.FullName -Raw).Trim()
+          $downloadUrl = "https://github.com/$repo/releases/download/$tag/$zipName"
+          $pubDate     = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+
+          $manifest = [ordered]@{
+            version  = $version
+            notes    = "See https://github.com/$repo/releases/tag/$tag"
+            pub_date = $pubDate
+            platforms = [ordered]@{
+              "windows-x86_64" = [ordered]@{
+                signature = $signature
+                url       = $downloadUrl
+              }
+            }
+          } | ConvertTo-Json -Depth 5
+
+          $manifest | Out-File "latest.json" -Encoding utf8NoBOM
+          Write-Host "Generated latest.json:"
+          Get-Content "latest.json"
+
+          gh release upload $tag "latest.json" --repo $repo --clobber

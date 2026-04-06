@@ -146,6 +146,8 @@ export interface UpdateInfo {
   currentVersion: string;
   /** Release notes from the update manifest, if any. */
   body: string | null;
+  /** Non-fatal error (e.g. endpoint unreachable, no releases yet). When set, `available` is false. */
+  error: string | null;
 }
 
 /** A version-backup snapshot stored under the game's `backups/` Drive folder. */

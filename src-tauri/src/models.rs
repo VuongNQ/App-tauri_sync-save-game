@@ -262,6 +262,9 @@ pub struct UpdateInfo {
     pub current_version: String,
     /// Release notes from the update manifest, if any.
     pub body: Option<String>,
+    /// Non-fatal error message (e.g. endpoint unreachable, no releases published yet).
+    /// When this is `Some`, `available` is always `false`.
+    pub error: Option<String>,
 }
 // ── Path Validation ───────────────────────────────────────
 
