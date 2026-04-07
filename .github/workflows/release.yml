@@ -78,7 +78,7 @@ jobs:
           }
 
       - name: Build and publish
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -92,7 +92,6 @@ jobs:
           releaseDraft: true
           prerelease: false
           updaterJsonPreferNsis: true
-          uploadUpdaterJson: false
 
       - name: Upload latest.json for updater
         shell: pwsh
