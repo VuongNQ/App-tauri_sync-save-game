@@ -39,7 +39,7 @@
   "plugins": {
     "updater": {
       "active": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERCNUY3MzM2RjA1RUY1OUEKUldTYTlWN3dObk5mMi9OdHVzdXphOG5RbkE3emtwZ0VLVlRGb0lMMVhjVUViV21KekdQTWN6MmgK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY2MzVFOEVCQzY3RDYwM0MKUldROFlIM0c2K2cxWnFCanlWWC9maER0c2FRTDAyUi9xVjhOQUVFQ2hBUmgzOFZzVWpRS2lGSGMK",
       "endpoints": [
         "https://github.com/VuongNQ/App-tauri_sync-save-game/releases/latest/download/latest.json"
       ],
