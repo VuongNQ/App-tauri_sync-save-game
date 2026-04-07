@@ -89,7 +89,7 @@ jobs:
           tagName: v__VERSION__
           releaseName: "Save Game Sync v__VERSION__"
           releaseBody: "Automated release from main branch."
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
 
       - name: Upload latest.json for updater
@@ -143,12 +143,6 @@ jobs:
               }
             }
           } | ConvertTo-Json -Depth 5
-
-          $manifest | Out-File "latest.json" -Encoding utf8NoBOM
-          Write-Host "Generated latest.json:"
-          Get-Content "latest.json"
-
-          gh release upload $tag "latest.json" --repo $repo --clobber
 
           $manifest | Out-File "latest.json" -Encoding utf8NoBOM
           Write-Host "Generated latest.json:"
