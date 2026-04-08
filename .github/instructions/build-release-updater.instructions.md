@@ -1,5 +1,5 @@
 ---
-description: "Use when: modifying the GitHub Actions release workflow, changing version bumping logic, adding new release secrets, configuring tauri-plugin-updater, implementing in-app update UI, adding Tauri updater commands, emitting update-download-progress events, checking for updates, installing updates, or troubleshooting signed releases. Covers the full CI/CD pipeline from push-to-main to published GitHub Release, the updater plugin wiring in Rust, update service functions, React Query hooks, and the SettingsPage update UI."
+description: "Use when: modifying the GitHub Actions release workflow, changing version bumping logic, adding new release secrets, configuring tauri-plugin-updater, implementing in-app update UI, checking for updates, installing updates, or troubleshooting signed releases. Covers the full CI/CD pipeline from push-to-main to published GitHub Release, the updater plugin wiring in Rust, the JS API (check/downloadAndInstall), the useAppUpdater hook, and the SettingsPage update UI."
 ---
 # Build, Release & In-App Updater
 
@@ -28,8 +28,9 @@ Required secrets (must exist in repo Settings → Secrets):
 
 - Release tag: `v__VERSION__` (substituted by tauri-action).
 - Release name: `"Save Game Sync v__VERSION__"`.
-- Releases are created as **draft** (`releaseDraft: true`) — publish manually after review.
+- Releases are **published immediately** (`releaseDraft: false`) — required so `/releases/latest/download/latest.json` is publicly accessible for the in-app updater.
 - `tauri-action` automatically uploads `latest.json` alongside each installer bundle; this file is what the in-app updater polls.
+- The `.sig` file pattern for NSIS v2 bundles is `*-setup.exe.sig` (not `*.nsis.zip.sig` which is the legacy v1 format).
 
 ### Adding a New Secret to the Build
 1. Add the secret to GitHub repo Settings → Secrets.
@@ -45,6 +46,8 @@ Required secrets (must exist in repo Settings → Secrets):
 .plugin(tauri_plugin_updater::Builder::new().build())
 ```
 Register before `.setup()` in `tauri::Builder::default()` chain.
+
+> **No custom Tauri commands needed.** The updater is driven entirely by the `@tauri-apps/plugin-updater` JS API. Do NOT add `check_for_update` or `download_and_install_update` Rust commands — the plugin exposes everything the frontend needs directly.
 
 ### `tauri.conf.json` — Updater Config
 ```json
@@ -63,88 +66,96 @@ Register before `.setup()` in `tauri::Builder::default()` chain.
 - Change `endpoints` only if the GitHub repo is renamed — the path always ends in `.../releases/latest/download/latest.json`.
 
 ### `UpdateInfo` Model (`models.rs`)
-```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateInfo {
-    pub available: bool,
-    pub version: Option<String>,       // e.g. "0.2.0" — only when available
-    pub current_version: String,       // always present
-    pub body: Option<String>,          // release notes
-}
-```
+
+> **Removed.** There is no `UpdateInfo` Rust struct or TypeScript interface. The JS API's `Update` type (from `@tauri-apps/plugin-updater`) is used directly on the frontend.
 
 ### Tauri Commands (`lib.rs`)
 
-**`check_for_update`** — async, returns `Result<UpdateInfo, String>`:
-- Calls `app.updater()?.check().await`.
-- Returns `UpdateInfo { available: false, ... }` when no update exists (not an error).
-
-**`download_and_install_update`** — async, returns `Result<(), String>`:
-- Re-checks for update; returns `Err("No update available")` if none.
-- Streams download chunks and emits `"update-download-progress"` events:
-  ```rust
-  serde_json::json!({ "downloaded": u64, "total": u64 })
-  ```
-- After completion the app restarts automatically — no explicit restart call needed.
-- Both commands are registered in `tauri::generate_handler![..., check_for_update, download_and_install_update]`.
+> **None.** Do not add `check_for_update` or `download_and_install_update` Tauri commands. The `@tauri-apps/plugin-updater` JS package handles all update operations without custom Rust wiring.
 
 ---
 
 ## In-App Updater — Frontend Side
 
-### Service Functions (`src/services/tauri.ts`)
+### Package
+`@tauri-apps/plugin-updater` is the only update dependency needed on the frontend. Import directly:
 ```ts
-export async function checkForUpdate(): Promise<UpdateInfo>
-export async function downloadAndInstallUpdate(): Promise<void>
-```
-Both are plain `invoke<T>()` wrappers.
-
-### TypeScript Type (`src/types/dashboard.ts`)
-```ts
-export interface UpdateInfo {
-  available: boolean;
-  version: string | null;
-  currentVersion: string;
-  body: string | null;
-}
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { getVersion } from "@tauri-apps/api/app";
 ```
 
-### React Query Hooks (`src/queries/settings.ts`)
-```ts
-export function useCheckForUpdateMutation()   // mutationFn: checkForUpdate
-export function useInstallUpdateMutation()    // mutationFn: downloadAndInstallUpdate
-```
-Both use `useMutation` with no query-cache invalidation needed (install restarts the app).
+### No Service Functions or React Query Hooks Needed
+There are no `invoke()` wrappers, no `useCheckForUpdateMutation`, and no `useInstallUpdateMutation`. The JS API is called directly inside the `useAppUpdater` hook.
 
 ### UI Pattern (`SettingsPage.tsx`)
-The `useAppUpdater()` same-file hook composes both mutations plus Tauri event listening:
+
+The `useAppUpdater()` same-file hook drives all update state:
 
 ```ts
+type UpdateStatus = "idle" | "checking" | "available" | "up-to-date" | "downloading" | "installed" | "error";
+
 function useAppUpdater() {
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-  const [progress, setProgress] = useState<DownloadProgress | null>(null);
+  const [status, setStatus] = useState<UpdateStatus>("idle");
+  const [currentVersion, setCurrentVersion] = useState<string>("");
+  const [update, setUpdate] = useState<Update | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
-  const checkMutation  = useCheckForUpdateMutation();
-  const installMutation = useInstallUpdateMutation();
-
-  // Listen while install is pending
   useEffect(() => {
-    if (!installMutation.isPending) return;
-    let unlisten: (() => void) | undefined;
-    listen<DownloadProgress>("update-download-progress", (e) => setProgress(e.payload))
-      .then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
-  }, [installMutation.isPending]);
+    getVersion().then(setCurrentVersion).catch(() => {});
+  }, []);
 
-  return { updateInfo, progress, checkMutation, installMutation, handleCheck, handleInstall };
+  async function handleCheck() {
+    setStatus("checking");
+    setUpdateError(null);
+    try {
+      const result = await check();
+      if (result) {
+        setUpdate(result);
+        setStatus("available");
+      } else {
+        setStatus("up-to-date");
+      }
+    } catch (e) {
+      setUpdateError(String(e));
+      setStatus("error");
+    }
+  }
+
+  async function handleInstall() {
+    if (!update) return;
+    setStatus("downloading");
+    setProgress(0);
+    try {
+      let downloaded = 0;
+      let total = 0;
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          total = event.data.contentLength ?? 0;
+        } else if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          setProgress(total > 0 ? Math.round((downloaded / total) * 100) : 0);
+        } else if (event.event === "Finished") {
+          setProgress(100);
+          setStatus("installed");
+        }
+      });
+    } catch (e) {
+      setUpdateError(String(e));
+      setStatus("error");
+    }
+  }
+
+  return { status, currentVersion, update, progress, updateError, handleCheck, handleInstall };
 }
 ```
 
 Rules:
-- Always unsubscribe the Tauri event listener in the `useEffect` cleanup.
-- `progress` is `null` when no install is in progress.
-- After `handleInstall` is called the app will restart — no navigation or state cleanup is needed.
+- Use the `DownloadEvent` discriminated union — `event.event` is `"Started"`, `"Progress"`, or `"Finished"`.
+- `event.data.contentLength` may be `undefined` (chunked transfer); guard with `?? 0`.
+- After `handleInstall` resolves the app restarts automatically — no navigation or state cleanup needed.
+- `status === "installed"` is briefly visible before the restart.
+- Never use `listen("update-download-progress", ...)` — progress comes from the `downloadAndInstall` callback, not Tauri events.
 
 ---
 
@@ -163,6 +174,9 @@ npx tauri signer generate -w ./my-key.key
 ## Common Mistakes
 
 - **Version mismatch**: If `tauri.conf.json` and `Cargo.toml` versions diverge, the build fails. The CI bump step must update both atomically.
-- **Missing `latest.json`**: `tauri-action` only uploads `latest.json` when the release target is a GitHub Release. Draft releases still get the file; the updater can poll drafts.
-- **Unsigned bundles in dev**: `check_for_update` will error in `tauri dev` because no updater endpoint/key is active. Wrap with a dev guard or handle the `Err` from `app.updater()` gracefully.
+- **Draft releases break the updater**: `releaseDraft: true` means the release is not public, so `/releases/latest/download/latest.json` returns 404. Always use `releaseDraft: false`.
+- **Wrong `.sig` pattern**: NSIS v2 bundles produce `*-setup.exe.sig`. The old v1 pattern `*.nsis.zip.sig` will fail to find the signature file.
+- **Adding custom Rust updater commands**: Do not add `check_for_update` or `download_and_install_update` Tauri commands. Use `check()` and `update.downloadAndInstall()` from `@tauri-apps/plugin-updater` directly in the frontend.
+- **Using Tauri events for progress**: Do not use `listen("update-download-progress", ...)`. Progress comes from the `downloadAndInstall(callback)` argument — the event approach was the old custom-command pattern.
+- **Unsigned bundles in dev**: `check()` will throw in `tauri dev` because no updater endpoint/key is active. Wrap in try/catch and handle gracefully.
 - **`installMode: "basicUi"` vs `"passive"`**: `passive` is the right default for desktop; `basicUi` shows the full installer wizard which can confuse users.
