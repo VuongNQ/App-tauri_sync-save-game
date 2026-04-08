@@ -2,8 +2,8 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*'
 
 jobs:
   release:
@@ -70,7 +70,7 @@ jobs:
         with:
           tagName: v${{ steps.bump.outputs.NEW_VERSION }}
           releaseName: "Save Game Sync v${{ steps.bump.outputs.NEW_VERSION }}"
-          releaseBody: "See [CHANGELOG](https://github.com/VuongNQ/App-tauri_sync-save-game/blob/main/CHANGELOG.md) for details."
+          releaseBody: "See https://github.com/VuongNQ/App-tauri_sync-save-game/releases/tag/v${{ steps.bump.outputs.NEW_VERSION }} for details."
           releaseDraft: true
           prerelease: false
           updaterJsonPreferNsis: true
@@ -98,14 +98,14 @@ jobs:
           Write-Host "Searching for .sig files under $bundleRoot ..."
           Get-ChildItem $bundleRoot -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
 
-          # Prefer NSIS (.nsis.zip.sig), fall back to MSI (.msi.zip.sig)
+          # Prefer NSIS (.nsis.sig), fall back to MSI (.msi.sig)
           $sigFile = Get-ChildItem $bundleRoot -Recurse `
-            | Where-Object { $_.Name -like "*.nsis.zip.sig" } `
+            | Where-Object { $_.Name -like "*.nsis.sig" } `
             | Select-Object -First 1
 
           if (-not $sigFile) {
             $sigFile = Get-ChildItem $bundleRoot -Recurse `
-              | Where-Object { $_.Name -like "*.msi.zip.sig" } `
+              | Where-Object { $_.Name -like "*.msi.sig" } `
               | Select-Object -First 1
           }
 
