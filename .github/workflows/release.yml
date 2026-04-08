@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  publish:
+  release:
     # Skip if this push is the automated version-bump commit (safety net)
     if: "!startsWith(github.event.head_commit.message, 'chore: bump version')"
     permissions:
@@ -21,6 +21,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm install
 
       - name: Bump patch version
         id: bump
@@ -39,23 +56,6 @@ jobs:
 
           echo "NEW_VERSION=$newVersion" >> $env:GITHUB_OUTPUT
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: 'npm'
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ./src-tauri -> target
-
-      - name: Install frontend dependencies
-        run: npm install
-
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
         env:
@@ -65,12 +65,14 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: v__VERSION__
-          releaseName: "Save Game Sync v__VERSION__"
-          releaseBody: "Automated release from main branch."
+          tagName: v${{ steps.bump.outputs.NEW_VERSION }}
+          releaseName: "Save Game Sync v${{ steps.bump.outputs.NEW_VERSION }}"
+          releaseBody: "See [CHANGELOG](https://github.com/VuongNQ/App-tauri_sync-save-game/blob/main/CHANGELOG.md) for details."
           releaseDraft: true
           prerelease: false
           updaterJsonPreferNsis: true
+          args: ${{ matrix.args }}
+
 
       - name: Commit bumped version
         shell: pwsh
@@ -81,60 +83,60 @@ jobs:
           git commit -m "chore: bump version to ${{ steps.bump.outputs.NEW_VERSION }}"
           git push
 
-      - name: Upload latest.json for updater
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $version = "${{ steps.bump.outputs.NEW_VERSION }}"
-          $tag = "v$version"
-          $repo = "VuongNQ/App-tauri_sync-save-game"
-          $bundleRoot = "src-tauri/target/release/bundle"
+      # - name: Upload latest.json for updater
+      #   shell: pwsh
+      #   env:
+      #     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   run: |
+      #     $version = "${{ steps.bump.outputs.NEW_VERSION }}"
+      #     $tag = "v$version"
+      #     $repo = "VuongNQ/App-tauri_sync-save-game"
+      #     $bundleRoot = "src-tauri/target/release/bundle"
 
-          Write-Host "Searching for .sig files under $bundleRoot ..."
-          Get-ChildItem $bundleRoot -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
+      #     Write-Host "Searching for .sig files under $bundleRoot ..."
+      #     Get-ChildItem $bundleRoot -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
 
-          # Prefer NSIS (.nsis.zip.sig), fall back to MSI (.msi.zip.sig)
-          $sigFile = Get-ChildItem $bundleRoot -Recurse `
-            | Where-Object { $_.Name -like "*.nsis.zip.sig" } `
-            | Select-Object -First 1
+      #     # Prefer NSIS (.nsis.zip.sig), fall back to MSI (.msi.zip.sig)
+      #     $sigFile = Get-ChildItem $bundleRoot -Recurse `
+      #       | Where-Object { $_.Name -like "*.nsis.zip.sig" } `
+      #       | Select-Object -First 1
 
-          if (-not $sigFile) {
-            $sigFile = Get-ChildItem $bundleRoot -Recurse `
-              | Where-Object { $_.Name -like "*.msi.zip.sig" } `
-              | Select-Object -First 1
-          }
+      #     if (-not $sigFile) {
+      #       $sigFile = Get-ChildItem $bundleRoot -Recurse `
+      #         | Where-Object { $_.Name -like "*.msi.zip.sig" } `
+      #         | Select-Object -First 1
+      #     }
 
-          if (-not $sigFile) {
-            Write-Error "No .sig file found. Ensure TAURI_SIGNING_PRIVATE_KEY is set in GitHub Secrets."
-            exit 1
-          }
+      #     if (-not $sigFile) {
+      #       Write-Error "No .sig file found. Ensure TAURI_SIGNING_PRIVATE_KEY is set in GitHub Secrets."
+      #       exit 1
+      #     }
 
-          Write-Host "Using sig file: $($sigFile.FullName)"
+      #     Write-Host "Using sig file: $($sigFile.FullName)"
 
-          # Strip the trailing .sig to get the zip asset name
-          $zipName  = [System.IO.Path]::GetFileNameWithoutExtension($sigFile.Name)
-          $signature = (Get-Content $sigFile.FullName -Raw).Trim()
-          $downloadUrl = "https://github.com/$repo/releases/download/$tag/$zipName"
-          $pubDate     = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+      #     # Strip the trailing .sig to get the zip asset name
+      #     $zipName  = [System.IO.Path]::GetFileNameWithoutExtension($sigFile.Name)
+      #     $signature = (Get-Content $sigFile.FullName -Raw).Trim()
+      #     $downloadUrl = "https://github.com/$repo/releases/download/$tag/$zipName"
+      #     $pubDate     = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
 
-          Write-Host "Zip asset : $zipName"
-          Write-Host "Download  : $downloadUrl"
+      #     Write-Host "Zip asset : $zipName"
+      #     Write-Host "Download  : $downloadUrl"
 
-          $manifest = [ordered]@{
-            version   = $version
-            notes     = "See https://github.com/$repo/releases/tag/$tag"
-            pub_date  = $pubDate
-            platforms = [ordered]@{
-              "windows-x86_64" = [ordered]@{
-                signature = $signature
-                url       = $downloadUrl
-              }
-            }
-          } | ConvertTo-Json -Depth 5
+      #     $manifest = [ordered]@{
+      #       version   = $version
+      #       notes     = "See https://github.com/$repo/releases/tag/$tag"
+      #       pub_date  = $pubDate
+      #       platforms = [ordered]@{
+      #         "windows-x86_64" = [ordered]@{
+      #           signature = $signature
+      #           url       = $downloadUrl
+      #         }
+      #       }
+      #     } | ConvertTo-Json -Depth 5
 
-          $manifest | Out-File "latest.json" -Encoding utf8NoBOM
-          Write-Host "Generated latest.json:"
-          Get-Content "latest.json"
+      #     $manifest | Out-File "latest.json" -Encoding utf8NoBOM
+      #     Write-Host "Generated latest.json:"
+      #     Get-Content "latest.json"
 
-          gh release upload $tag "latest.json" --repo $repo --clobber
+      #     gh release upload $tag "latest.json" --repo $repo --clobber

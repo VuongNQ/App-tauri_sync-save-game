@@ -26,9 +26,13 @@
   },
   "bundle": {
     "targets": [
+      "app",
       "nsis"
     ],
+    "category": "Utility",
+    "shortDescription": "Sync your game save files across devices with ease.",
     "createUpdaterArtifacts": true,
+    "active": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
