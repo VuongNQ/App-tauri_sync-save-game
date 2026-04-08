@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 
-import { listen } from "@tauri-apps/api/event";
+import { check } from "@tauri-apps/plugin-updater";
+import type { Update } from "@tauri-apps/plugin-updater";
+import { getVersion } from "@tauri-apps/api/app";
 
 import { useClearAllDriveMutation, useGoogleUserInfoQuery, useLogoutMutation } from "../queries";
-import { useCheckForUpdateMutation, useInstallUpdateMutation, useSettingsQuery, useUpdateSettingsMutation } from "../queries/settings";
+import { useSettingsQuery, useUpdateSettingsMutation } from "../queries/settings";
 import { ConfirmModal } from "../components/ConfirmModal";
 import {
   BTN,
@@ -16,7 +18,7 @@ import {
   TOGGLE_THUMB,
   TOGGLE_THUMB_ON,
 } from "../components/styles";
-import type { AppSettings, UpdateInfo } from "../types/dashboard";
+import type { AppSettings } from "../types/dashboard";
 
 export function SettingsPage() {
   const { data: userInfo, isLoading, error, refetch } = useGoogleUserInfoQuery();
@@ -31,7 +33,7 @@ export function SettingsPage() {
 
   const [showClearModal, setShowClearModal] = useState(false);
 
-  const { updateInfo, progress, checkMutation, installMutation, handleCheck, handleInstall } = useAppUpdater();
+  const { status, currentVersion, update, progress, updateError, handleCheck, handleInstall } = useAppUpdater();
 
   const toggleSetting = (key: keyof AppSettings, value: boolean) => {
     if (!settings) return;
@@ -176,32 +178,32 @@ export function SettingsPage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="m-0 text-[0.92rem] text-[#c7d3f7]">Current version</p>
-              {updateInfo && (
+              {currentVersion && (
                 <p className={`m-0 mt-0.5 font-mono text-xs ${MUTED}`}>
-                  v{updateInfo.currentVersion}
+                  v{currentVersion}
                 </p>
               )}
             </div>
             <button
               type="button"
               className={`${BTN} rounded-xl bg-white/10 px-4 py-2 text-sm font-medium text-[#eef4ff] hover:bg-white/15 disabled:opacity-50`}
-              disabled={checkMutation.isPending || installMutation.isPending}
+              disabled={status === 'checking' || status === 'downloading'}
               onClick={handleCheck}
             >
-              {checkMutation.isPending ? "Checking…" : "Check for Updates"}
+              {status === 'checking' ? "Checking…" : "Check for Updates"}
             </button>
           </div>
 
-          {updateInfo?.available && !installMutation.isPending && !installMutation.isSuccess && (
+          {status === 'available' && (
             <div className="rounded-xl border border-[rgba(140,165,241,0.2)] bg-[rgba(99,125,255,0.08)] p-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <p className="m-0 text-sm font-semibold text-[#9effc3]">
-                    v{updateInfo.version} is available
+                    v{update?.version} is available
                   </p>
-                  {updateInfo.body && (
+                  {update?.body && (
                     <p className={`m-0 mt-1 whitespace-pre-wrap text-xs ${MUTED}`}>
-                      {updateInfo.body}
+                      {update.body}
                     </p>
                   )}
                 </div>
@@ -216,7 +218,7 @@ export function SettingsPage() {
             </div>
           )}
 
-          {installMutation.isPending && (
+          {status === 'downloading' && (
             <div>
               <p className={`m-0 mb-1 text-sm ${MUTED}`}>
                 Downloading update…
@@ -238,20 +240,16 @@ export function SettingsPage() {
             </div>
           )}
 
-          {installMutation.isSuccess && (
+          {status === 'installed' && (
             <p className="m-0 text-sm text-[#9effc3]">Restarting to apply update…</p>
           )}
 
-          {!checkMutation.isPending && updateInfo && !updateInfo.available && !updateInfo.error && (
+          {status === 'up-to-date' && (
             <p className={`m-0 text-sm ${MUTED}`}>You&apos;re up to date.</p>
           )}
 
-          {updateInfo?.error && (
-            <p className="m-0 text-sm text-[#ffd5d5]">{updateInfo.error}</p>
-          )}
-
-          {installMutation.isError && (
-            <p className="m-0 text-sm text-[#ffd5d5]">Download failed. Please try again.</p>
+          {updateError && (
+            <p className="m-0 text-sm text-[#ffd5d5]">{updateError}</p>
           )}
         </div>
       </div>
@@ -330,44 +328,68 @@ function ToggleRow({ label, description, checked, onChange }: ToggleRowProps) {
 
 // ── useAppUpdater (same-file hook) ────────────────────────
 
+type UpdateStatus = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'installed' | 'error';
+
 interface DownloadProgress {
   downloaded: number;
   total: number;
 }
 
 function useAppUpdater() {
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [status, setStatus] = useState<UpdateStatus>('idle');
+  const [currentVersion, setCurrentVersion] = useState<string | null>(null);
+  const [update, setUpdate] = useState<Update | null>(null);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
-
-  const checkMutation = useCheckForUpdateMutation();
-  const installMutation = useInstallUpdateMutation();
-
-  const handleCheck = () => {
-    checkMutation.mutate(undefined, {
-      onSuccess: (data) => setUpdateInfo(data),
-    });
-  };
-
-  const handleInstall = () => {
-    setProgress(null);
-    installMutation.mutate();
-  };
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!installMutation.isPending) return;
+    getVersion().then(setCurrentVersion).catch(() => {});
+  }, []);
 
-    let unlisten: (() => void) | undefined;
+  const handleCheck = async () => {
+    setStatus('checking');
+    setError(null);
+    setUpdate(null);
+    try {
+      const result = await check();
+      if (result) {
+        setUpdate(result);
+        setStatus('available');
+      } else {
+        setStatus('up-to-date');
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setStatus('error');
+    }
+  };
 
-    listen<DownloadProgress>("update-download-progress", (event) => {
-      setProgress(event.payload);
-    }).then((fn) => {
-      unlisten = fn;
-    });
+  const handleInstall = async () => {
+    if (!update) return;
+    setStatus('downloading');
+    setProgress(null);
+    let totalSize = 0;
+    let downloaded = 0;
+    try {
+      await update.downloadAndInstall((event) => {
+        switch (event.event) {
+          case 'Started':
+            totalSize = event.data.contentLength ?? 0;
+            break;
+          case 'Progress':
+            downloaded += event.data.chunkLength;
+            setProgress({ downloaded, total: totalSize });
+            break;
+          case 'Finished':
+            setStatus('installed');
+            break;
+        }
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setStatus('error');
+    }
+  };
 
-    return () => {
-      unlisten?.();
-    };
-  }, [installMutation.isPending]);
-
-  return { updateInfo, progress, checkMutation, installMutation, handleCheck, handleInstall };
+  return { status, currentVersion, update, progress, updateError: error, handleCheck, handleInstall };
 }

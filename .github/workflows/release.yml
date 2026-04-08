@@ -73,7 +73,7 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "Save Game Sync ${{ github.ref_name }}"
           releaseBody: "See https://github.com/VuongNQ/App-tauri_sync-save-game/releases/tag/${{ github.ref_name }} for details."
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
@@ -101,10 +101,16 @@ jobs:
           }
           Write-Host "-----------------------------"
 
-          # Prefer NSIS (.exe.sig), fall back to MSI (.msi.sig)
+          # Prefer NSIS (*-setup.exe.sig), fall back to MSI (*.msi.sig) — Tauri v2 artifact names
           $sigFile = Get-ChildItem -Path $targetDir -Recurse | Where-Object { 
-              $_.Name -like "*.nsis.zip.sig" -or $_.Name -like "*.msi.zip.sig" 
+              $_.Name -like "*-setup.exe.sig"
           } | Select-Object -First 1
+
+          if (-not $sigFile) {
+            $sigFile = Get-ChildItem -Path $targetDir -Recurse | Where-Object {
+              $_.Name -like "*.msi.sig"
+            } | Select-Object -First 1
+          }
 
           if (-not $sigFile) {
             Write-Error "CRITICAL: No updater .sig files found. Updater will NOT work."

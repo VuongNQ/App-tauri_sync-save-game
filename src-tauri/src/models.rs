@@ -250,22 +250,7 @@ pub struct DriveVersionBackup {
     pub total_files: u32,
     pub total_size: u64,
 }
-// ── Updater ───────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateInfo {
-    pub available: bool,
-    /// New version string (e.g. "0.2.0"), present only when `available` is true.
-    pub version: Option<String>,
-    /// Currently installed version string (e.g. "0.1.0"). Always present.
-    pub current_version: String,
-    /// Release notes from the update manifest, if any.
-    pub body: Option<String>,
-    /// Non-fatal error message (e.g. endpoint unreachable, no releases published yet).
-    /// When this is `Some`, `available` is always `false`.
-    pub error: Option<String>,
-}
 // ── Path Validation ───────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

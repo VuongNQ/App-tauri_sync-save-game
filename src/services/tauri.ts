@@ -17,7 +17,6 @@ import type {
   SyncResult,
   SyncStructureDiff,
   UpdateGamePayload,
-  UpdateInfo,
 } from "../types/dashboard";
 
 export async function loadDashboard(): Promise<DashboardData> {
@@ -245,18 +244,4 @@ export async function deleteVersionBackup(
   return invoke<void>("delete_version_backup", { gameId, backupFolderId });
 }
 
-// ── Updater ───────────────────────────────────────────────────────────────────
 
-/** Check GitHub Releases for a newer version of the app. */
-export async function checkForUpdate(): Promise<UpdateInfo> {
-  return invoke<UpdateInfo>("check_for_update");
-}
-
-/**
- * Download the latest update and install it. Emits `update-download-progress`
- * events `{ downloaded: number; total: number }` during download.
- * The app restarts automatically once installation completes.
- */
-export async function downloadAndInstallUpdate(): Promise<void> {
-  return invoke<void>("download_and_install_update");
-}

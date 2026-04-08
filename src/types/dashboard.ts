@@ -136,20 +136,6 @@ export interface DriveFileFlatItem {
   parentFolderId: string;
 }
 
-// ── Updater ──────────────────────────────────────────────
-
-export interface UpdateInfo {
-  available: boolean;
-  /** New version string (e.g. "0.2.0"), present only when `available` is true. */
-  version: string | null;
-  /** Currently installed version string (e.g. "0.1.0"). Always present. */
-  currentVersion: string;
-  /** Release notes from the update manifest, if any. */
-  body: string | null;
-  /** Non-fatal error (e.g. endpoint unreachable, no releases yet). When set, `available` is false. */
-  error: string | null;
-}
-
 /** A version-backup snapshot stored under the game's `backups/` Drive folder. */
 export interface DriveVersionBackup {
   /** Drive folder ID of the backup subfolder. */

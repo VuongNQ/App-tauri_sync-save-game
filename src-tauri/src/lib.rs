@@ -14,7 +14,7 @@ use tauri::Manager;
 use models::{
     AddGamePayload, AppSettings, AuthStatus, DashboardData, DriveFileFlatItem, DriveFileItem,
     DriveVersionBackup, GoogleUserInfo, OAuthCredentials, PathValidation, SaveInfo,
-    SaveTokensPayload, SyncResult, SyncStructureDiff, UpdateGamePayload, UpdateInfo,
+    SaveTokensPayload, SyncResult, SyncStructureDiff, UpdateGamePayload,
 };
 
 #[tauri::command]
@@ -404,97 +404,6 @@ fn toggle_auto_sync(
     Ok(DashboardData { games: state.games })
 }
 
-// ── Updater commands ──────────────────────────────────────
-
-/// Check GitHub Releases for a newer version of the app.
-/// Always returns Ok — errors are reported as a soft `error` field inside UpdateInfo.
-#[tauri::command]
-async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
-    use tauri_plugin_updater::UpdaterExt;
-
-    let current_version = app.package_info().version.to_string();
-
-    let updater = match app.updater() {
-        Ok(u) => u,
-        Err(e) => {
-            return Ok(UpdateInfo {
-                available: false,
-                version: None,
-                current_version,
-                body: None,
-                error: Some(format!("Updater not configured: {e}")),
-            });
-        }
-    };
-
-    match updater.check().await {
-        Ok(Some(update)) => Ok(UpdateInfo {
-            available: true,
-            version: Some(update.version),
-            current_version,
-            body: update.body,
-            error: None,
-        }),
-        Ok(None) => Ok(UpdateInfo {
-            available: false,
-            version: None,
-            current_version,
-            body: None,
-            error: None,
-        }),
-        Err(e) => {
-            let msg = e.to_string();
-            // Distinguish between "no release published yet" (404) and true errors
-            let friendly = if msg.contains("404") || msg.contains("Not Found") || msg.contains("not found") {
-                "No update release found. Push to main and publish a GitHub Release to enable updates.".to_string()
-            } else {
-                format!("Could not reach update server: {msg}")
-            };
-            eprintln!("[updater] Check failed: {msg}");
-            Ok(UpdateInfo {
-                available: false,
-                version: None,
-                current_version,
-                body: None,
-                error: Some(friendly),
-            })
-        }
-    }
-}
-
-/// Download the latest update from GitHub Releases and install it.
-/// Emits `update-download-progress { downloaded: u64, total: u64 }` events during download.
-/// The app restarts automatically once installation completes.
-#[tauri::command]
-async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), String> {
-    use tauri_plugin_updater::UpdaterExt;
-
-    let updater = app.updater().map_err(|e| e.to_string())?;
-    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
-        return Err("No update available".to_string());
-    };
-
-    let app_clone = app.clone();
-    let mut downloaded: u64 = 0;
-
-    update
-        .download_and_install(
-            move |chunk_length, total| {
-                downloaded += chunk_length as u64;
-                let _ = tauri::Emitter::emit(
-                    &app_clone,
-                    "update-download-progress",
-                    serde_json::json!({ "downloaded": downloaded, "total": total.unwrap_or(0) }),
-                );
-            },
-            || {},
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -558,8 +467,6 @@ pub fn run() {
             list_version_backups,
             restore_version_backup,
             delete_version_backup,
-            check_for_update,
-            download_and_install_update,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
