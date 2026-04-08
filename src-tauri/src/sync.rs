@@ -71,6 +71,26 @@ fn collect_local_files(save_path: &Path) -> Result<Vec<LocalFileInfo>, String> {
 /// Maximum total cloud storage allowed per user across all games (200 MB).
 const STORAGE_LIMIT_BYTES: u64 = 200 * 1024 * 1024;
 
+/// Check whether a relative path matches any exclusion entry.
+/// An entry ending with `/` is treated as a folder prefix; otherwise it is
+/// an exact file match (or a folder where the path starts with `<entry>/`).
+fn is_excluded(rel_path: &str, excludes: &[String]) -> bool {
+    for ex in excludes {
+        if ex.ends_with('/') {
+            // Folder prefix — match anything under this directory
+            if rel_path.starts_with(ex.as_str()) {
+                return true;
+            }
+        } else {
+            // Exact file match OR path starts with `<entry>/` (entry is a folder without trailing slash)
+            if rel_path == ex.as_str() || rel_path.starts_with(&format!("{ex}/")) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Compute the projected total cloud bytes for one game after a sync completes.
 /// Uses local file sizes for files that will be uploaded, and existing cloud
 /// sizes for files that are cloud-only (will be downloaded, not re-uploaded).
@@ -237,8 +257,12 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
     // 4. List existing Drive files (for looking up file IDs by name)
     let mut drive_files = gdrive::list_files(app, &game_folder_id)?;
 
-    // 5. Collect local files
-    let local_files = collect_local_files(save_dir)?;
+    // 5. Collect local files — excluding paths the user has opted out of syncing
+    let all_local_files = collect_local_files(save_dir)?;
+    let local_files: Vec<LocalFileInfo> = all_local_files
+        .into_iter()
+        .filter(|f| !is_excluded(&f.relative_path, &game.sync_excludes))
+        .collect();
 
     // ── Storage limit guard ───────────────────────────────────────────────────
     let projected_this_game = projected_game_cloud_bytes(&local_files, &cloud_meta);
@@ -458,9 +482,12 @@ pub fn check_sync_structure_diff(
     let cloud_has_data = cloud_meta_opt.is_some();
     let cloud_meta = cloud_meta_opt.unwrap_or_default();
 
-    // 4. Collect local files (returns empty vec if path doesn't exist yet)
+    // 4. Collect local files — excluding paths the user has opted out of syncing
     let local_files = if save_dir.exists() {
         collect_local_files(save_dir)?
+            .into_iter()
+            .filter(|f| !is_excluded(&f.relative_path, &game.sync_excludes))
+            .collect()
     } else {
         Vec::new()
     };
@@ -669,8 +696,12 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
     let cloud_meta = cloud_meta_opt.unwrap_or_default();
     let drive_files = gdrive::list_files(app, &game_folder_id)?;
 
-    // 4. Collect local files
-    let local_files = collect_local_files(save_dir)?;
+    // 4. Collect local files — excluding paths the user has opted out of syncing
+    let all_local_files = collect_local_files(save_dir)?;
+    let local_files: Vec<LocalFileInfo> = all_local_files
+        .into_iter()
+        .filter(|f| !is_excluded(&f.relative_path, &game.sync_excludes))
+        .collect();
 
     // ── Storage limit guard ───────────────────────────────────────────────────
     let projected_this_game = projected_game_cloud_bytes(&local_files, &cloud_meta);
@@ -748,4 +779,78 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
         skipped,
         error: None,
     })
+}
+
+// ── Cleanup excluded files from Cloud ────────────────────
+
+/// Delete files from Google Drive that the user has newly added to `sync_excludes`.
+/// Updates `.sync-meta.json` to remove the deleted entries.
+/// Called in a background thread from the `update_game` command handler.
+pub fn cleanup_excluded_from_cloud(
+    app: &AppHandle,
+    game_id: &str,
+    newly_excluded: Vec<String>,
+) -> Result<(), String> {
+    if newly_excluded.is_empty() {
+        return Ok(());
+    }
+
+    println!(
+        "[sync] Cleaning up {} newly-excluded path(s) from Drive for game {game_id}",
+        newly_excluded.len()
+    );
+
+    // 1. Ensure Drive folder exists
+    let root_folder_id = gdrive::ensure_root_folder(app)?;
+    let game_folder_id = gdrive::ensure_game_folder(app, &root_folder_id, game_id)?;
+
+    // 2. Download sync metadata
+    let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
+    let mut cloud_meta = match cloud_meta_opt {
+        Some(m) => m,
+        None => {
+            println!("[sync] No cloud meta for {game_id} — nothing to clean up");
+            return Ok(());
+        }
+    };
+
+    // 3. For each excluded path, delete its Drive file and remove it from meta
+    let expandable_excludes: Vec<String> = newly_excluded;
+    // We need sync_excludes from GameEntry to evaluate is_excluded properly.
+    // Since newly_excluded already contains only the new entries, we use them directly.
+    let keys_to_remove: Vec<String> = cloud_meta
+        .files
+        .keys()
+        .filter(|rel_path| is_excluded(rel_path, &expandable_excludes))
+        .cloned()
+        .collect();
+
+    for rel_path in &keys_to_remove {
+        if let Some(file_meta) = cloud_meta.files.get(rel_path) {
+            if let Some(ref drive_file_id) = file_meta.drive_file_id {
+                println!("[sync] Deleting excluded Drive file '{rel_path}' (id={drive_file_id})");
+                if let Err(e) = gdrive::delete_drive_file(app, drive_file_id) {
+                    // Log but continue — meta cleanup still happens
+                    eprintln!("[sync] Failed to delete Drive file '{rel_path}': {e}");
+                }
+            }
+        }
+        cloud_meta.files.remove(rel_path);
+    }
+
+    // 4. Re-upload updated sync metadata
+    gdrive::upload_sync_meta(app, &game_folder_id, &cloud_meta, meta_file_id.as_deref())?;
+
+    // 5. Update cloud_storage_bytes to reflect new total
+    let new_cloud_bytes: u64 = cloud_meta.files.values().map(|f| f.size).sum();
+    let _ = settings::update_game_field(app, game_id, |g| {
+        g.cloud_storage_bytes = Some(new_cloud_bytes);
+    });
+
+    println!(
+        "[sync] Cleanup complete for {game_id}: removed {} path(s) from Drive",
+        keys_to_remove.len()
+    );
+
+    Ok(())
 }

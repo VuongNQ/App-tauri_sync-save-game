@@ -38,7 +38,34 @@ fn update_game(
     app: tauri::AppHandle,
     payload: UpdateGamePayload,
 ) -> Result<DashboardData, String> {
+    // Capture old sync_excludes before updating so we can diff for cloud cleanup.
+    let old_excludes: Vec<String> = settings::load_state(&app)
+        .ok()
+        .and_then(|s| s.games.into_iter().find(|g| g.id == payload.game.id))
+        .map(|g| g.sync_excludes)
+        .unwrap_or_default();
+
+    let new_excludes = payload.game.sync_excludes.clone();
+    let game_id = payload.game.id.clone();
+    let gdrive_folder_id = payload.game.gdrive_folder_id.clone();
+
     settings::upsert_game(&app, payload.game)?;
+
+    // If any paths were newly excluded, delete them from Drive in the background.
+    let newly_excluded: Vec<String> = new_excludes
+        .into_iter()
+        .filter(|e| !old_excludes.contains(e))
+        .collect();
+
+    if !newly_excluded.is_empty() && gdrive_folder_id.is_some() {
+        let app_clone = app.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = sync::cleanup_excluded_from_cloud(&app_clone, &game_id, newly_excluded) {
+                eprintln!("[sync] cleanup excluded from cloud failed: {e}");
+            }
+        });
+    }
+
     let state = settings::load_state(&app)?;
     Ok(DashboardData { games: state.games })
 }

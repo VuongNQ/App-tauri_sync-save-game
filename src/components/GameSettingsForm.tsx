@@ -4,18 +4,21 @@ import {
   useFormContext,
   FormProvider,
   Controller,
+  useWatch,
 } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { useUpdateGameMutation } from "../queries";
-import type { GameEntry } from "../types/dashboard";
+import type { GameEntry, SaveInfo } from "../types/dashboard";
 import {
   getBrowseDefaultPath,
   expandSavePath,
+  getSaveInfo,
   uploadGameLogo,
 } from "../services/tauri";
+import { SaveFileTree } from "./SaveFileTree";
 import { norm, msg, toImgSrc } from "../utils";
 import {
   CARD,
@@ -54,6 +57,7 @@ const gameSettingsSchema = z.object({
   savePath: z.string(),
   trackChanges: z.boolean(),
   autoSync: z.boolean(),
+  syncExcludes: z.array(z.string()),
 });
 
 type GameSettingsFormValues = z.infer<typeof gameSettingsSchema>;
@@ -87,6 +91,7 @@ export function GameSettingsForm({
       savePath: game.savePath ?? "",
       trackChanges: game.trackChanges,
       autoSync: game.autoSync,
+      syncExcludes: game.syncExcludes ?? [],
     },
     resolver: zodResolver(gameSettingsSchema),
   });
@@ -103,6 +108,7 @@ export function GameSettingsForm({
       savePath: game.savePath ?? "",
       trackChanges: game.trackChanges,
       autoSync: game.autoSync,
+      syncExcludes: game.syncExcludes ?? [],
     });
   }, [
     game.id,
@@ -111,6 +117,7 @@ export function GameSettingsForm({
     game.savePath,
     game.trackChanges,
     game.autoSync,
+    game.syncExcludes,
     reset,
   ]);
 
@@ -147,6 +154,7 @@ export function GameSettingsForm({
       savePath: norm(values.savePath),
       trackChanges: values.trackChanges,
       autoSync: values.autoSync,
+      syncExcludes: values.syncExcludes,
     });
     onClose();
   }
@@ -197,6 +205,9 @@ export function GameSettingsForm({
 
               {/* Tracking & Sync */}
               <TrackingSettingsSection isSyncing={isSyncing} />
+
+              {/* Sync exclusions */}
+              <SyncExclusionsSection game={game} />
             </div>
 
             {/* Modal footer */}
@@ -465,6 +476,151 @@ function TrackingSettingsSection({ isSyncing }: TrackingSettingsSectionProps) {
           )}
         />
       </div>
+    </div>
+  );
+}
+
+// ── SyncExclusionsSection ─────────────────────────────────────────────────────
+
+interface SyncExclusionsSectionProps {
+  game: GameEntry;
+}
+
+function SyncExclusionsSection({ game }: SyncExclusionsSectionProps) {
+  const { setValue, control } = useFormContext<GameSettingsFormValues>();
+  const excluded = useWatch({ control, name: "syncExcludes" });
+
+  const [saveInfo, setSaveInfo] = useState<SaveInfo | null>(null);
+  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [manualInput, setManualInput] = useState("");
+
+  async function handleLoadFiles() {
+    setLoadError(null);
+    setIsLoadingFiles(true);
+    try {
+      const info = await getSaveInfo(game.id);
+      setSaveInfo(info);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsLoadingFiles(false);
+    }
+  }
+
+  function handleToggle(path: string, _isFolder: boolean) {
+    const next = excluded.includes(path)
+      ? excluded.filter((e) => e !== path)
+      : [...excluded, path];
+    setValue("syncExcludes", next, { shouldDirty: true });
+  }
+
+  function handleRemove(path: string) {
+    setValue(
+      "syncExcludes",
+      excluded.filter((e) => e !== path),
+      { shouldDirty: true },
+    );
+  }
+
+  function handleManualAdd() {
+    const trimmed = manualInput.trim();
+    if (!trimmed || excluded.includes(trimmed)) {
+      setManualInput("");
+      return;
+    }
+    setValue("syncExcludes", [...excluded, trimmed], { shouldDirty: true });
+    setManualInput("");
+  }
+
+  return (
+    <div className={CARD}>
+      <h3 className="m-0 mb-1 font-semibold">Sync exclusions</h3>
+      <p className="m-0 mb-4 text-sm text-[#9aa8c7]">
+        Files and folders listed here are skipped during Google Drive sync. Existing
+        Drive copies are deleted when you save.
+      </p>
+
+      {/* Current exclusions list */}
+      {excluded.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          {excluded.map((ex) => (
+            <span
+              key={ex}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-[rgba(255,180,80,0.12)] border border-[rgba(255,180,80,0.25)] text-[#ffd5a0]"
+            >
+              <span className="font-mono truncate max-w-[260px]" title={ex}>{ex}</span>
+              <button
+                type="button"
+                className="shrink-0 text-[#ffd5a0] hover:text-white leading-none"
+                onClick={() => handleRemove(ex)}
+                title="Remove exclusion"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Manual add */}
+      <div className={INPUT_ROW + " mb-4"}>
+        <input
+          className={INPUT_CLS}
+          value={manualInput}
+          onChange={(e) => setManualInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleManualAdd())}
+          placeholder="e.g. UserMetaData.sav  or  backup/"
+        />
+        <button
+          type="button"
+          className={SECONDARY_BTN}
+          onClick={handleManualAdd}
+          disabled={!manualInput.trim()}
+        >
+          Add
+        </button>
+      </div>
+
+      {/* Load files button */}
+      {!saveInfo && (
+        <button
+          type="button"
+          className={SECONDARY_BTN}
+          onClick={handleLoadFiles}
+          disabled={isLoadingFiles || !game.savePath}
+          title={!game.savePath ? "Set a save folder first" : undefined}
+        >
+          {isLoadingFiles ? "Loading…" : "Load save files"}
+        </button>
+      )}
+      {loadError && (
+        <p className="mt-2 text-sm text-[#ffd5d5]">{loadError}</p>
+      )}
+
+      {/* Interactive file tree */}
+      {saveInfo && (
+        <>
+          <div className="flex items-center justify-between mb-1">
+            <p className="m-0 text-xs text-[#9aa8c7]">
+              Check files or folders to exclude from sync.
+            </p>
+            <button
+              type="button"
+              className="text-xs text-[#7dc9ff] hover:underline"
+              onClick={() => setSaveInfo(null)}
+            >
+              Hide
+            </button>
+          </div>
+          <SaveFileTree
+            info={saveInfo}
+            checkable
+            excluded={excluded}
+            onToggle={handleToggle}
+          />
+        </>
+      )}
     </div>
   );
 }
