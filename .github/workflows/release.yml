@@ -91,9 +91,18 @@ jobs:
           Write-Host "Searching for .sig files under $bundleRoot ..."
           Get-ChildItem $bundleRoot -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
 
-          # Prefer NSIS (.nsis.sig), fall back to MSI (.msi.sig)
+          Write-Host "--- All *.sig files found ---"
+          $allSig = Get-ChildItem $bundleRoot -Recurse | Where-Object { $_.Name -like "*.sig" }
+          if ($allSig) {
+            $allSig | ForEach-Object { Write-Host "  [sig] $($_.FullName)" }
+          } else {
+            Write-Host "  (none)"
+          }
+          Write-Host "-----------------------------"
+
+          # Prefer NSIS (.exe.sig), fall back to MSI (.msi.sig)
           $sigFile = Get-ChildItem $bundleRoot -Recurse `
-            | Where-Object { $_.Name -like "*.nsis.sig" } `
+            | Where-Object { $_.Name -like "*.exe.sig" } `
             | Select-Object -First 1
 
           if (-not $sigFile) {
@@ -107,7 +116,9 @@ jobs:
             exit 1
           }
 
-          Write-Host "Using sig file: $($sigFile.FullName)"
+          Write-Host "sigFile          : $($sigFile | Format-List | Out-String)"
+          Write-Host "sigFile.Name     : $($sigFile.Name)"
+          Write-Host "sigFile.FullName : $($sigFile.FullName)"
 
           # Strip the trailing .sig to get the zip asset name
           $zipName  = [System.IO.Path]::GetFileNameWithoutExtension($sigFile.Name)
