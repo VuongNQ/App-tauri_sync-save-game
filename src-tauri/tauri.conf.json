@@ -27,7 +27,8 @@
   "bundle": {
     "targets": [
       "msi",
-      "nsis"
+      "nsis",
+      "updater"
     ],
     "category": "Utility",
     "shortDescription": "Sync your game save files across devices with ease.",
