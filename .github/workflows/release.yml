@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   release:
@@ -86,13 +86,14 @@ jobs:
           $version = "${{ steps.version.outputs.VERSION }}"
           $tag = "${{ github.ref_name }}"
           $repo = "VuongNQ/App-tauri_sync-save-game"
-          $bundleRoot = "src-tauri/target/release/bundle"
+          $targetDir = "src-tauri/target"
+          $bundleRoot = "$targetDir/release/bundle"
 
           Write-Host "Searching for .sig files under $bundleRoot ..."
           Get-ChildItem $bundleRoot -Recurse | ForEach-Object { Write-Host "  $($_.FullName)" }
 
           Write-Host "--- All *.sig files found ---"
-          $allSig = Get-ChildItem $bundleRoot -Recurse | Where-Object { $_.Name -like "*.sig" }
+          $allSig = Get-ChildItem $targetDir -Recurse | Where-Object { $_.Name -like "*.sig" }
           if ($allSig) {
             $allSig | ForEach-Object { Write-Host "  [sig] $($_.FullName)" }
           } else {
@@ -101,18 +102,12 @@ jobs:
           Write-Host "-----------------------------"
 
           # Prefer NSIS (.exe.sig), fall back to MSI (.msi.sig)
-          $sigFile = Get-ChildItem $bundleRoot -Recurse `
-            | Where-Object { $_.Name -like "*.exe.sig" } `
-            | Select-Object -First 1
+          $sigFile = Get-ChildItem -Path $targetDir -Recurse | Where-Object { 
+              $_.Name -like "*.nsis.zip.sig" -or $_.Name -like "*.msi.zip.sig" 
+          } | Select-Object -First 1
 
           if (-not $sigFile) {
-            $sigFile = Get-ChildItem $bundleRoot -Recurse `
-              | Where-Object { $_.Name -like "*.msi.sig" } `
-              | Select-Object -First 1
-          }
-
-          if (-not $sigFile) {
-            Write-Error "No .sig file found. Ensure TAURI_SIGNING_PRIVATE_KEY is set in GitHub Secrets."
+            Write-Error "CRITICAL: No updater .sig files found. Updater will NOT work."
             exit 1
           }
 
