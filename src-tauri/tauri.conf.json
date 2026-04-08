@@ -51,7 +51,10 @@
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFGQTkzODlCRjI1REQ0NDcKUldSSDFGM3ltemlwSDgyaUQrVjNvSExyczRIK002eGxJVm9jcDg4bTYxZDNKL3JhNE5Gc2dmU0sK",
       "endpoints": [
         "https://github.com/VuongNQ/App-tauri_sync-save-game/releases/latest/download/latest.json"
-      ]
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }
