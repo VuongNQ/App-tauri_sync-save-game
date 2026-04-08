@@ -70,6 +70,7 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
         last_cloud_modified: None,
         gdrive_folder_id: None,
         cloud_storage_bytes: None,
+        sync_excludes: vec![]
     };
 
     state.games.push(game.clone());

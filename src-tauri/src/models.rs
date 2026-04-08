@@ -28,6 +28,10 @@ pub struct GameEntry {
     /// Updated after each successful sync. Used to enforce per-user storage quotas.
     #[serde(default)]
     pub cloud_storage_bytes: Option<u64>,
+    /// Relative paths (forward-slash) excluded from Drive sync.
+    /// A trailing '/' means the entry is a folder prefix; otherwise it is an exact file match.
+    #[serde(default)]
+    pub sync_excludes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

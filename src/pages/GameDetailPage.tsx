@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DriveFilesSection } from "../components/DriveFilesSection";
 import { GameSettingsForm } from "../components/GameSettingsForm";
+import { SaveFileTree, formatBytes } from "../components/SaveFileTree";
 import { Toast } from "../components/Toast";
 import { VersionBackupsSection } from "../components/VersionBackupsSection";
 import {
@@ -27,7 +28,6 @@ import {
   useValidatePathsQuery,
 } from "../queries";
 import type {
-  SaveFileInfo,
   SaveInfo,
   SyncStructureDiff,
 } from "../types/dashboard";
@@ -337,150 +337,6 @@ export function GameDetailPage() {
 
 // ── Co-located components ─────────────────────────────────────────────────────
 
-// ── Save-file tree ────────────────────────────────────────
-
-type SaveTreeLeaf = {
-  kind: "file";
-  name: string;
-  relativePath: string;
-  size: number;
-};
-
-type SaveTreeDir = {
-  kind: "folder";
-  name: string;
-  children: SaveTreeItem[];
-  totalSize: number;
-};
-
-type SaveTreeItem = SaveTreeLeaf | SaveTreeDir;
-
-function buildSaveTree(files: SaveFileInfo[]): SaveTreeItem[] {
-  function insert(
-    nodes: SaveTreeItem[],
-    parts: string[],
-    file: SaveFileInfo,
-  ): void {
-    if (parts.length === 1) {
-      nodes.push({
-        kind: "file",
-        name: parts[0],
-        relativePath: file.relativePath,
-        size: file.size,
-      });
-      return;
-    }
-    const dirName = parts[0];
-    let dir = nodes.find(
-      (n): n is SaveTreeDir => n.kind === "folder" && n.name === dirName,
-    );
-    if (!dir) {
-      dir = { kind: "folder", name: dirName, children: [], totalSize: 0 };
-      nodes.push(dir);
-    }
-    dir.totalSize += file.size;
-    insert(dir.children, parts.slice(1), file);
-  }
-
-  const roots: SaveTreeItem[] = [];
-  for (const file of files) {
-    const parts = file.relativePath
-      .replace(/\\/g, "/")
-      .split("/")
-      .filter(Boolean);
-    insert(roots, parts, file);
-  }
-  return roots;
-}
-
-function SaveTreeNode({ node, depth }: { node: SaveTreeItem; depth: number }) {
-  const [open, setOpen] = useState(true);
-  const indent = depth * 14;
-
-  if (node.kind === "file") {
-    return (
-      <li
-        className="flex items-center justify-between gap-2 text-xs py-1.25 pr-2 rounded-lg hover:bg-white/4"
-        style={{ paddingLeft: `${6 + indent}px` }}
-      >
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[#9aa8c7] shrink-0 select-none">↳</span>
-          <div className="min-w-0">
-            <span className="text-[#c7d3f7] truncate block">{node.name}</span>
-          </div>
-        </div>
-        <span className="shrink-0 text-[0.72rem] text-[#9aa8c7] bg-white/6 px-1.75 py-0.5 rounded-full whitespace-nowrap">
-          {formatBytes(node.size)}
-        </span>
-      </li>
-    );
-  }
-
-  return (
-    <>
-      <li
-        className="flex items-center justify-between gap-2 text-xs py-1.25 pr-2 rounded-lg cursor-pointer hover:bg-white/6 select-none"
-        style={{ paddingLeft: `${6 + indent}px` }}
-        onClick={() => setOpen((o) => !o)}
-      >
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[#9aa8c7] shrink-0 w-3 text-center text-[0.6rem]">
-            {open ? "▼" : "►"}
-          </span>
-          <span className="text-[#7dc9ff] font-medium truncate">
-            {node.name}/
-          </span>
-        </div>
-        <span className="shrink-0 text-[0.72rem] text-[#9aa8c7] bg-white/6 px-1.75 py-0.5 rounded-full whitespace-nowrap">
-          {formatBytes(node.totalSize)}
-        </span>
-      </li>
-      {open &&
-        node.children.map((child, i) => (
-          <SaveTreeNode key={i} node={child} depth={depth + 1} />
-        ))}
-    </>
-  );
-}
-
-function SaveFolderTree({ info }: { info: SaveInfo }) {
-  const [open, setOpen] = useState(true);
-  const tree = buildSaveTree(info.files);
-
-  return (
-    <ul className="mt-3 list-none p-0 text-xs rounded-[14px] bg-[rgba(255,255,255,0.02)] border border-[rgba(165,185,255,0.06)] overflow-hidden">
-      {/* Root save-path row */}
-      <li
-        className="flex items-center justify-between gap-2 px-2 py-1.75 cursor-pointer hover:bg-white/5 select-none border-b border-[rgba(165,185,255,0.06)]"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[#9aa8c7] shrink-0 w-3 text-center text-[0.6rem]">
-            {open ? "▼" : "►"}
-          </span>
-          <span
-            className="text-[#7dc9ff] font-medium truncate"
-            title={info.savePath}
-          >
-            {info.savePath}
-          </span>
-        </div>
-        <span className="shrink-0 text-[0.72rem] text-[#9aa8c7] bg-white/6 px-1.75 py-0.5 rounded-full whitespace-nowrap">
-          {formatBytes(info.totalSize)}
-        </span>
-      </li>
-      {/* Tree children */}
-      {open && (
-        <div className="py-1 max-h-65 overflow-y-auto">
-          {tree.map((node, i) => (
-            <SaveTreeNode key={i} node={node} depth={1} />
-          ))}
-        </div>
-      )}
-    </ul>
-  );
-}
-
 function SaveInfoPanel({ info }: { info: SaveInfo }) {
   return (
     <div className="mt-4 p-4 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]">
@@ -499,7 +355,7 @@ function SaveInfoPanel({ info }: { info: SaveInfo }) {
           <dd className={`${MUTED} m-0`}>{info.lastModified ?? "N/A"}</dd>
         </div>
       </dl>
-      {info.files.length > 0 && <SaveFolderTree info={info} />}
+      {info.files.length > 0 && <SaveFileTree info={info} />}
     </div>
   );
 }
@@ -539,17 +395,6 @@ function SyncResultPanel({
       )}
     </div>
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const i = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1,
-  );
-  const val = bytes / Math.pow(1024, i);
-  return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 // ── useRestoreFromDriveFlow ───────────────────────────────────────────────────

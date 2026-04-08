@@ -14,6 +14,7 @@ export interface GameEntry {
   gdriveFolderId: string | null;
   /** Total bytes stored in Google Drive for this game's save files. */
   cloudStorageBytes: number | null;
+  syncExcludes: string[];
 }
 
 export interface DashboardData {
