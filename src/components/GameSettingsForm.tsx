@@ -1,25 +1,25 @@
+import { zodResolver } from "@hookform/resolvers/zod";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import {
+  Controller,
+  FormProvider,
   useForm,
   useFormContext,
-  FormProvider,
-  Controller,
   useWatch,
 } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { open } from "@tauri-apps/plugin-dialog";
 
 import { useUpdateGameMutation } from "../queries";
-import type { GameEntry, SaveInfo } from "../types/dashboard";
 import {
-  getBrowseDefaultPath,
   expandSavePath,
+  getBrowseDefaultPath,
   getSaveInfo,
   uploadGameLogo,
 } from "../services/tauri";
+import type { GameEntry, SaveInfo } from "../types/dashboard";
+import { msg, norm, toImgSrc } from "../utils";
 import { SaveFileTree } from "./SaveFileTree";
-import { norm, msg, toImgSrc } from "../utils";
 import {
   CARD,
   FIELD_ERROR,
@@ -32,10 +32,6 @@ import {
   MUTED,
   PRIMARY_BTN,
   SECONDARY_BTN,
-  TOGGLE_TRACK_ON,
-  TOGGLE_TRACK_OFF,
-  TOGGLE_THUMB_ON,
-  TOGGLE_THUMB_OFF,
 } from "./styles";
 
 // ── Unified settings schema ───────────────────────────────────────────────────
