@@ -25,6 +25,7 @@ import {
   useRemoveGameMutation,
   useRestoreFromCloudMutation,
   useSyncGameMutation,
+  useSyncLibraryFromCloudMutation,
   useValidatePathsQuery,
 } from "../queries";
 import type {
@@ -54,6 +55,8 @@ export function GameDetailPage() {
 
   const syncMutation = useSyncGameMutation();
 
+  const syncLibraryMutation = useSyncLibraryFromCloudMutation();
+
   const validateQuery = useValidatePathsQuery();
 
   const [toast, setToast] = useState<{
@@ -64,7 +67,10 @@ export function GameDetailPage() {
   const restoreFlow = useRestoreFromDriveFlow(id ?? "", setToast);
 
   const isSyncing =
-    syncMutation.isPending || restoreFlow.isChecking || restoreFlow.isExecuting;
+    syncMutation.isPending ||
+    restoreFlow.isChecking ||
+    restoreFlow.isExecuting ||
+    syncLibraryMutation.isPending;
 
   const isPathInvalid =
     game != null &&
@@ -171,6 +177,27 @@ export function GameDetailPage() {
             onClick={() => setShowSettingsModal(true)}
           >
             Edit settings
+          </button>
+          <button
+            className={SECONDARY_BTN}
+            type="button"
+            disabled={isSyncing}
+            onClick={() =>
+              syncLibraryMutation.mutate(undefined, {
+                onSuccess: () =>
+                  setToast({
+                    message: "Game settings refreshed from Drive.",
+                    type: "success",
+                  }),
+                onError: (err) =>
+                  setToast({
+                    message: msg(err, "Failed to sync settings from Drive."),
+                    type: "error",
+                  }),
+              })
+            }
+          >
+            {syncLibraryMutation.isPending ? "Syncing…" : "↓ Sync settings from Drive"}
           </button>
           <button
             className={SECONDARY_BTN}

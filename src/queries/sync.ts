@@ -16,6 +16,7 @@ import {
   restoreVersionBackup,
   syncAllGames,
   syncGame,
+  syncLibraryFromCloud,
   toggleAutoSync,
   toggleTrackChanges,
 } from "../services/tauri";
@@ -41,6 +42,16 @@ export function useSyncAllMutation() {
   return useMutation({
     mutationFn: () => syncAllGames(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY }),
+  });
+}
+
+export function useSyncLibraryFromCloudMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => syncLibraryFromCloud(),
+    onSuccess: (data) => {
+      queryClient.setQueryData<DashboardData>(DASHBOARD_KEY, data);
+    },
   });
 }
 

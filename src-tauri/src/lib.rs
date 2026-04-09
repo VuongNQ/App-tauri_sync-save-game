@@ -368,6 +368,17 @@ async fn sync_all_games(app: tauri::AppHandle) -> Result<Vec<SyncResult>, String
 }
 
 #[tauri::command]
+async fn sync_library_from_cloud(app: tauri::AppHandle) -> Result<DashboardData, String> {
+    tokio::task::spawn_blocking(move || {
+        gdrive::fetch_library_from_cloud(&app)?;
+        let state = settings::load_state(&app)?;
+        Ok(DashboardData { games: state.games })
+    })
+    .await
+    .map_err(|e| format!("Library sync from cloud task failed: {e}"))?
+}
+
+#[tauri::command]
 async fn check_sync_structure_diff(
     app: tauri::AppHandle,
     game_id: String,
@@ -476,6 +487,7 @@ pub fn run() {
             get_save_info,
             sync_game,
             sync_all_games,
+            sync_library_from_cloud,
             check_sync_structure_diff,
             restore_from_cloud,
             push_to_cloud,

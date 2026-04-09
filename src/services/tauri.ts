@@ -96,6 +96,11 @@ export async function syncAllGames(): Promise<SyncResult[]> {
   return invoke<SyncResult[]>("sync_all_games");
 }
 
+/** Pull library.json from Drive and overwrite local game list. Returns updated dashboard. */
+export async function syncLibraryFromCloud(): Promise<DashboardData> {
+  return invoke<DashboardData>("sync_library_from_cloud");
+}
+
 /** Check the diff between local saves and Drive without transferring files. */
 export async function checkSyncStructureDiff(
   gameId: string,
