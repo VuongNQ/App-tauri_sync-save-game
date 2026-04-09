@@ -96,10 +96,7 @@ export function GameSettingsForm({
     resolver: zodResolver(gameSettingsSchema),
   });
 
-  const {
-    handleSubmit,
-    reset,
-  } = methods;
+  const { handleSubmit, reset } = methods;
 
   useEffect(() => {
     reset({
@@ -177,7 +174,10 @@ export function GameSettingsForm({
           <button
             type="button"
             className="text-[#9aa8c7] hover:text-[#c7d3f7] text-xl leading-none p-1 transition-colors"
-            onClick={() => { reset(); onClose(); }}
+            onClick={() => {
+              reset();
+              onClose();
+            }}
           >
             ✕
           </button>
@@ -203,9 +203,6 @@ export function GameSettingsForm({
                 isPathInvalid={isPathInvalid}
               />
 
-              {/* Tracking & Sync */}
-              <TrackingSettingsSection isSyncing={isSyncing} />
-
               {/* Sync exclusions */}
               <SyncExclusionsSection game={game} />
             </div>
@@ -213,18 +210,27 @@ export function GameSettingsForm({
             {/* Modal footer */}
             <div className="shrink-0 px-6 py-4 border-t border-[rgba(165,185,255,0.1)] flex items-center gap-3">
               {saveError && (
-                <span className="text-sm text-[#ffd5d5] mr-auto">{saveError}</span>
+                <span className="text-sm text-[#ffd5d5] mr-auto">
+                  {saveError}
+                </span>
               )}
               <div className="flex items-center gap-3 ml-auto">
                 <button
                   type="button"
                   className={GHOST_BTN}
-                  onClick={() => { reset(); onClose(); }}
+                  onClick={() => {
+                    reset();
+                    onClose();
+                  }}
                   disabled={isSaving}
                 >
                   Discard
                 </button>
-                <button type="submit" className={PRIMARY_BTN} disabled={isSaving}>
+                <button
+                  type="submit"
+                  className={PRIMARY_BTN}
+                  disabled={isSaving}
+                >
                   {isSaving ? "Saving…" : "Save"}
                 </button>
               </div>
@@ -435,51 +441,6 @@ function SaveFolderSection({
   );
 }
 
-// ── Tracking & Sync section ───────────────────────────────────────────────────
-
-interface TrackingSettingsSectionProps {
-  isSyncing: boolean;
-}
-
-function TrackingSettingsSection({ isSyncing }: TrackingSettingsSectionProps) {
-  const { control } = useFormContext<GameSettingsFormValues>();
-
-  return (
-    <div className={CARD}>
-      <h3 className="m-0 mb-4 font-semibold">Tracking & Sync</h3>
-
-      <div className="grid gap-4">
-        <Controller
-          name="trackChanges"
-          control={control}
-          render={({ field }) => (
-            <ToggleRow
-              label="Track file changes"
-              description="Watch the save folder for modifications in the background"
-              enabled={field.value}
-              disabled={isSyncing}
-              onChange={field.onChange}
-            />
-          )}
-        />
-        <Controller
-          name="autoSync"
-          control={control}
-          render={({ field }) => (
-            <ToggleRow
-              label="Auto-sync to Google Drive"
-              description="Automatically back up saves when changes are detected"
-              enabled={field.value}
-              disabled={isSyncing}
-              onChange={field.onChange}
-            />
-          )}
-        />
-      </div>
-    </div>
-  );
-}
-
 // ── SyncExclusionsSection ─────────────────────────────────────────────────────
 
 interface SyncExclusionsSectionProps {
@@ -537,8 +498,8 @@ function SyncExclusionsSection({ game }: SyncExclusionsSectionProps) {
     <div className={CARD}>
       <h3 className="m-0 mb-1 font-semibold">Sync exclusions</h3>
       <p className="m-0 mb-4 text-sm text-[#9aa8c7]">
-        Files and folders listed here are skipped during Google Drive sync. Existing
-        Drive copies are deleted when you save.
+        Files and folders listed here are skipped during Google Drive sync.
+        Existing Drive copies are deleted when you save.
       </p>
 
       {/* Current exclusions list */}
@@ -549,7 +510,9 @@ function SyncExclusionsSection({ game }: SyncExclusionsSectionProps) {
               key={ex}
               className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-[rgba(255,180,80,0.12)] border border-[rgba(255,180,80,0.25)] text-[#ffd5a0]"
             >
-              <span className="font-mono truncate max-w-[260px]" title={ex}>{ex}</span>
+              <span className="font-mono truncate max-w-[260px]" title={ex}>
+                {ex}
+              </span>
               <button
                 type="button"
                 className="shrink-0 text-[#ffd5a0] hover:text-white leading-none"
@@ -569,7 +532,9 @@ function SyncExclusionsSection({ game }: SyncExclusionsSectionProps) {
           className={INPUT_CLS}
           value={manualInput}
           onChange={(e) => setManualInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleManualAdd())}
+          onKeyDown={(e) =>
+            e.key === "Enter" && (e.preventDefault(), handleManualAdd())
+          }
           placeholder="e.g. UserMetaData.sav  or  backup/"
         />
         <button
@@ -594,9 +559,7 @@ function SyncExclusionsSection({ game }: SyncExclusionsSectionProps) {
           {isLoadingFiles ? "Loading…" : "Load save files"}
         </button>
       )}
-      {loadError && (
-        <p className="mt-2 text-sm text-[#ffd5d5]">{loadError}</p>
-      )}
+      {loadError && <p className="mt-2 text-sm text-[#ffd5d5]">{loadError}</p>}
 
       {/* Interactive file tree */}
       {saveInfo && (
@@ -621,43 +584,6 @@ function SyncExclusionsSection({ game }: SyncExclusionsSectionProps) {
           />
         </>
       )}
-    </div>
-  );
-}
-
-// ── ToggleRow ─────────────────────────────────────────────────────────────────
-
-interface ToggleRowProps {
-  label: string;
-  description: string;
-  enabled: boolean;
-  disabled?: boolean;
-  onChange: (value: boolean) => void;
-}
-
-function ToggleRow({
-  label,
-  description,
-  enabled,
-  disabled,
-  onChange,
-}: ToggleRowProps) {
-  return (
-    <div className="flex items-center justify-between gap-4 p-4 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]">
-      <div>
-        <p className="m-0 font-medium text-[#c7d3f7]">{label}</p>
-        <p className={`${MUTED} m-0 text-sm`}>{description}</p>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        disabled={disabled}
-        className={`${enabled ? TOGGLE_TRACK_ON : TOGGLE_TRACK_OFF} disabled:opacity-40 disabled:cursor-not-allowed`}
-        onClick={() => onChange(!enabled)}
-      >
-        <span className={enabled ? TOGGLE_THUMB_ON : TOGGLE_THUMB_OFF} />
-      </button>
     </div>
   );
 }

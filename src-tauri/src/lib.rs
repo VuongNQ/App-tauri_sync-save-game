@@ -38,18 +38,29 @@ fn update_game(
     app: tauri::AppHandle,
     payload: UpdateGamePayload,
 ) -> Result<DashboardData, String> {
-    // Capture old sync_excludes before updating so we can diff for cloud cleanup.
-    let old_excludes: Vec<String> = settings::load_state(&app)
+    // Capture old game state before updating so we can diff.
+    let old_game = settings::load_state(&app)
         .ok()
-        .and_then(|s| s.games.into_iter().find(|g| g.id == payload.game.id))
-        .map(|g| g.sync_excludes)
+        .and_then(|s| s.games.into_iter().find(|g| g.id == payload.game.id));
+
+    let old_excludes: Vec<String> = old_game.as_ref()
+        .map(|g| g.sync_excludes.clone())
         .unwrap_or_default();
+    let old_track_changes = old_game.map(|g| g.track_changes).unwrap_or(false);
 
     let new_excludes = payload.game.sync_excludes.clone();
+    let new_track_changes = payload.game.track_changes;
     let game_id = payload.game.id.clone();
     let gdrive_folder_id = payload.game.gdrive_folder_id.clone();
 
     settings::upsert_game(&app, payload.game)?;
+
+    // If track_changes toggled, start or stop the watcher immediately for this session.
+    if new_track_changes != old_track_changes {
+        if let Err(e) = watcher::handle_track_changes_toggle(&app, &game_id, new_track_changes) {
+            eprintln!("[watcher] handle_track_changes_toggle failed in update_game: {e}");
+        }
+    }
 
     // If any paths were newly excluded, delete them from Drive in the background.
     let newly_excluded: Vec<String> = new_excludes
