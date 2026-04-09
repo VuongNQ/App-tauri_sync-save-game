@@ -50,7 +50,13 @@ export function SettingsPage() {
       <div className={CARD}>
         <h3 className="m-0 mb-4 font-semibold">Google Account</h3>
         {isLoading ? (
-          <p className={MUTED}>Loading account info…</p>
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 shrink-0 rounded-full animate-pulse bg-[rgba(165,185,255,0.08)]" />
+            <div className="flex-1 grid gap-2">
+              <div className="h-4 w-32 rounded-xl animate-pulse bg-[rgba(165,185,255,0.08)]" />
+              <div className="h-3 w-44 rounded-full animate-pulse bg-[rgba(165,185,255,0.08)]" />
+            </div>
+          </div>
         ) : userInfo ? (
           <div className="flex items-center gap-4">
             {userInfo.picture && (
@@ -134,7 +140,7 @@ export function SettingsPage() {
             </div>
           </div>
         ) : (
-          <p className={MUTED}>Loading…</p>
+          <SettingsSectionSkeleton rows={1} />
         )}
       </div>
 
@@ -167,7 +173,7 @@ export function SettingsPage() {
             />
           </div>
         ) : (
-          <p className={MUTED}>Loading…</p>
+          <SettingsSectionSkeleton rows={3} />
         )}
       </div>
 
@@ -294,6 +300,24 @@ export function SettingsPage() {
         onCancel={() => setShowClearModal(false)}
       />
     </>
+  );
+}
+
+// ── SettingsSectionSkeleton (same-file helper) ───────────
+
+function SettingsSectionSkeleton({ rows }: { rows: number }) {
+  return (
+    <div className="flex flex-col gap-4">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex items-center justify-between gap-3">
+          <div className="grid gap-1.5">
+            <div className="h-4 w-40 rounded-xl animate-pulse bg-[rgba(165,185,255,0.08)]" />
+            <div className="h-3 w-60 rounded-full animate-pulse bg-[rgba(165,185,255,0.08)]" />
+          </div>
+          <div className="w-12 h-6 rounded-full shrink-0 animate-pulse bg-[rgba(165,185,255,0.08)]" />
+        </div>
+      ))}
+    </div>
   );
 }
 

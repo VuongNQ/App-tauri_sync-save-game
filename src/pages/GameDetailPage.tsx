@@ -40,12 +40,73 @@ import type {
 } from "../types/dashboard";
 import { formatLocalTime, msg, toImgSrc } from "../utils";
 
+function GameDetailSkeleton() {
+  const shimmer =
+    "animate-pulse bg-[rgba(165,185,255,0.08)] rounded-xl";
+  return (
+    <>
+      {/* Breadcrumb */}
+      <div className={`h-4 w-28 ${shimmer} rounded-full`} />
+
+      {/* Header card */}
+      <div className={CARD}>
+        <div className="flex items-start gap-5 mb-5">
+          <div className={`w-24 h-24 shrink-0 rounded-2xl ${shimmer}`} />
+          <div className="grid gap-3 flex-1">
+            <div className={`h-3 w-20 rounded-full ${shimmer}`} />
+            <div className={`h-7 w-48 ${shimmer}`} />
+            <div className={`h-5 w-16 rounded-full ${shimmer}`} />
+          </div>
+        </div>
+        {/* Metadata grid */}
+        <div className="grid gap-[14px] grid-cols-2 max-[720px]:grid-cols-1">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              className="p-[18px] rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]"
+            >
+              <div className={`h-3 w-24 rounded-full mb-2 ${shimmer}`} />
+              <div className={`h-4 w-36 ${shimmer}`} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Actions card */}
+      <div className={CARD}>
+        <div className={`h-5 w-20 mb-5 ${shimmer}`} />
+        <div className="grid gap-4 grid-cols-2 max-[900px]:grid-cols-1">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className={`h-11 rounded-2xl ${shimmer}`} />
+          ))}
+        </div>
+      </div>
+
+      {/* Tracking toggles card */}
+      <div className={CARD}>
+        <div className={`h-5 w-40 mb-5 ${shimmer}`} />
+        <div className="flex flex-col gap-4">
+          {[0, 1].map((i) => (
+            <div key={i} className="flex items-center justify-between gap-3">
+              <div className="grid gap-1.5">
+                <div className={`h-4 w-32 ${shimmer}`} />
+                <div className={`h-3 w-52 rounded-full ${shimmer}`} />
+              </div>
+              <div className={`w-12 h-6 rounded-full shrink-0 ${shimmer}`} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function GameDetailPage() {
   const { id } = useParams<{ id: string }>();
 
   const navigate = useNavigate();
 
-  const { data: dashboard } = useDashboardQuery();
+  const { data: dashboard, isLoading: isDashboardLoading } = useDashboardQuery();
 
   const removeMutation = useRemoveGameMutation();
 
@@ -81,6 +142,10 @@ export function GameDetailPage() {
   const isPathInvalid =
     game != null &&
     (validateQuery.data ?? []).some((v) => v.gameId === game.id && !v.valid);
+
+  if (isDashboardLoading) {
+    return <GameDetailSkeleton />;
+  }
 
   if (!game) {
     return (

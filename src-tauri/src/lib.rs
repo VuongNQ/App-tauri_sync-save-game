@@ -139,29 +139,48 @@ fn save_auth_tokens(
 ) -> Result<AuthStatus, String> {
     let status = gdrive_auth::save_tokens_from_plugin(&app, payload)?;
 
-    // On first login (empty local library) restore games and settings from Drive.
-    let is_empty = settings::load_state(&app)
-        .map(|s| s.games.is_empty())
-        .unwrap_or(false);
+    // After every login: restore library + settings from Drive, then sync all saves.
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        let mut library_changed = false;
 
-    if is_empty {
-        let app_clone = app.clone();
-        std::thread::spawn(move || {
-            match gdrive::fetch_library_from_cloud(&app_clone) {
-                Ok(true) => {
-                    println!("[gdrive] Cloud restore: library loaded");
-                    let _ = tauri::Emitter::emit(&app_clone, "library-restored", ());
-                }
-                Ok(false) => println!("[gdrive] Cloud restore: no library on Drive yet"),
-                Err(e) => eprintln!("[gdrive] Cloud restore library failed: {e}"),
+        match gdrive::fetch_library_from_cloud(&app_clone) {
+            Ok(true) => {
+                println!("[gdrive] Post-login: library restored from Drive");
+                library_changed = true;
+                let _ = tauri::Emitter::emit(&app_clone, "library-restored", ());
             }
-            match gdrive::fetch_settings_from_cloud(&app_clone) {
-                Ok(true) => println!("[gdrive] Cloud restore: settings loaded"),
-                Ok(false) => println!("[gdrive] Cloud restore: no config on Drive yet"),
-                Err(e) => eprintln!("[gdrive] Cloud restore settings failed: {e}"),
+            Ok(false) => println!("[gdrive] Post-login: no library on Drive yet"),
+            Err(e) => eprintln!("[gdrive] Post-login library restore failed: {e}"),
+        }
+
+        match gdrive::fetch_settings_from_cloud(&app_clone) {
+            Ok(true) => println!("[gdrive] Post-login: settings restored from Drive"),
+            Ok(false) => println!("[gdrive] Post-login: no config on Drive yet"),
+            Err(e) => eprintln!("[gdrive] Post-login settings restore failed: {e}"),
+        }
+
+        // Sync all game saves from Drive (picks up cloud-side changes).
+        match sync::sync_all_games(&app_clone) {
+            Ok(results) => {
+                let downloaded: u32 = results.iter().map(|r| r.downloaded).sum();
+                let uploaded: u32 = results.iter().map(|r| r.uploaded).sum();
+                println!(
+                    "[sync] Post-login sync done — {} games, {} downloaded, {} uploaded",
+                    results.len(),
+                    downloaded,
+                    uploaded
+                );
+                let _ = tauri::Emitter::emit(&app_clone, "post-login-sync-completed", ());
             }
-        });
-    }
+            Err(e) => {
+                eprintln!("[sync] Post-login sync_all_games failed: {e}");
+                let _ = tauri::Emitter::emit(&app_clone, "post-login-sync-completed", ());
+            }
+        }
+
+        let _ = library_changed; // suppress unused warning when library was already up-to-date
+    });
 
     Ok(status)
 }
