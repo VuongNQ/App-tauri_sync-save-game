@@ -1,3 +1,4 @@
+import { openPath } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { ConfirmModal } from "../../components/ConfirmModal";
@@ -23,6 +24,7 @@ import {
   useSyncLibraryFromCloudMutation,
   useValidatePathsQuery,
 } from "../../queries";
+import { expandSavePath } from "../../services/tauri";
 import { formatLocalTime, msg, toImgSrc } from "../../utils";
 import { useRestoreFromDriveFlow } from "./hooks";
 import { SaveInfoPanel, SyncResultPanel } from "./SupportUI";
@@ -135,10 +137,6 @@ export function GameDetailPage() {
             {
               label: "Google Drive folder",
               value: game.gdriveFolderId ?? "Not synced",
-            },
-            {
-              label: "Last local save",
-              value: formatLocalTime(game.lastLocalModified),
             },
             {
               label: "Last cloud save",
@@ -262,6 +260,10 @@ export function GameDetailPage() {
             info={saveInfoQuery.data}
             onRefresh={() => void saveInfoQuery.refetch()}
             isRefreshing={saveInfoQuery.isFetching}
+            onOpenFolder={() => {
+              if (!game?.savePath) return;
+              void expandSavePath(game.savePath).then((p) => openPath(p));
+            }}
           />
         )}
         {saveInfoQuery.isError && (

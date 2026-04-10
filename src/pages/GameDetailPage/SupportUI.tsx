@@ -9,22 +9,46 @@ export function SaveInfoPanel({
   info,
   onRefresh,
   isRefreshing,
+  onOpenFolder,
 }: {
   info: SaveInfo;
   onRefresh?: () => void;
   isRefreshing?: boolean;
+  onOpenFolder?: () => void;
 }) {
   return (
     <div className="mt-4 p-4 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]">
       <div className="flex items-center justify-between mb-1">
         <p className={`${EYEBROW} mb-0`}>Local save info</p>
-        {onRefresh && (
-          <button
-            onClick={onRefresh}
-            disabled={isRefreshing}
-            title="Refresh local save info"
-            className="p-1 rounded-lg cursor-pointer text-[#9aa8c7] hover:text-white hover:bg-white/10 transition-colors disabled:opacity-40"
-          >
+        <div className="flex items-center gap-1">
+          {onOpenFolder && (
+            <button
+              onClick={onOpenFolder}
+              title="Open save folder"
+              className="p-1 rounded-lg cursor-pointer text-[#9aa8c7] hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+            </button>
+          )}
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              disabled={isRefreshing}
+              title="Refresh local save info"
+              className="p-1 rounded-lg cursor-pointer text-[#9aa8c7] hover:text-white hover:bg-white/10 transition-colors disabled:opacity-40"
+            >
             <svg
               xmlns="http://www.w3.org/2000/svg"
               width="15"
@@ -42,8 +66,9 @@ export function SaveInfoPanel({
               <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
               <path d="M8 16H3v5" />
             </svg>
-          </button>
-        )}
+            </button>
+          )}
+        </div>
       </div>
       <dl className="grid gap-2 grid-cols-3 m-0 mt-2 max-[720px]:grid-cols-1">
         <div>
