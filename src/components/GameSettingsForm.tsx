@@ -1,4 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useQueryClient } from "@tanstack/react-query";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import {
@@ -9,15 +10,14 @@ import {
   useWatch,
 } from "react-hook-form";
 import { z } from "zod";
-
-import { useUpdateGameMutation } from "../queries";
+import { DASHBOARD_KEY, useUpdateGameMutation } from "../queries";
 import {
   expandSavePath,
   getBrowseDefaultPath,
   getSaveInfo,
   uploadGameLogo,
 } from "../services/tauri";
-import type { GameEntry, SaveInfo } from "../types/dashboard";
+import type { DashboardData, GameEntry, SaveInfo } from "../types/dashboard";
 import { msg, norm, toImgSrc } from "../utils";
 import { SaveFileTree } from "./SaveFileTree";
 import {
@@ -61,76 +61,73 @@ type GameSettingsFormValues = z.infer<typeof gameSettingsSchema>;
 // ── GameSettingsForm ──────────────────────────────────────────────────────────
 
 interface GameSettingsFormProps {
-  open: boolean;
-  onClose: () => void;
-  game: GameEntry;
+  isOpen: boolean;
+  onToggle: () => void;
   isSyncing: boolean;
   isPathInvalid: boolean;
+  id?: string;
 }
 
 export function GameSettingsForm({
-  open,
-  onClose,
-  game,
+  isOpen,
+  onToggle,
   isSyncing,
   isPathInvalid,
+  id,
 }: GameSettingsFormProps) {
   const updateMutation = useUpdateGameMutation();
 
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+
   const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
+
+  const queryClient = useQueryClient();
+
+  const gameSettings = queryClient
+    .getQueryData<DashboardData>(DASHBOARD_KEY)
+    ?.games.find((g) => g.id === id);
+
+  console.log("GameSettingsForm render", { id, gameSettings });
 
   const methods = useForm<GameSettingsFormValues>({
     defaultValues: {
-      thumbnail: game.thumbnail ?? "",
-      description: game.description ?? "",
-      savePath: game.savePath ?? "",
-      trackChanges: game.trackChanges,
-      autoSync: game.autoSync,
-      syncExcludes: game.syncExcludes ?? [],
+      thumbnail: gameSettings?.thumbnail ?? "",
+      description: gameSettings?.description ?? "",
+      savePath: gameSettings?.savePath ?? "",
+      trackChanges: gameSettings?.trackChanges ?? false,
+      autoSync: gameSettings?.autoSync ?? false,
+      syncExcludes: gameSettings?.syncExcludes ?? [],
     },
     resolver: zodResolver(gameSettingsSchema),
   });
 
-  const { handleSubmit, reset } = methods;
+  const { handleSubmit, reset, formState } = methods;
+  const { isDirty } = formState;
 
   useEffect(() => {
     reset({
-      thumbnail: game.thumbnail ?? "",
-      description: game.description ?? "",
-      savePath: game.savePath ?? "",
-      trackChanges: game.trackChanges,
-      autoSync: game.autoSync,
-      syncExcludes: game.syncExcludes ?? [],
+      thumbnail: gameSettings?.thumbnail ?? "",
+      description: gameSettings?.description ?? "",
+      savePath: gameSettings?.savePath ?? "",
+      trackChanges: gameSettings?.trackChanges ?? false,
+      autoSync: gameSettings?.autoSync ?? false,
+      syncExcludes: gameSettings?.syncExcludes ?? [],
     });
-  }, [
-    game.id,
-    game.thumbnail,
-    game.description,
-    game.savePath,
-    game.trackChanges,
-    game.autoSync,
-    game.syncExcludes,
-    reset,
-  ]);
-
-  useEffect(() => {
-    if (open) {
-      document.body.style.overflow = "hidden";
-    }
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [open]);
+  }, [gameSettings, reset]);
 
   async function onSaveSettings(values: GameSettingsFormValues) {
     setLogoUploadError(null);
     const src = norm(values.thumbnail);
 
+    if (!gameSettings) {
+      setLogoUploadError("Game not found in cache.");
+      return;
+    }
+
     if (methods.formState.dirtyFields.thumbnail && src) {
       setIsUploadingLogo(true);
       try {
-        await uploadGameLogo(game.id, src);
+        await uploadGameLogo(gameSettings.id, src);
       } catch (err) {
         setLogoUploadError(msg(err, "Logo upload failed."));
         setIsUploadingLogo(false);
@@ -141,7 +138,7 @@ export function GameSettingsForm({
 
     const trimmed = values.description.trim().slice(0, 1000);
     await updateMutation.mutateAsync({
-      ...game,
+      ...gameSettings,
       thumbnail: src || null,
       description: trimmed || null,
       savePath: norm(values.savePath),
@@ -149,10 +146,8 @@ export function GameSettingsForm({
       autoSync: values.autoSync,
       syncExcludes: values.syncExcludes,
     });
-    onClose();
+    onToggle();
   }
-
-  if (!open) return null;
 
   const isSaving = isUploadingLogo || updateMutation.isPending;
   const saveError =
@@ -162,78 +157,61 @@ export function GameSettingsForm({
       : null);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-5xl max-h-[90vh] flex flex-col rounded-3xl border border-[rgba(165,185,255,0.15)] bg-[rgba(9,14,28,0.97)] shadow-2xl overflow-hidden">
-        {/* Modal header */}
-        <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-[rgba(165,185,255,0.1)] shrink-0">
-          <h3 className="m-0 font-semibold text-[#c7d3f7]">Edit settings</h3>
-          <button
-            type="button"
-            className="text-[#9aa8c7] hover:text-[#c7d3f7] text-xl leading-none p-1 transition-colors"
-            onClick={() => {
-              reset();
-              onClose();
-            }}
+    <div className={`${CARD} mt-4`}>
+      <div className="flex items-center gap-3 justify-between">
+        <h3 className="m-0 font-semibold">Edit settings</h3>
+        <div className="flex items-center gap-5 justify-end-safe">
+          {isDirty && (
+            <>
+              <button
+                type="button"
+                className={GHOST_BTN}
+                onClick={() => {
+                  reset();
+                  onToggle();
+                }}
+                disabled={isSaving}
+              >
+                Discard
+              </button>
+              <button type="submit" className={PRIMARY_BTN} disabled={isSaving}>
+                {isSaving ? "Saving…" : "Save"}
+              </button>
+            </>
+          )}
+          <span
+            className="text-[#7dc9ff] text-lg shrink-0 cursor-pointer"
+            onClick={onToggle}
           >
-            ✕
-          </button>
+            {isOpen ? "▲" : "▼"}
+          </span>
         </div>
+      </div>
 
+      {isOpen && gameSettings && (
         <FormProvider {...methods}>
           <form
             onSubmit={handleSubmit(onSaveSettings)}
-            className="flex flex-col min-h-0 flex-1"
+            className="flex flex-col gap-5 pt-4"
           >
-            {/* Scrollable body */}
-            <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
-              {/* Logo / Thumbnail */}
-              <ThumbnailSection isSyncing={isSyncing} />
-
-              {/* Description */}
-              <DescriptionSection />
-
-              {/* Save folder */}
-              <SaveFolderSection
-                game={game}
-                isSyncing={isSyncing}
-                isPathInvalid={isPathInvalid}
-              />
-
-              {/* Sync exclusions */}
-              <SyncExclusionsSection game={game} />
-            </div>
-
-            {/* Modal footer */}
-            <div className="shrink-0 px-6 py-4 border-t border-[rgba(165,185,255,0.1)] flex items-center gap-3">
+            <ThumbnailSection isSyncing={isSyncing} />
+            <DescriptionSection />
+            <SaveFolderSection
+              game={gameSettings}
+              isSyncing={isSyncing}
+              isPathInvalid={isPathInvalid}
+            />
+            <SyncExclusionsSection game={gameSettings} />
+            <div className="flex items-center gap-3 justify-end">
               {saveError && (
                 <span className="text-sm text-[#ffd5d5] mr-auto">
                   {saveError}
                 </span>
               )}
-              <div className="flex items-center gap-3 ml-auto">
-                <button
-                  type="button"
-                  className={GHOST_BTN}
-                  onClick={() => {
-                    reset();
-                    onClose();
-                  }}
-                  disabled={isSaving}
-                >
-                  Discard
-                </button>
-                <button
-                  type="submit"
-                  className={PRIMARY_BTN}
-                  disabled={isSaving}
-                >
-                  {isSaving ? "Saving…" : "Save"}
-                </button>
-              </div>
             </div>
           </form>
         </FormProvider>
-      </div>
+      )}
     </div>
   );
 }

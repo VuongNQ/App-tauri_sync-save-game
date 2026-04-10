@@ -4,8 +4,6 @@ import { ConfirmModal } from "../../components/ConfirmModal";
 import { DriveFilesSection } from "../../components/DriveFilesSection";
 import { GameSettingsForm } from "../../components/GameSettingsForm";
 import { formatBytes } from "../../components/SaveFileTree";
-import { Toast } from "../../components/Toast";
-import { VersionBackupsSection } from "../../components/VersionBackupsSection";
 import {
   CARD,
   DANGER_BTN,
@@ -13,21 +11,23 @@ import {
   PRIMARY_BTN,
   SECONDARY_BTN,
   SOFT_BADGE,
-  SOURCE_BADGE
+  SOURCE_BADGE,
 } from "../../components/styles";
+import { Toast } from "../../components/Toast";
+import { VersionBackupsSection } from "../../components/VersionBackupsSection";
 import {
   useDashboardQuery,
   useGetSaveInfoQuery,
   useRemoveGameMutation,
   useSyncGameMutation,
   useSyncLibraryFromCloudMutation,
-  useValidatePathsQuery
+  useValidatePathsQuery,
 } from "../../queries";
 import { formatLocalTime, msg, toImgSrc } from "../../utils";
 import { useRestoreFromDriveFlow } from "./hooks";
-import TrackingSyncCard from "./TrackingSyncCard";
-import SyncConflictModal from "./SyncConflictModal";
 import { SaveInfoPanel, SyncResultPanel } from "./SupportUI";
+import SyncConflictModal from "./SyncConflictModal";
+import TrackingSyncCard from "./TrackingSyncCard";
 
 export function GameDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -41,7 +41,7 @@ export function GameDetailPage() {
 
   const [showRemoveModal, setShowRemoveModal] = useState(false);
 
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const game = dashboard?.games.find((g) => g.id === id) ?? null;
 
@@ -163,21 +163,11 @@ export function GameDetailPage() {
         </dl>
       </div>
 
-      {/* Settings form */}
-
       {/* Actions */}
       <div className={CARD}>
         <h3 className="m-0 mb-4 font-semibold">Actions</h3>
 
         <div className="grid gap-4 grid-cols-2 max-[900px]:grid-cols-1">
-          <button
-            className={SECONDARY_BTN}
-            type="button"
-            disabled={isSyncing}
-            onClick={() => setShowSettingsModal(true)}
-          >
-            Edit settings
-          </button>
           <button
             className={SECONDARY_BTN}
             type="button"
@@ -210,7 +200,7 @@ export function GameDetailPage() {
             {restoreFlow.isChecking ? "Checking…" : "Restore from Drive"}
           </button>
           <button
-            className={`${PRIMARY_BTN} inline-flex items-center justify-center gap-2`}
+            className={`${PRIMARY_BTN} col-span-full inline-flex items-center justify-center gap-2`}
             type="button"
             disabled={!game.savePath || isSyncing}
             onClick={() =>
@@ -267,9 +257,7 @@ export function GameDetailPage() {
         </div>
 
         {/* Save Info Result */}
-        {saveInfoQuery.data && (
-          <SaveInfoPanel info={saveInfoQuery.data} />
-        )}
+        {saveInfoQuery.data && <SaveInfoPanel info={saveInfoQuery.data} />}
         {saveInfoQuery.isError && (
           <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
             {msg(saveInfoQuery.error, "Unable to get save info.")}
@@ -283,6 +271,17 @@ export function GameDetailPage() {
             {msg(syncMutation.error, "Sync failed.")}
           </p>
         )}
+
+        {/* Settings form */}
+
+        {/* Settings (collapsible) */}
+        <GameSettingsForm
+          isOpen={showSettings}
+          onToggle={() => setShowSettings((v) => !v)}
+          isSyncing={isSyncing}
+          isPathInvalid={isPathInvalid}
+          id={id}
+        />
       </div>
 
       {/* Tracking & Sync quick-toggles */}
@@ -341,14 +340,6 @@ export function GameDetailPage() {
         />
       )}
 
-      <GameSettingsForm
-        open={showSettingsModal}
-        onClose={() => setShowSettingsModal(false)}
-        game={game}
-        isSyncing={isSyncing}
-        isPathInvalid={isPathInvalid}
-      />
-
       <ConfirmModal
         open={showRemoveModal}
         title="Remove game"
@@ -365,8 +356,6 @@ export function GameDetailPage() {
     </>
   );
 }
-
-
 
 function GameDetailSkeleton() {
   const shimmer = "animate-pulse bg-[rgba(165,185,255,0.08)] rounded-xl";

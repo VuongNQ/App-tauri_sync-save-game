@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   useCreateVersionBackupMutation,
@@ -67,7 +67,9 @@ export function VersionBackupsSection({ gameId }: Props) {
           <p className={EYEBROW}>Version backups</p>
           <h3 className="m-0 font-semibold">Save snapshots</h3>
         </div>
-        <span className="text-[#7dc9ff] text-lg shrink-0">{isOpen ? "▲" : "▼"}</span>
+        <span className="text-[#7dc9ff] text-lg shrink-0">
+          {isOpen ? "▲" : "▼"}
+        </span>
       </button>
 
       {isOpen && (
@@ -87,9 +89,14 @@ export function VersionBackupsSection({ gameId }: Props) {
             </button>
           ) : (
             <div className="rounded-2xl border border-[rgba(165,185,255,0.12)] bg-[rgba(9,14,28,0.75)] p-4 grid gap-3">
-              <p className="m-0 text-sm font-medium text-[#c7d3f7]">New version backup</p>
+              <p className="m-0 text-sm font-medium text-[#c7d3f7]">
+                New version backup
+              </p>
               <div>
-                <label htmlFor="backup-label" className="block text-xs text-[#9aa8c7] mb-1">
+                <label
+                  htmlFor="backup-label"
+                  className="block text-xs text-[#9aa8c7] mb-1"
+                >
                   Label <span className="italic">(optional)</span>
                 </label>
                 <input
@@ -130,11 +137,11 @@ export function VersionBackupsSection({ gameId }: Props) {
           )}
 
           {/* Backup list */}
-          {isLoading && (
-            <p className={`${MUTED} text-sm`}>Loading backups…</p>
-          )}
+          {isLoading && <p className={`${MUTED} text-sm`}>Loading backups…</p>}
           {isError && (
-            <p className="text-sm text-[#ff9e9e]">{msg(error, "Failed to load backups.")}</p>
+            <p className="text-sm text-[#ff9e9e]">
+              {msg(error, "Failed to load backups.")}
+            </p>
           )}
           {!isLoading && !isError && backups && (
             <>
@@ -143,7 +150,11 @@ export function VersionBackupsSection({ gameId }: Props) {
               ) : (
                 <ul className="list-none p-0 grid gap-2">
                   {backups.map((backup) => (
-                    <BackupRow key={backup.id} backup={backup} gameId={gameId} />
+                    <BackupRow
+                      key={backup.id}
+                      backup={backup}
+                      gameId={gameId}
+                    />
                   ))}
                 </ul>
               )}
@@ -177,13 +188,20 @@ function BackupRow({ backup, gameId }: BackupRowProps) {
   const deleteMutation = useDeleteVersionBackupMutation();
 
   // Parse the name: ISO-8601-timestamp_optional-label
-  const labelPart = (() => {
-    const underscoreIdx = backup.name.indexOf("_");
-    if (underscoreIdx !== -1 && underscoreIdx < backup.name.length - 1) {
-      return backup.name.slice(underscoreIdx + 1).replace(/-/g, " ");
+  const labelPart = useMemo(() => {
+    if (backup.name.length) {
+      const underscoreIdx = backup.name.indexOf("—");
+
+      if (underscoreIdx !== -1 && underscoreIdx < backup.name.length - 1) {
+        return {
+          time: backup.name.slice(underscoreIdx + 1).replace(/-/g, " "),
+          description: backup.name.slice(underscoreIdx + 2),
+        };
+      }
     }
+
     return null;
-  })();
+  }, [backup.name]);
 
   function handleRestoreConfirm() {
     setShowRestoreModal(false);
@@ -200,7 +218,9 @@ function BackupRow({ backup, gameId }: BackupRowProps) {
   return (
     <li className="rounded-[14px] border border-[rgba(165,185,255,0.08)] bg-[rgba(9,14,28,0.75)] px-4 py-3">
       <div className="flex items-start gap-3">
-        <span className="text-lg shrink-0 mt-0.5" aria-hidden="true">💾</span>
+        <span className="text-lg shrink-0 mt-0.5" aria-hidden="true">
+          💾
+        </span>
 
         <div className="flex-1 min-w-0">
           {/* Timestamp */}
@@ -209,7 +229,9 @@ function BackupRow({ backup, gameId }: BackupRowProps) {
           </p>
           {/* Label */}
           {labelPart && (
-            <p className="m-0 mt-0.5 text-xs text-[#9aa8c7] truncate italic">"{labelPart}"</p>
+            <p className="m-0 mt-0.5 text-xs text-[#9aa8c7] truncate italic">
+              {labelPart.description}
+            </p>
           )}
           {/* Stats */}
           <p className="m-0 mt-1 text-xs text-[#7a8baa]">
@@ -219,7 +241,10 @@ function BackupRow({ backup, gameId }: BackupRowProps) {
 
           {(restoreMutation.isError || deleteMutation.isError) && (
             <p className="m-0 mt-1 text-xs text-[#ff9e9e]">
-              {msg(restoreMutation.error ?? deleteMutation.error, "Operation failed.")}
+              {msg(
+                restoreMutation.error ?? deleteMutation.error,
+                "Operation failed.",
+              )}
             </p>
           )}
         </div>
@@ -280,6 +305,9 @@ function BackupRow({ backup, gameId }: BackupRowProps) {
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const i = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1,
+  );
   return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
