@@ -1,16 +1,17 @@
 ---
-description: "Use when: syncing save-game files to Google Drive, implementing sync logic, modifying sync.rs, modifying watcher.rs, modifying gdrive.rs, modifying drive_mgmt.rs, adding file-watcher features, changing background tracking, extending sync algorithm, handling sync conflicts, adding sync Tauri commands, creating sync React Query hooks, building sync UI components, emitting or listening to sync events, syncing library.json or config.json to Google Drive as a file-based database, implementing cloud library restore on first login, forced-direction sync (restore from cloud, push to cloud), checking sync structure diff, SyncStructureDiff, Drive file manager, list Drive files, rename Drive file, move Drive file, delete Drive file, version backup, create backup, restore version backup, delete version backup. Covers the full sync pipeline: local file collection, timestamp comparison, Drive upload/download, .sync-meta.json management, cloud DB library/settings sync, local-first strategy, file-watcher lifecycle, Drive file management, version snapshots, and frontend sync integration."
+description: "Use when: syncing save-game files to Google Drive, implementing sync logic, modifying sync.rs, modifying watcher.rs, modifying gdrive.rs, modifying drive_mgmt.rs, modifying firestore.rs, adding file-watcher features, changing background tracking, extending sync algorithm, handling sync conflicts, adding sync Tauri commands, creating sync React Query hooks, building sync UI components, emitting or listening to sync events, syncing library.json or config.json to Google Drive as a file-based database, storing game library or settings in Firestore, implementing Firestore REST API, SyncMeta Firestore mirror, cloud library restore on first login, forced-direction sync (restore from cloud, push to cloud), checking sync structure diff, SyncStructureDiff, Drive file manager, list Drive files, rename Drive file, move Drive file, delete Drive file, version backup, create backup, restore version backup, delete version backup. Covers the full sync pipeline: local file collection, timestamp comparison, Drive upload/download, .sync-meta.json management, Firestore game library/settings/SyncMeta mirror, local-first strategy, file-watcher lifecycle, Drive file management, version snapshots, and frontend sync integration."
 ---
 
 # Save-Game Sync Service
 
 ## Architecture Overview
 
-The sync system spans four Rust modules and their frontend counterparts:
+The sync system spans five Rust modules and their frontend counterparts:
 
 | Module | Responsibility |
 |--------|---------------|
 | `gdrive.rs` | Google Drive REST API client (folders, upload, download, metadata, rename, move, copy) |
+| `firestore.rs` | Firestore REST API client (game library, settings, SyncMeta mirror) |
 | `sync.rs` | Per-game sync algorithm (collect → compare → transfer → update) |
 | `watcher.rs` | File-system watcher manager (per-game, debounced, with sync locks) |
 | `settings.rs` | Persistence for `AppSettings` and `GameEntry` state |
@@ -78,43 +79,169 @@ appDataFolder/
 - `backups/` is treated as a protected name: shown in the file manager but rename/delete/move are disabled.
 - `.sync-meta.json` is treated as a protected name: shown but actions disabled.
 
-## Cloud Library DB Sync (gdrive.rs)
+## Cloud Library DB Sync (gdrive.rs — Legacy / Migration Only)
 
-`library.json` and `config.json` on Drive act as the zero-cost, user-owned database.
+> **Superseded by Firestore.** `library.json` and `config.json` on Drive are no longer the live database. `sync_library_to_cloud` and `sync_settings_to_cloud` are **dead code** (marked `#[allow(dead_code)]`). Game library and settings are now mirrored to Firestore via `firestore.rs`. The Drive fetch functions are retained exclusively for the one-time migration path.
 
 ### Functions
 
-| Function | Direction | Trigger |
-|----------|-----------|---------|
-| `sync_library_to_cloud(app)` | Local → Cloud | After every `add_game`, `update_game`, `remove_game` — background thread |
-| `fetch_library_from_cloud(app)` | Cloud → Local | First login or missing local `games-library.json` |
-| `sync_settings_to_cloud(app)` | Local → Cloud | After every `update_settings` — background thread |
-| `fetch_settings_from_cloud(app)` | Cloud → Local | First login (alongside library fetch) |
+| Function | Direction | Status |
+|----------|-----------|--------|
+| `sync_library_to_cloud(app)` | Local → Cloud | **Dead code** — replaced by Firestore |
+| `fetch_library_from_cloud(app)` | Cloud → Local | Kept — migration path in `settings::fetch_all_from_firestore` |
+| `sync_settings_to_cloud(app)` | Local → Cloud | **Dead code** — replaced by Firestore |
+| `fetch_settings_from_cloud(app)` | Cloud → Local | Kept — migration path in `settings::fetch_all_from_firestore` |
 
-### Conflict Resolution for library.json / config.json
+---
 
-Use Drive's `modifiedTime` returned by `GET /drive/v3/files/{id}?fields=modifiedTime`:
+## Firestore Database (`firestore.rs`)
 
-1. Fetch Drive file `modifiedTime` before any write.
-2. Compare against `last_cloud_library_modified` stored in local `StoredState`.
-3. Drive newer → pull and merge cloud version to local first.
-4. Write new merged version to Drive; update `last_cloud_library_modified`.
+The `firestore.rs` module is the primary cloud database for game library and settings. It uses the Firestore REST API via the existing `ureq` v3 blocking HTTP client (no new HTTP crate).
 
-### Local-First Strategy (Non-negotiable)
+### Data Model
 
-`ureq` is blocking — cloud library writes **must not block the UI**:
-
-```rust
-// Mandatory pattern after every save_state() call that modifies games/settings:
-let app_clone = app.clone();
-std::thread::spawn(move || {
-    if let Err(e) = gdrive::sync_library_to_cloud(&app_clone) {
-        eprintln!("[gdrive] Cloud library sync failed: {e}");
-    }
-});
+```
+users/{user_id}/
+  games/{game_id}       → GameEntry fields (Firestore typed values, flat document)
+  settings/app          → AppSettings fields (Firestore typed values, flat document)
+  syncMeta/{game_id}    → { data: stringValue (JSON blob of SyncMeta), gameId: stringValue }
 ```
 
-UI always reads from the local `games-library-{user_id}.json` file (or fallback `games-library.json` when unauthenticated) — never waits on network calls.
+- **`games/{game_id}`**: Each `GameEntry` is a separate Firestore document. Field keys match camelCase TypeScript names.
+- **`settings/app`**: A single document under the `settings` collection. Key is always `"app"`.
+- **`syncMeta/{game_id}`**: SyncMeta is stored as a **JSON blob** (`stringValue`) in a field called `data`. This avoids Firestore restrictions on `/` in field names (file paths like `"saves/slot1.sav"` cannot be Firestore field names).
+
+### Project ID
+
+Compiled in via `option_env!("GOOGLE_CLOUD_PROJECT_ID")` — same pattern as `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`. Set in `src-tauri/.env` for local dev and as a CI secret for release builds.
+
+```rust
+const PROJECT_ID: &str = match option_env!("GOOGLE_CLOUD_PROJECT_ID") {
+    Some(v) => v,
+    None => "",
+};
+```
+
+### Public Functions
+
+| Function | Operation | Endpoint |
+|----------|-----------|---------|
+| `save_game(app, user_id, game)` | PATCH (upsert) | `users/{uid}/games/{game_id}` |
+| `delete_game(app, user_id, game_id)` | DELETE (idempotent on 404) | `users/{uid}/games/{game_id}` |
+| `load_all_games(app, user_id)` | GET collection | `users/{uid}/games` → `Vec<GameEntry>` |
+| `save_settings(app, user_id, settings)` | PATCH (upsert) | `users/{uid}/settings/app` |
+| `load_settings(app, user_id)` | GET | `users/{uid}/settings/app` → `Option<AppSettings>` |
+| `save_sync_meta(app, user_id, game_id, meta)` | PATCH (upsert) | `users/{uid}/syncMeta/{game_id}` |
+| `load_sync_meta(app, user_id, game_id)` | GET | `users/{uid}/syncMeta/{game_id}` → `Option<SyncMeta>` |
+
+> `load_sync_meta` is marked `#[allow(dead_code)]` — retained for future cross-device read path. Drive `.sync-meta.json` remains the exclusive read source today.
+
+### 401 Retry Pattern (same as gdrive.rs)
+
+Every Firestore call wraps the request: on HTTP 401, force a token refresh via `gdrive_auth::get_access_token()` and retry once.
+
+### Background Spawn Pattern (`settings.rs`)
+
+Because `ureq` is blocking, Firestore writes **must not block the UI**. Use dedicated background threads after every `save_state()` call:
+
+```rust
+// After add_game / update_game:
+fn spawn_firestore_game_upsert(app: &AppHandle, game: GameEntry) {
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        if let Some(uid) = gdrive_auth::get_current_user_id(&app_clone) {
+            if let Err(e) = firestore::save_game(&app_clone, &uid, &game) {
+                eprintln!("[firestore] save_game failed: {e}");
+            }
+        }
+    });
+}
+
+// After remove_game:
+fn spawn_firestore_game_delete(app: &AppHandle, game_id: String) {
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        if let Some(uid) = gdrive_auth::get_current_user_id(&app_clone) {
+            if let Err(e) = firestore::delete_game(&app_clone, &uid, &game_id) {
+                eprintln!("[firestore] delete_game failed: {e}");
+            }
+        }
+    });
+}
+
+// After update_settings:
+fn spawn_firestore_settings_sync(app: &AppHandle) {
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        if let (Some(uid), Ok(state)) = (
+            gdrive_auth::get_current_user_id(&app_clone),
+            settings::load_state(&app_clone),
+        ) {
+            if let Err(e) = firestore::save_settings(&app_clone, &uid, &state.settings) {
+                eprintln!("[firestore] save_settings failed: {e}");
+            }
+        }
+    });
+}
+```
+
+### First-Login Migration (`settings::fetch_all_from_firestore`)
+
+Called from `lib.rs` → `save_auth_tokens` command after login. Algorithm:
+
+1. Try `firestore::load_all_games()` → if non-empty, use Firestore data as source of truth.
+2. If Firestore has zero games → fall back to `gdrive::fetch_library_from_cloud()` for one-time migration.
+3. Try `firestore::load_settings()` → if `Some`, use Firestore settings.
+4. If `None` → fall back to `gdrive::fetch_settings_from_cloud()` for one-time migration.
+5. Call `settings::save_state()` with merged data.
+
+This ensures existing users (who had Drive `library.json`) are seamlessly migrated to Firestore on first login after upgrade.
+
+---
+
+## SyncMeta Firestore Mirror
+
+After every `upload_sync_meta()` call (in both `sync.rs` and `drive_mgmt.rs`), mirror the written SyncMeta to Firestore as a write-only background operation.
+
+### JSON-Blob Strategy
+
+`SyncMeta.files` has keys that are relative file paths (e.g. `"saves/slot1.sav"`). Firestore field names cannot contain `/`, so the entire `SyncMeta` struct is serialised to a JSON string and stored in a single `stringValue` field called `data`:
+
+```
+Firestore: users/{uid}/syncMeta/{game_id} → { data: "<JSON string of SyncMeta>", gameId: "{game_id}" }
+```
+
+### Helper Pattern
+
+Both `sync.rs` and `drive_mgmt.rs` use the same private helper after each `upload_sync_meta` call:
+
+```rust
+fn spawn_sync_meta_mirror(app: &AppHandle, game_id: &str, meta: crate::models::SyncMeta) {
+    let app_c = app.clone();
+    let gid = game_id.to_string();
+    std::thread::spawn(move || {
+        if let Some(uid) = crate::gdrive_auth::get_current_user_id(&app_c) {
+            if let Err(e) = crate::firestore::save_sync_meta(&app_c, &uid, &gid, &meta) {
+                eprintln!("[firestore] save_sync_meta failed for {gid}: {e}");
+            }
+        }
+    });
+}
+```
+
+### Call Sites
+
+**`sync.rs`** (4 sites):
+- `sync_game_inner` — after upload_sync_meta for normal sync
+- `restore_from_cloud_inner` — after upload_sync_meta post-restore
+- `push_to_cloud_inner` — after upload_sync_meta post-push
+- `cleanup_excluded_from_cloud` — after upload_sync_meta when files are removed
+
+**`drive_mgmt.rs`** (4 sites):
+- `rename_game_drive_file` — after SyncMeta rename update
+- `move_game_drive_file` — after SyncMeta move update
+- `delete_game_drive_file` — after SyncMeta delete update
+- `restore_version_backup` — after SyncMeta post-restore update
 
 ## Sync Algorithm (sync.rs)
 

@@ -1,4 +1,5 @@
 mod drive_mgmt;
+mod firestore;
 mod gdrive;
 mod gdrive_auth;
 mod models;
@@ -114,6 +115,16 @@ fn clear_all_drive_data(app: tauri::AppHandle) -> Result<DashboardData, String> 
 
     // Clear all cloud metadata from every game in local state.
     let mut state = settings::load_state(&app)?;
+
+    // Also delete all Firestore game documents so the cloud slate is fully clean.
+    if let Some(user_id) = crate::gdrive_auth::get_current_user_id(&app) {
+        for game in &state.games {
+            if let Err(e) = firestore::delete_game(&app, &user_id, &game.id) {
+                eprintln!("[firestore] clear_all_drive_data: delete game '{}' failed: {e}", game.id);
+            }
+        }
+    }
+
     for game in state.games.iter_mut() {
         game.gdrive_folder_id = None;
         game.cloud_storage_bytes = None;
@@ -139,25 +150,20 @@ fn save_auth_tokens(
 ) -> Result<AuthStatus, String> {
     let status = gdrive_auth::save_tokens_from_plugin(&app, payload)?;
 
-    // After every login: restore library + settings from Drive, then sync all saves.
+    // After every login: restore library + settings from Firestore (with Drive migration
+    // fallback), then sync all save files.
     let app_clone = app.clone();
     std::thread::spawn(move || {
         let mut library_changed = false;
 
-        match gdrive::fetch_library_from_cloud(&app_clone) {
+        match settings::fetch_all_from_firestore(&app_clone) {
             Ok(true) => {
-                println!("[gdrive] Post-login: library restored from Drive");
+                println!("[firestore] Post-login: library + settings restored");
                 library_changed = true;
                 let _ = tauri::Emitter::emit(&app_clone, "library-restored", ());
             }
-            Ok(false) => println!("[gdrive] Post-login: no library on Drive yet"),
-            Err(e) => eprintln!("[gdrive] Post-login library restore failed: {e}"),
-        }
-
-        match gdrive::fetch_settings_from_cloud(&app_clone) {
-            Ok(true) => println!("[gdrive] Post-login: settings restored from Drive"),
-            Ok(false) => println!("[gdrive] Post-login: no config on Drive yet"),
-            Err(e) => eprintln!("[gdrive] Post-login settings restore failed: {e}"),
+            Ok(false) => println!("[firestore] Post-login: no data in Firestore yet"),
+            Err(e) => eprintln!("[firestore] Post-login restore failed: {e}"),
         }
 
         // Sync all game saves from Drive (picks up cloud-side changes).
@@ -400,7 +406,7 @@ async fn sync_all_games(app: tauri::AppHandle) -> Result<Vec<SyncResult>, String
 #[tauri::command]
 async fn sync_library_from_cloud(app: tauri::AppHandle) -> Result<DashboardData, String> {
     tokio::task::spawn_blocking(move || {
-        gdrive::fetch_library_from_cloud(&app)?;
+        settings::fetch_all_from_firestore(&app)?;
         let state = settings::load_state(&app)?;
         Ok(DashboardData { games: state.games })
     })

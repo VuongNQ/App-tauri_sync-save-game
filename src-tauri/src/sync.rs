@@ -400,6 +400,7 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
 
     // 8. Upload updated sync metadata
     gdrive::upload_sync_meta(app, &game_folder_id, &new_meta, meta_file_id.as_deref())?;
+    spawn_sync_meta_mirror(app, game_id, new_meta.clone());
 
     // 9. Update game entry timestamps and cloud storage size in state
     let now_iso = chrono::Utc::now().to_rfc3339();
@@ -620,6 +621,7 @@ fn restore_from_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult
 
     // 5. Upload updated sync metadata
     gdrive::upload_sync_meta(app, &game_folder_id, &new_meta, meta_file_id.as_deref())?;
+    spawn_sync_meta_mirror(app, game_id, new_meta.clone());
 
     // 6. Update game entry timestamps and cloud storage size
     let now_iso = chrono::Utc::now().to_rfc3339();
@@ -762,6 +764,7 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
 
     // 7. Upload updated sync metadata
     gdrive::upload_sync_meta(app, &game_folder_id, &new_meta, meta_file_id.as_deref())?;
+    spawn_sync_meta_mirror(app, game_id, new_meta.clone());
 
     // 8. Update game entry timestamps and cloud storage size
     let now_iso = chrono::Utc::now().to_rfc3339();
@@ -840,6 +843,7 @@ pub fn cleanup_excluded_from_cloud(
 
     // 4. Re-upload updated sync metadata
     gdrive::upload_sync_meta(app, &game_folder_id, &cloud_meta, meta_file_id.as_deref())?;
+    spawn_sync_meta_mirror(app, game_id, cloud_meta.clone());
 
     // 5. Update cloud_storage_bytes to reflect new total
     let new_cloud_bytes: u64 = cloud_meta.files.values().map(|f| f.size).sum();
@@ -853,4 +857,21 @@ pub fn cleanup_excluded_from_cloud(
     );
 
     Ok(())
+}
+
+// ── Firestore mirror helpers ──────────────────────────────────
+
+/// After every successful `upload_sync_meta` to Drive, spawn a background thread
+/// to mirror the same data to Firestore. Drive remains the authoritative read
+/// source — this is a write-only mirror for future cross-device querying.
+fn spawn_sync_meta_mirror(app: &AppHandle, game_id: &str, meta: crate::models::SyncMeta) {
+    let app = app.clone();
+    let game_id = game_id.to_string();
+    std::thread::spawn(move || {
+        if let Some(user_id) = crate::gdrive_auth::get_current_user_id(&app) {
+            if let Err(e) = crate::firestore::save_sync_meta(&app, &user_id, &game_id, &meta) {
+                eprintln!("[firestore] SyncMeta mirror failed for '{game_id}': {e}");
+            }
+        }
+    });
 }

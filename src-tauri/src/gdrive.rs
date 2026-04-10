@@ -849,13 +849,11 @@ fn get_file_modified_time(app: &AppHandle, file_id: &str) -> Result<String, Stri
         .ok_or_else(|| format!("Missing modifiedTime in response for {file_id}"))
 }
 
-// ── File-based DB: library.json ───────────────────────────
+// ── File-based DB: library.json (legacy — superseded by Firestore) ───────────
 
 /// Sync the local `Vec<GameEntry>` to `library.json` in the Drive root folder.
-///
-/// Conflict strategy: if Drive's `modifiedTime` is newer than our recorded
-/// `last_cloud_library_modified`, we pull the cloud games first and merge
-/// (cloud games + any local-only games) before uploading.
+/// Kept for the one-time migration path in `settings::fetch_all_from_firestore`.
+#[allow(dead_code)]
 pub fn sync_library_to_cloud(app: &AppHandle) -> Result<(), String> {
     let root_id = ensure_root_folder(app)?;
     let mut state = settings::load_state(app)?;
@@ -934,10 +932,11 @@ pub fn fetch_library_from_cloud(app: &AppHandle) -> Result<bool, String> {
     Ok(true)
 }
 
-// ── File-based DB: config.json ────────────────────────────
+// ── File-based DB: config.json (legacy — superseded by Firestore) ───────────
 
 /// Sync local `AppSettings` to `config.json` in the Drive root folder.
-/// Last-write-wins — no conflict tracking needed for settings.
+/// Kept for the one-time migration path in `settings::fetch_all_from_firestore`.
+#[allow(dead_code)]
 pub fn sync_settings_to_cloud(app: &AppHandle) -> Result<(), String> {
     let root_id = ensure_root_folder(app)?;
     let state = settings::load_state(app)?;

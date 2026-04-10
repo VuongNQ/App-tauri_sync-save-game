@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf};
 use tauri::{AppHandle, Manager};
 
 use crate::{
-    gdrive,
+    firestore,
     models::{AddGamePayload, AppSettings, GameEntry, PathValidation, StoredState},
 };
 
@@ -75,7 +75,7 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
 
     state.games.push(game.clone());
     save_state(app, &state)?;
-    spawn_library_cloud_sync(app);
+    spawn_firestore_game_upsert(app, game.clone());
 
     Ok(game)
 }
@@ -88,7 +88,7 @@ pub fn remove_game(app: &AppHandle, game_id: &str) -> Result<(), String> {
         return Err(format!("Game not found: {game_id}"));
     }
     save_state(app, &state)?;
-    spawn_library_cloud_sync(app);
+    spawn_firestore_game_delete(app, game_id.to_string());
     Ok(())
 }
 
@@ -99,6 +99,7 @@ pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
         ..game
     };
 
+    let to_sync = normalized.clone();
     if let Some(existing) = state.games.iter_mut().find(|e| e.id == normalized.id) {
         *existing = normalized;
     } else {
@@ -106,7 +107,7 @@ pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
     }
 
     save_state(app, &state)?;
-    spawn_library_cloud_sync(app);
+    spawn_firestore_game_upsert(app, to_sync);
     Ok(())
 }
 
@@ -120,7 +121,7 @@ pub fn update_settings(app: &AppHandle, settings: AppSettings) -> Result<AppSett
     let old_run_on_startup = state.settings.run_on_startup;
     state.settings = settings;
     save_state(app, &state)?;
-    spawn_settings_cloud_sync(app);
+    spawn_firestore_settings_sync(app);
 
     // Register / unregister Windows startup when the flag changes
     if state.settings.run_on_startup != old_run_on_startup {
@@ -150,26 +151,107 @@ pub fn update_game_field(
     Ok(state)
 }
 
-// ── Background cloud sync helpers ────────────────────────
+// ── Background Firestore sync helpers ────────────────────
 
-/// Spawn a background thread to sync the game library to Google Drive.
-/// Must only be called after `save_state()` has already succeeded locally.
-fn spawn_library_cloud_sync(app: &AppHandle) {
+/// Fetch game library + settings from Firestore and overwrite local state.
+/// Falls back to Drive `library.json` migration if Firestore has no data yet.
+/// Returns `Ok(true)` if data was loaded, `Ok(false)` if no data found anywhere.
+pub fn fetch_all_from_firestore(app: &AppHandle) -> Result<bool, String> {
+    let user_id = match crate::gdrive_auth::get_current_user_id(app) {
+        Some(id) => id,
+        None => {
+            println!("[firestore] fetch_all_from_firestore: no user_id, skipping");
+            return Ok(false);
+        }
+    };
+
+    let firestore_games = firestore::load_all_games(app, &user_id)
+        .unwrap_or_else(|e| { eprintln!("[firestore] load_all_games failed: {e}"); vec![] });
+
+    // Migration path: if Firestore has no games, try Drive library.json once.
+    if firestore_games.is_empty() {
+        println!("[firestore] No games in Firestore — checking Drive for one-time migration");
+        match crate::gdrive::fetch_library_from_cloud(app) {
+            Ok(true) => {
+                println!("[firestore] Migrating games from Drive library.json to Firestore");
+                let migrated = load_state(app)?;
+                for game in &migrated.games {
+                    if let Err(e) = firestore::save_game(app, &user_id, game) {
+                        eprintln!("[firestore] Migration: save game '{}' failed: {e}", game.id);
+                    }
+                }
+                // Also migrate settings if available.
+                match crate::gdrive::fetch_settings_from_cloud(app) {
+                    Ok(true) => {
+                        let s = load_state(app)?;
+                        if let Err(e) = firestore::save_settings(app, &user_id, &s.settings) {
+                            eprintln!("[firestore] Migration: save settings failed: {e}");
+                        }
+                    }
+                    _ => {}
+                }
+                return Ok(true);
+            }
+            Ok(false) => {
+                println!("[firestore] No data in Drive either — first-time user");
+                return Ok(false);
+            }
+            Err(e) => {
+                eprintln!("[firestore] Could not check Drive during migration: {e}");
+                return Ok(false);
+            }
+        }
+    }
+
+    // Apply cloud data to local state.
+    let mut state = load_state(app)?;
+    state.games = firestore_games;
+
+    if let Ok(Some(cloud_settings)) = firestore::load_settings(app, &user_id) {
+        state.settings = cloud_settings;
+    }
+
+    save_state(app, &state)?;
+    println!("[firestore] Restored {} games from Firestore", state.games.len());
+    Ok(true)
+}
+
+/// Upsert a single game to Firestore in a background thread.
+fn spawn_firestore_game_upsert(app: &AppHandle, game: GameEntry) {
     let app = app.clone();
     std::thread::spawn(move || {
-        if let Err(e) = gdrive::sync_library_to_cloud(&app) {
-            eprintln!("[gdrive] Background library cloud sync failed: {e}");
+        if let Some(user_id) = crate::gdrive_auth::get_current_user_id(&app) {
+            if let Err(e) = firestore::save_game(&app, &user_id, &game) {
+                eprintln!("[firestore] Background game upsert '{}' failed: {e}", game.id);
+            }
         }
     });
 }
 
-/// Spawn a background thread to sync app settings to Google Drive.
-/// Must only be called after `save_state()` has already succeeded locally.
-fn spawn_settings_cloud_sync(app: &AppHandle) {
+/// Delete a single game from Firestore in a background thread.
+fn spawn_firestore_game_delete(app: &AppHandle, game_id: String) {
     let app = app.clone();
     std::thread::spawn(move || {
-        if let Err(e) = gdrive::sync_settings_to_cloud(&app) {
-            eprintln!("[gdrive] Background settings cloud sync failed: {e}");
+        if let Some(user_id) = crate::gdrive_auth::get_current_user_id(&app) {
+            if let Err(e) = firestore::delete_game(&app, &user_id, &game_id) {
+                eprintln!("[firestore] Background game delete '{game_id}' failed: {e}");
+            }
+        }
+    });
+}
+
+/// Push the current `AppSettings` to Firestore in a background thread.
+fn spawn_firestore_settings_sync(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let settings = match load_state(&app) {
+            Ok(s) => s.settings,
+            Err(_) => return,
+        };
+        if let Some(user_id) = crate::gdrive_auth::get_current_user_id(&app) {
+            if let Err(e) = firestore::save_settings(&app, &user_id, &settings) {
+                eprintln!("[firestore] Background settings sync failed: {e}");
+            }
         }
     });
 }

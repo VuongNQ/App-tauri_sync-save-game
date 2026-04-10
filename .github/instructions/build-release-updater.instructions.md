@@ -23,6 +23,7 @@ Required secrets (must exist in repo Settings → Secrets):
 | `GITHUB_TOKEN` | Create/update release + push version commit |
 | `GOOGLE_CLIENT_ID` | Compiled into Rust binary via `option_env!()` |
 | `GOOGLE_CLIENT_SECRET` | Compiled into Rust binary via `option_env!()` |
+| `GOOGLE_CLOUD_PROJECT_ID` | Firestore project ID compiled into Rust binary via `option_env!()` |
 | `TAURI_SIGNING_PRIVATE_KEY` | Signs bundles so the updater can verify them |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password for the signing key |
 

@@ -8,6 +8,7 @@ description: "Use when: integrating Google Drive API, implementing Google OAuth 
 
 - `CLIENT_ID` and `CLIENT_SECRET` are **compile-time constants** injected via env vars in `src-tauri/.env`.
   Use `option_env!("GOOGLE_CLIENT_ID")` / `option_env!("GOOGLE_CLIENT_SECRET")`.
+- `GOOGLE_CLOUD_PROJECT_ID` is a compile-time constant injected the same way — used by `firestore.rs` as the GCP project ID for Firestore REST API calls. Read with `option_env!("GOOGLE_CLOUD_PROJECT_ID")`.
 - The Rust backend exposes `get_oauth_credentials` command so the frontend can pass them to the Google Auth plugin — credentials are **never hardcoded** in TypeScript.
 - Always use the **"Desktop app"** OAuth credential type. `CLIENT_SECRET` defaults to `""`.
 - Always call `require_client_id()` at the top of every public OAuth function to surface misconfiguration early.
@@ -24,7 +25,8 @@ Authentication uses `tauri-plugin-google-auth` (Rust crate: `tauri-plugin-google
 4. **Frontend** sends tokens to Rust via `saveAuthTokens(SaveTokensPayload)`.
 5. **Rust** persists `OAuthTokens { access_token, refresh_token, expires_at, user_id: "" }` to `TOKEN_FILE_NAME` first.
 6. **Rust** calls `/oauth2/v2/userinfo` with the access token to get the stable `id`; re-saves tokens with `user_id` populated.
-7. **Rust** emits `"auth-status-changed"` event and returns `AuthStatus { authenticated: true }`.
+7. **Rust** calls `settings::fetch_all_from_firestore()` — loads game library + settings from Firestore, falls back to Drive `library.json` migration if Firestore has no data. This replaces the old separate `fetch_library_from_cloud` + `fetch_settings_from_cloud` calls.
+8. **Rust** emits `"auth-status-changed"` event and returns `AuthStatus { authenticated: true }`.
 
 ### Plugin Registration
 
@@ -90,12 +92,16 @@ const SCOPES = [
   "profile",
   "https://www.googleapis.com/auth/drive.file",
   "https://www.googleapis.com/auth/drive.appdata",
+  "https://www.googleapis.com/auth/datastore",
 ];
 ```
 
 - `openid`, `email`, `profile` — needed for Google user info (profile picture, display name).
 - `drive.appdata` — keeps all sync data in the hidden app folder.
 - `drive.file` — covers files the app creates.
+- `datastore` — required for Firestore REST API access (game library, settings, SyncMeta mirror).
+
+> **Re-login required**: Adding the `datastore` scope invalidates existing tokens. Users upgrading from a build without this scope must re-authenticate.
 
 ## Google Drive API Calls (gdrive.rs)
 
@@ -165,39 +171,14 @@ appDataFolder/
 
 ### Cloud Library & Config DB Operations
 
-| Function | Direction | Trigger |
-|----------|-----------|---------|
-| `sync_library_to_cloud(app)` | Local → Cloud | After every `add_game`, `update_game`, `remove_game`. Runs in a **background thread** — local `save_state()` must complete first. |
-| `fetch_library_from_cloud(app)` | Cloud → Local | On first login or when local `games-library.json` is missing. |
-| `sync_settings_to_cloud(app)` | Local → Cloud | After every `update_settings` call. Runs in background thread. |
-| `fetch_settings_from_cloud(app)` | Cloud → Local | On first login alongside library fetch. |
+> **Superseded by Firestore** — `library.json` and `config.json` on Drive are no longer the primary database. `sync_library_to_cloud` and `sync_settings_to_cloud` are dead code (marked `#[allow(dead_code)]`). Game library and settings are now read/written via `firestore.rs`. The Drive functions are kept for the one-time migration path only.
 
-#### Conflict Resolution for library.json / config.json
-
-Use Drive's native `modifiedTime` (from `GET /drive/v3/files/{id}?fields=modifiedTime`) as the version timestamp:
-
-1. Before writing to cloud, fetch the Drive file's `modifiedTime`.
-2. Compare with `last_cloud_library_modified` stored in local `StoredState`.
-3. If Drive version is **newer** → pull cloud version and update local first.
-4. Then write the merged/updated version back to Drive.
-
-#### Local-First Strategy (Performance Requirement)
-
-Because `ureq` is blocking, cloud library sync **must never block the UI thread**:
-
-- UI always reads from `games-library-{user_id}.json` (or fallback `games-library.json`) on disk — fast, no network.
-- After `settings::save_state()` completes, spawn a background thread to call `gdrive::sync_library_to_cloud()`.
-- Use a dedicated thread (mirror the `WatcherManager` pattern) — not the main Tauri thread.
-
-```rust
-// Pattern: background cloud sync after local save
-let app_clone = app.clone();
-std::thread::spawn(move || {
-    if let Err(e) = gdrive::sync_library_to_cloud(&app_clone) {
-        eprintln!("[gdrive] Cloud library sync failed: {e}");
-    }
-});
-```
+| Function | Direction | Status |
+|----------|-----------|--------|
+| `sync_library_to_cloud(app)` | Local → Cloud | **Dead code** — replaced by Firestore |
+| `fetch_library_from_cloud(app)` | Cloud → Local | Kept — used by migration path in `settings::fetch_all_from_firestore` |
+| `sync_settings_to_cloud(app)` | Local → Cloud | **Dead code** — replaced by Firestore |
+| `fetch_settings_from_cloud(app)` | Cloud → Local | Kept — used by migration path in `settings::fetch_all_from_firestore` |
 
 ### Common Drive Operations
 

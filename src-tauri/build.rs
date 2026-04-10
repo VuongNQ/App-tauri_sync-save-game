@@ -6,7 +6,7 @@ fn main() {
     }
 
     // Forward selected env vars so code can use  env!() / option_env!().
-    for key in ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"] {
+    for key in ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_CLOUD_PROJECT_ID"] {
         println!("cargo:rerun-if-env-changed={key}");
         if let Ok(val) = std::env::var(key) {
             println!("cargo:rustc-env={key}={val}");

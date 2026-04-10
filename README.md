@@ -27,6 +27,7 @@ A **Windows desktop tool** built with [Tauri 2](https://tauri.app/) that tracks 
 | HTTP (Rust) | ureq 3 (blocking) |
 | File watcher | notify 8 + notify-debouncer-mini 0.6 |
 | Auth | tauri-plugin-google-auth 0.5 (browser-based OAuth) |
+| Cloud DB | Firestore REST API (game library, settings, sync metadata) |
 
 ---
 
@@ -44,30 +45,46 @@ src/                          # React + TypeScript frontend
 
 src-tauri/src/
   models.rs                   # Rust data types (mirrors types/dashboard.ts)
-  settings.rs                 # JSON persistence (load_state / save_state)
+  settings.rs                 # JSON persistence (load_state / save_state) + Firestore spawn helpers
   gdrive_auth.rs              # OAuth token management (persist, refresh, check status)
   gdrive.rs                   # Google Drive API client (upload, download, list, folders)
+  firestore.rs                # Firestore REST API client (game library, settings, SyncMeta mirror)
   watcher.rs                  # File-system watcher for background save-game tracking
   sync.rs                     # Sync logic: compare timestamps, upload/download newest save
+  drive_mgmt.rs               # Drive file manager + version backup commands
   tray.rs                     # System-tray setup and background lifecycle
   lib.rs                      # Tauri commands wired to handler functions
 ```
 
 ---
 
-## Google Drive as Database
+## Cloud Storage
 
-The `drive.appdata` hidden folder acts as a zero-cost, user-owned database — no external server or SQL engine.
+### Firestore (Game Library & Settings)
+
+Game library and app settings are stored in **Firestore** — a fully managed NoSQL database on the user's own GCP project. No external server needed.
+
+```
+users/{user_id}/
+  games/{game_id}       # GameEntry document (flat Firestore fields)
+  settings/app          # AppSettings document
+  syncMeta/{game_id}    # SyncMeta JSON blob (write-only mirror for future cross-device use)
+```
+
+- Writes happen in **background threads** — the UI never blocks on network calls.
+- On first login, if Firestore has no data, the app automatically migrates from the legacy Drive `library.json`.
+
+### Google Drive (Save Files)
+
+Actual save-game files are stored in the `drive.appdata` hidden folder — invisible in Drive UI, protected from accidental deletion.
 
 ```
 appDataFolder/
   game-processing-sync/
-    config.json           # AppSettings (global configuration)
-    library.json          # Vec<GameEntry> (game list)
-    games/
-      {game_id}/
-        <save files...>
-        .sync-meta.json   # timestamps + file hashes for conflict detection
+    {game_id}/
+      <save files...>
+      .sync-meta.json   # timestamps + file IDs for conflict detection
+      backups/          # version snapshots
 ```
 
 ---
@@ -75,9 +92,11 @@ appDataFolder/
 ## Authentication
 
 - Uses `tauri-plugin-google-auth` — browser-based OAuth with no local HTTP server.
-- Scopes: `openid`, `email`, `profile`, `drive.file`, `drive.appdata`.
-- `CLIENT_ID` and `CLIENT_SECRET` are compiled into the Rust binary via `option_env!()` — never stored in frontend code.
+- Scopes: `openid`, `email`, `profile`, `drive.file`, `drive.appdata`, `https://www.googleapis.com/auth/datastore`.
+- `CLIENT_ID`, `CLIENT_SECRET`, and `GOOGLE_CLOUD_PROJECT_ID` are compiled into the Rust binary via `option_env!()` — never stored in frontend code.
 - Tokens are persisted to `{app_data_dir}/oauth-tokens.json`.
+
+> Existing users upgrading from a build without the `datastore` scope must re-authenticate once.
 
 ---
 
@@ -101,9 +120,10 @@ Before running the app locally you must configure a Google Cloud project with th
 
 1. **Create a Google Cloud project** at [console.cloud.google.com](https://console.cloud.google.com/).
 
-2. **Enable APIs** — in *APIs & Services → Library*, enable both:
+2. **Enable APIs** — in *APIs & Services → Library*, enable all three:
    - **Google Drive API**
    - **Google People API** (used for `userinfo` endpoint)
+   - **Cloud Firestore API**
 
 3. **Create OAuth 2.0 credentials**:
    - Go to *APIs & Services → Credentials → Create Credentials → OAuth client ID*.
@@ -113,17 +133,22 @@ Before running the app locally you must configure a Google Cloud project with th
 4. **Configure OAuth consent screen**:
    - Go to *APIs & Services → OAuth consent screen*.
    - Set user type to **External** (or Internal if using a Google Workspace org).
-   - Add scopes: `openid`, `email`, `profile`, `https://www.googleapis.com/auth/drive.file`, `https://www.googleapis.com/auth/drive.appdata`.
+   - Add scopes: `openid`, `email`, `profile`, `https://www.googleapis.com/auth/drive.file`, `https://www.googleapis.com/auth/drive.appdata`, `https://www.googleapis.com/auth/datastore`.
    - Add your Google account as a **test user** while the app is in *Testing* status.
 
-5. **Provide credentials to the Rust build** — create `src-tauri/.env`:
+5. **Create a Firestore database** — in *Firestore → Create database*.
+   - Choose **Native mode**.
+   - Select your preferred region.
+
+6. **Provide credentials to the Rust build** — create `src-tauri/.env`:
    ```
    GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
    GOOGLE_CLIENT_SECRET=your-client-secret
+   GOOGLE_CLOUD_PROJECT_ID=your-gcp-project-id
    ```
    These are injected at compile time via `option_env!()` in `build.rs` and are **never** exposed to the frontend directly.
 
-> For CI/CD, add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` as GitHub repository secrets instead of using `.env`.
+> For CI/CD, add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CLOUD_PROJECT_ID` as GitHub repository secrets instead of using `.env`.
 
 ---
 
@@ -161,7 +186,7 @@ Releases are published automatically via GitHub Actions on every push to `main`:
 2. Builds and signs the Windows installer.
 3. Publishes a GitHub Release tagged `vX.Y.Z` with `latest.json` for the in-app updater.
 
-Required repository secrets: `GITHUB_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+Required repository secrets: `GITHUB_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CLOUD_PROJECT_ID`, `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 ### Generating the Signing Key
 
@@ -187,4 +212,4 @@ This outputs:
 
 - OAuth credentials are **never** stored in frontend code — served only through a Tauri command from the compiled Rust binary.
 - Tokens are stored as plain JSON at `{app_data_dir}/oauth-tokens.json` (OS keyring migration is a future enhancement).
-- CSP in `tauri.conf.json` restricts connections to `accounts.google.com`, `oauth2.googleapis.com`, `www.googleapis.com`, and `localhost`.
+- CSP in `tauri.conf.json` restricts connections to `accounts.google.com`, `oauth2.googleapis.com`, `www.googleapis.com`, `firestore.googleapis.com`, and `localhost`.

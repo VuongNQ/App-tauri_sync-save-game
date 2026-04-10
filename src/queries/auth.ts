@@ -17,6 +17,7 @@ const SCOPES = [
   "profile",
   "https://www.googleapis.com/auth/drive.file",
   "https://www.googleapis.com/auth/drive.appdata",
+  "https://www.googleapis.com/auth/datastore",
 ];
 
 export function useAuthStatusQuery() {

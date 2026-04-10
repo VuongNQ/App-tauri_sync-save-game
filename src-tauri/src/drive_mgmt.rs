@@ -84,6 +84,7 @@ pub fn rename_game_drive_file(
             if let Some(entry) = meta.files.remove(old_name) {
                 meta.files.insert(new_name.to_string(), entry);
                 gdrive::upload_sync_meta(app, &folder_id, &meta, meta_id.as_deref())?;
+                spawn_sync_meta_mirror(app, game_id, meta.clone());
                 println!("[gdrive] Renamed sync-meta key '{old_name}' → '{new_name}'");
             }
         }
@@ -137,6 +138,7 @@ pub fn move_game_drive_file(
         if let Some(mut meta) = meta_opt {
             if meta.files.remove(file_name).is_some() {
                 gdrive::upload_sync_meta(app, &game_folder_id, &meta, meta_id.as_deref())?;
+                spawn_sync_meta_mirror(app, game_id, meta.clone());
                 println!("[gdrive] Removed '{file_name}' from sync-meta after move");
             }
         }
@@ -176,6 +178,7 @@ pub fn delete_game_drive_file(
         if let Some(mut meta) = meta_opt {
             if meta.files.remove(file_name).is_some() {
                 gdrive::upload_sync_meta(app, &folder_id, &meta, meta_id.as_deref())?;
+                spawn_sync_meta_mirror(app, game_id, meta.clone());
                 println!("[gdrive] Removed '{file_name}' from sync-meta after delete");
             }
         }
@@ -388,6 +391,7 @@ pub fn restore_version_backup(
     }
     let (_, meta_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
     gdrive::upload_sync_meta(app, &game_folder_id, &new_sync_meta, meta_id.as_deref())?;
+    spawn_sync_meta_mirror(app, game_id, new_sync_meta.clone());
 
     // Update game timestamps.
     settings::update_game_field(app, game_id, |g| {
@@ -443,4 +447,21 @@ pub fn delete_version_backup(
 
     println!("[gdrive] Deleted backup {backup_folder_id} for game {game_id}");
     Ok(())
+}
+
+// ── Firestore mirror helpers ──────────────────────────────────
+
+/// After every successful `upload_sync_meta` to Drive, spawn a background thread
+/// to mirror the same data to Firestore. Drive remains the authoritative read
+/// source — this is a write-only mirror for future cross-device querying.
+fn spawn_sync_meta_mirror(app: &AppHandle, game_id: &str, meta: SyncMeta) {
+    let app = app.clone();
+    let game_id = game_id.to_string();
+    std::thread::spawn(move || {
+        if let Some(user_id) = crate::gdrive_auth::get_current_user_id(&app) {
+            if let Err(e) = crate::firestore::save_sync_meta(&app, &user_id, &game_id, &meta) {
+                eprintln!("[firestore] SyncMeta mirror failed for '{game_id}': {e}");
+            }
+        }
+    });
 }
