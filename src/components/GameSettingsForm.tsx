@@ -158,60 +158,63 @@ export function GameSettingsForm({
 
   return (
     <div className={`${CARD} mt-4`}>
-      <div className="flex items-center gap-3 justify-between">
-        <h3 className="m-0 font-semibold">Edit settings</h3>
-        <div className="flex items-center gap-5 justify-end-safe">
-          {isDirty && (
-            <>
-              <button
-                type="button"
-                className={GHOST_BTN}
-                onClick={() => {
-                  reset();
-                  onToggle();
-                }}
-                disabled={isSaving}
-              >
-                Discard
-              </button>
-              <button type="submit" className={PRIMARY_BTN} disabled={isSaving}>
-                {isSaving ? "Saving…" : "Save"}
-              </button>
-            </>
-          )}
-          <span
-            className="text-[#7dc9ff] text-lg shrink-0 cursor-pointer"
-            onClick={onToggle}
-          >
-            {isOpen ? "▲" : "▼"}
-          </span>
-        </div>
-      </div>
-
-      {isOpen && gameSettings && (
-        <FormProvider {...methods}>
-          <form
-            onSubmit={handleSubmit(onSaveSettings)}
-            className="flex flex-col gap-5 pt-4"
-          >
-            <ThumbnailSection isSyncing={isSyncing} />
-            <DescriptionSection />
-            <SaveFolderSection
-              game={gameSettings}
-              isSyncing={isSyncing}
-              isPathInvalid={isPathInvalid}
-            />
-            <SyncExclusionsSection game={gameSettings} />
-            <div className="flex items-center gap-3 justify-end">
-              {saveError && (
-                <span className="text-sm text-[#ffd5d5] mr-auto">
-                  {saveError}
-                </span>
+      <FormProvider {...methods}>
+        <form onSubmit={handleSubmit(onSaveSettings)}>
+          <div className="flex items-center gap-3 justify-between">
+            <h3 className="m-0 font-semibold">Edit settings</h3>
+            <div className="flex items-center gap-5 justify-end-safe">
+              {isDirty && (
+                <>
+                  <button
+                    type="button"
+                    className={GHOST_BTN}
+                    onClick={() => {
+                      reset();
+                      onToggle();
+                    }}
+                    disabled={isSaving}
+                  >
+                    Discard
+                  </button>
+                  <button
+                    type="submit"
+                    className={PRIMARY_BTN}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? "Saving…" : "Save"}
+                  </button>
+                </>
               )}
+              <span
+                className="text-[#7dc9ff] text-lg shrink-0 cursor-pointer"
+                onClick={onToggle}
+              >
+                {isOpen ? "▲" : "▼"}
+              </span>
             </div>
-          </form>
-        </FormProvider>
-      )}
+          </div>
+
+          {isOpen && gameSettings && (
+            <div className="flex flex-col gap-5 pt-4">
+              <ThumbnailSection isSyncing={isSyncing} />
+              <DescriptionSection />
+              <SaveFolderSection
+                game={gameSettings}
+                isSyncing={isSyncing}
+                isPathInvalid={isPathInvalid}
+              />
+              <SyncExclusionsSection game={gameSettings} />
+              <div className="flex items-center gap-3 justify-end">
+                {saveError && (
+                  <span className="text-sm text-[#ffd5d5] mr-auto">
+                    {saveError}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </form>
+      </FormProvider>
     </div>
   );
 }
