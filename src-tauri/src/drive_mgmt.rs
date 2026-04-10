@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
 
 use chrono::SecondsFormat;
 
@@ -6,7 +6,7 @@ use tauri::AppHandle;
 
 use crate::{
     gdrive,
-    models::{BackupMeta, DriveFileFlatItem, DriveFileItem, DriveVersionBackup, SyncFileMeta, SyncMeta, SyncResult},
+    models::{BackupMeta, DriveFileFlatItem, DriveFileItem, DriveVersionBackup, SyncFileEntry, SyncMeta, SyncResult},
     settings,
 };
 
@@ -81,8 +81,11 @@ pub fn rename_game_drive_file(
         let folder_id = require_game_folder(app, game_id)?;
         let (meta_opt, meta_id) = gdrive::download_sync_meta(app, &folder_id)?;
         if let Some(mut meta) = meta_opt {
-            if let Some(entry) = meta.files.remove(old_name) {
-                meta.files.insert(new_name.to_string(), entry);
+        if let Some(pos) = meta.files.iter().position(|f| f.relative_path == old_name || f.file_name == old_name) {
+                let mut entry = meta.files.remove(pos);
+                entry.relative_path = new_name.to_string();
+                entry.file_name = new_name.to_string();
+                meta.files.push(entry);
                 gdrive::upload_sync_meta(app, &folder_id, &meta, meta_id.as_deref())?;
                 spawn_sync_meta_mirror(app, game_id, meta.clone());
                 println!("[gdrive] Renamed sync-meta key '{old_name}' → '{new_name}'");
@@ -136,7 +139,9 @@ pub fn move_game_drive_file(
     if old_parent_id == game_folder_id && new_parent_id != game_folder_id {
         let (meta_opt, meta_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
         if let Some(mut meta) = meta_opt {
-            if meta.files.remove(file_name).is_some() {
+            let before = meta.files.len();
+            meta.files.retain(|f| f.relative_path != file_name && f.file_name != file_name);
+            if meta.files.len() < before {
                 gdrive::upload_sync_meta(app, &game_folder_id, &meta, meta_id.as_deref())?;
                 spawn_sync_meta_mirror(app, game_id, meta.clone());
                 println!("[gdrive] Removed '{file_name}' from sync-meta after move");
@@ -176,7 +181,9 @@ pub fn delete_game_drive_file(
         let folder_id = require_game_folder(app, game_id)?;
         let (meta_opt, meta_id) = gdrive::download_sync_meta(app, &folder_id)?;
         if let Some(mut meta) = meta_opt {
-            if meta.files.remove(file_name).is_some() {
+            let before = meta.files.len();
+            meta.files.retain(|f| f.relative_path != file_name && f.file_name != file_name);
+            if meta.files.len() < before {
                 gdrive::upload_sync_meta(app, &folder_id, &meta, meta_id.as_deref())?;
                 spawn_sync_meta_mirror(app, game_id, meta.clone());
                 println!("[gdrive] Removed '{file_name}' from sync-meta after delete");
@@ -377,17 +384,15 @@ pub fn restore_version_backup(
     let updated_root = gdrive::list_drive_items(app, &game_folder_id)?;
     let mut new_sync_meta = SyncMeta {
         last_synced: Some(now_iso.clone()),
-        files: HashMap::new(),
+        files: Vec::new(),
     };
     for item in updated_root.iter().filter(|f| !f.is_folder && f.name != SYNC_META_NAME) {
-        new_sync_meta.files.insert(
-            item.name.clone(),
-            SyncFileMeta {
-                modified_time: item.modified_time.clone().unwrap_or_else(|| now_iso.clone()),
-                size: item.size.unwrap_or(0),
-                drive_file_id: Some(item.id.clone()),
-            },
-        );
+        new_sync_meta.files.push(SyncFileEntry {
+            relative_path: item.name.clone(),
+            file_name: item.name.clone(),
+            size: item.size.unwrap_or(0),
+            drive_file_id: Some(item.id.clone()),
+        });
     }
     let (_, meta_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
     gdrive::upload_sync_meta(app, &game_folder_id, &new_sync_meta, meta_id.as_deref())?;

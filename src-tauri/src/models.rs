@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
 
 // ── Dashboard ─────────────────────────────────────────────
@@ -153,22 +151,23 @@ pub struct SyncResult {
 #[serde(rename_all = "camelCase")]
 pub struct SyncMeta {
     pub last_synced: Option<String>,
-    pub files: HashMap<String, SyncFileMeta>,
+    pub files: Vec<SyncFileEntry>,
 }
 
 impl Default for SyncMeta {
     fn default() -> Self {
         Self {
             last_synced: None,
-            files: HashMap::new(),
+            files: Vec::new(),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SyncFileMeta {
-    pub modified_time: String,
+pub struct SyncFileEntry {
+    pub relative_path: String,
+    pub file_name: String,
     pub size: u64,
     pub drive_file_id: Option<String>,
 }
