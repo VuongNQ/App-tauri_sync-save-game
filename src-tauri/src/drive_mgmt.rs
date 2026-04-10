@@ -81,10 +81,9 @@ pub fn rename_game_drive_file(
         let folder_id = require_game_folder(app, game_id)?;
         let (meta_opt, meta_id) = gdrive::download_sync_meta(app, &folder_id)?;
         if let Some(mut meta) = meta_opt {
-        if let Some(pos) = meta.files.iter().position(|f| f.relative_path == old_name || f.file_name == old_name) {
+        if let Some(pos) = meta.files.iter().position(|f| f.path_file == old_name) {
                 let mut entry = meta.files.remove(pos);
-                entry.relative_path = new_name.to_string();
-                entry.file_name = new_name.to_string();
+                entry.path_file = new_name.to_string();
                 meta.files.push(entry);
                 gdrive::upload_sync_meta(app, &folder_id, &meta, meta_id.as_deref())?;
                 spawn_sync_meta_mirror(app, game_id, meta.clone());
@@ -140,7 +139,7 @@ pub fn move_game_drive_file(
         let (meta_opt, meta_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
         if let Some(mut meta) = meta_opt {
             let before = meta.files.len();
-            meta.files.retain(|f| f.relative_path != file_name && f.file_name != file_name);
+            meta.files.retain(|f| f.path_file != file_name);
             if meta.files.len() < before {
                 gdrive::upload_sync_meta(app, &game_folder_id, &meta, meta_id.as_deref())?;
                 spawn_sync_meta_mirror(app, game_id, meta.clone());
@@ -182,7 +181,7 @@ pub fn delete_game_drive_file(
         let (meta_opt, meta_id) = gdrive::download_sync_meta(app, &folder_id)?;
         if let Some(mut meta) = meta_opt {
             let before = meta.files.len();
-            meta.files.retain(|f| f.relative_path != file_name && f.file_name != file_name);
+            meta.files.retain(|f| f.path_file != file_name);
             if meta.files.len() < before {
                 gdrive::upload_sync_meta(app, &folder_id, &meta, meta_id.as_deref())?;
                 spawn_sync_meta_mirror(app, game_id, meta.clone());
@@ -388,8 +387,7 @@ pub fn restore_version_backup(
     };
     for item in updated_root.iter().filter(|f| !f.is_folder && f.name != SYNC_META_NAME) {
         new_sync_meta.files.push(SyncFileEntry {
-            relative_path: item.name.clone(),
-            file_name: item.name.clone(),
+            path_file: item.name.clone(),
             size: item.size.unwrap_or(0),
             drive_file_id: Some(item.id.clone()),
         });

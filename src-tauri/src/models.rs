@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 // ── Dashboard ─────────────────────────────────────────────
@@ -151,6 +153,7 @@ pub struct SyncResult {
 #[serde(rename_all = "camelCase")]
 pub struct SyncMeta {
     pub last_synced: Option<String>,
+    #[serde(deserialize_with = "deserialize_sync_files")]
     pub files: Vec<SyncFileEntry>,
 }
 
@@ -166,10 +169,67 @@ impl Default for SyncMeta {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncFileEntry {
-    pub relative_path: String,
-    pub file_name: String,
+    pub path_file: String,
     pub size: u64,
     pub drive_file_id: Option<String>,
+}
+
+/// Deserialize `SyncMeta.files` from either:
+/// - **New format** (`pathFile`): JSON array of current `SyncFileEntry` objects
+/// - **Intermediate format** (`relativePath`/`fileName`): array written by the Vec-refactor before the `pathFile` rename
+/// - **Legacy format**: JSON object (map) keyed by relative path with `{ size, driveFileId }` values
+///
+/// This migration shim allows the app to read `.sync-meta.json` files written
+/// by any previous version of the app without requiring a manual resync.
+fn deserialize_sync_files<'de, D>(deserializer: D) -> Result<Vec<SyncFileEntry>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LegacyFileMeta {
+        #[serde(default)]
+        size: u64,
+        drive_file_id: Option<String>,
+    }
+
+    // Array format written when the struct had `relativePath` + `fileName` fields.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct IntermediateEntry {
+        relative_path: String,
+        #[serde(default)]
+        size: u64,
+        drive_file_id: Option<String>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Format {
+        New(Vec<SyncFileEntry>),
+        Mid(Vec<IntermediateEntry>),
+        Old(HashMap<String, LegacyFileMeta>),
+    }
+
+    match Format::deserialize(deserializer)? {
+        Format::New(v) => Ok(v),
+        Format::Mid(v) => Ok(v
+            .into_iter()
+            .map(|e| SyncFileEntry {
+                path_file: e.relative_path,
+                size: e.size,
+                drive_file_id: e.drive_file_id,
+            })
+            .collect()),
+        Format::Old(map) => Ok(map
+            .into_iter()
+            .map(|(rel, meta)| SyncFileEntry {
+                path_file: rel,
+                size: meta.size,
+                drive_file_id: meta.drive_file_id,
+            })
+            .collect()),
+    }
 }
 
 /// Diff between local save files and Drive sync metadata.

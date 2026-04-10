@@ -105,7 +105,7 @@ fn projected_game_cloud_bytes(local_files: &[LocalFileInfo], cloud_meta: &SyncMe
     let cloud_only: u64 = cloud_meta
         .files
         .iter()
-        .filter(|f| !local_files.iter().any(|l| l.relative_path == f.relative_path))
+        .filter(|f| !local_files.iter().any(|l| l.relative_path == f.path_file))
         .map(|f| f.size)
         .sum();
 
@@ -303,7 +303,7 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
 
     // Build lookup from stored SyncMeta for fast path checks (cloud_meta is never mutated)
     let meta_lookup: HashMap<&str, &SyncFileEntry> =
-        cloud_meta.files.iter().map(|f| (f.relative_path.as_str(), f)).collect();
+        cloud_meta.files.iter().map(|f| (f.path_file.as_str(), f)).collect();
 
     let mut uploaded = 0u32;
     let mut downloaded = 0u32;
@@ -341,10 +341,9 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
 
             let result = gdrive::upload_file(app, &game_folder_id, &local.absolute_path, existing_id)?;
 
-            new_meta.files.retain(|f| f.relative_path != local.relative_path);
+            new_meta.files.retain(|f| f.path_file != local.relative_path);
             new_meta.files.push(SyncFileEntry {
-                relative_path: local.relative_path.clone(),
-                file_name: file_name.to_string(),
+                path_file: local.relative_path.clone(),
                 size: local.size,
                 drive_file_id: Some(result.id),
             });
@@ -366,10 +365,9 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
                     &dest,
                 )?;
                 if let Some(fid) = used_id {
-                    new_meta.files.retain(|f| f.relative_path != local.relative_path);
+                    new_meta.files.retain(|f| f.path_file != local.relative_path);
                     new_meta.files.push(SyncFileEntry {
-                        relative_path: local.relative_path.clone(),
-                        file_name: file_name.to_string(),
+                        path_file: local.relative_path.clone(),
                         size: cloud_entry.map(|e| e.size).unwrap_or(0),
                         drive_file_id: Some(fid),
                     });
@@ -388,26 +386,25 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
 
     // 7. Download files that exist only on Drive (not locally)
     for entry in cloud_meta.files.iter() {
-        if local_files.iter().any(|l| l.relative_path == entry.relative_path) {
+        if local_files.iter().any(|l| l.relative_path == entry.path_file) {
             continue; // Already handled above
         }
 
         // File exists on Drive but not locally → download it
         if let Some(ref drive_file_id) = entry.drive_file_id {
-            let dest = save_dir.join(entry.relative_path.replace('/', "\\"));
+            let dest = save_dir.join(entry.path_file.replace('/', "\\"));
             let used_id = download_with_fallback(
                 app,
                 &game_folder_id,
                 &mut drive_files,
                 drive_file_id,
-                &entry.relative_path,
+                &entry.path_file,
                 &dest,
             )?;
             if let Some(fid) = used_id {
-                new_meta.files.retain(|f| f.relative_path != entry.relative_path);
+                new_meta.files.retain(|f| f.path_file != entry.path_file);
                 new_meta.files.push(SyncFileEntry {
-                    relative_path: entry.relative_path.clone(),
-                    file_name: entry.file_name.clone(),
+                    path_file: entry.path_file.clone(),
                     size: entry.size,
                     drive_file_id: Some(fid),
                 });
@@ -518,7 +515,7 @@ pub fn check_sync_structure_diff(
     };
 
     let meta_lookup: HashMap<&str, &SyncFileEntry> =
-        cloud_meta.files.iter().map(|f| (f.relative_path.as_str(), f)).collect();
+        cloud_meta.files.iter().map(|f| (f.path_file.as_str(), f)).collect();
 
     // 6. Classify files into diff categories
     let mut local_only_files = Vec::new();
@@ -547,7 +544,7 @@ pub fn check_sync_structure_diff(
     let cloud_only_files: Vec<String> = cloud_meta
         .files
         .iter()
-        .map(|f| &f.relative_path)
+        .map(|f| &f.path_file)
         .filter(|rel| !local_files.iter().any(|l| &l.relative_path == *rel))
         .cloned()
         .collect();
@@ -635,12 +632,11 @@ fn restore_from_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult
     // 4. Force-download ALL cloud-tracked files
     for entry in cloud_meta.files.iter() {
         if let Some(ref drive_file_id) = entry.drive_file_id {
-            let dest = save_dir.join(entry.relative_path.replace('/', "\\"));
+            let dest = save_dir.join(entry.path_file.replace('/', "\\"));
             gdrive::download_file(app, drive_file_id, &dest)?;
-            new_meta.files.retain(|f| f.relative_path != entry.relative_path);
+            new_meta.files.retain(|f| f.path_file != entry.path_file);
             new_meta.files.push(SyncFileEntry {
-                relative_path: entry.relative_path.clone(),
-                file_name: entry.file_name.clone(),
+                path_file: entry.path_file.clone(),
                 size: entry.size,
                 drive_file_id: Some(drive_file_id.clone()),
             });
@@ -762,7 +758,7 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
 
     // Build lookup for fast path checking
     let meta_lookup: HashMap<&str, &SyncFileEntry> =
-        cloud_meta.files.iter().map(|f| (f.relative_path.as_str(), f)).collect();
+        cloud_meta.files.iter().map(|f| (f.path_file.as_str(), f)).collect();
 
     // 5. Force-upload ALL local files
     for local in &local_files {
@@ -777,10 +773,9 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
             .or_else(|| drive_files.iter().find(|f| f.name == file_name).map(|f| f.id.as_str()));
 
         let result = gdrive::upload_file(app, &game_folder_id, &local.absolute_path, existing_id)?;
-        new_meta.files.retain(|f| f.relative_path != local.relative_path);
+        new_meta.files.retain(|f| f.path_file != local.relative_path);
         new_meta.files.push(SyncFileEntry {
-            relative_path: local.relative_path.clone(),
-            file_name: file_name.to_string(),
+            path_file: local.relative_path.clone(),
             size: local.size,
             drive_file_id: Some(result.id),
         });
@@ -789,7 +784,7 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
 
     // 6. Cloud-only files are left in Drive (non-destructive) → counted as skipped
     for entry in &cloud_meta.files {
-        if !local_files.iter().any(|l| l.relative_path == entry.relative_path) {
+        if !local_files.iter().any(|l| l.relative_path == entry.path_file) {
             skipped += 1;
         }
     }
@@ -855,12 +850,12 @@ pub fn cleanup_excluded_from_cloud(
     let keys_to_remove: Vec<String> = cloud_meta
         .files
         .iter()
-        .filter(|f| is_excluded(&f.relative_path, &expandable_excludes))
-        .map(|f| f.relative_path.clone())
+        .filter(|f| is_excluded(&f.path_file, &expandable_excludes))
+        .map(|f| f.path_file.clone())
         .collect();
 
     for rel_path in &keys_to_remove {
-        if let Some(file_entry) = cloud_meta.files.iter().find(|f| f.relative_path == *rel_path).cloned() {
+        if let Some(file_entry) = cloud_meta.files.iter().find(|f| f.path_file == *rel_path).cloned() {
             if let Some(ref drive_file_id) = file_entry.drive_file_id {
                 println!("[sync] Deleting excluded Drive file '{rel_path}' (id={drive_file_id})");
                 if let Err(e) = gdrive::delete_drive_file(app, drive_file_id) {
@@ -869,7 +864,7 @@ pub fn cleanup_excluded_from_cloud(
                 }
             }
         }
-        cloud_meta.files.retain(|f| f.relative_path != *rel_path);
+        cloud_meta.files.retain(|f| f.path_file != *rel_path);
     }
 
     // 4. Re-upload updated sync metadata
