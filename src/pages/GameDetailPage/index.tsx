@@ -257,7 +257,13 @@ export function GameDetailPage() {
         </div>
 
         {/* Save Info Result */}
-        {saveInfoQuery.data && <SaveInfoPanel info={saveInfoQuery.data} />}
+        {saveInfoQuery.data && (
+          <SaveInfoPanel
+            info={saveInfoQuery.data}
+            onRefresh={() => void saveInfoQuery.refetch()}
+            isRefreshing={saveInfoQuery.isFetching}
+          />
+        )}
         {saveInfoQuery.isError && (
           <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
             {msg(saveInfoQuery.error, "Unable to get save info.")}
