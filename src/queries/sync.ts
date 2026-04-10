@@ -21,7 +21,7 @@ import {
   toggleTrackChanges,
 } from "../services/tauri";
 import type { DashboardData } from "../types/dashboard";
-import { DASHBOARD_KEY, VALIDATE_PATHS_KEY, driveFilesKey, driveFilesFlatKey, driveFilesFolderKey, versionBackupsKey } from "./keys";
+import { DASHBOARD_KEY, VALIDATE_PATHS_KEY, driveFilesKey, driveFilesFlatKey, driveFilesFolderKey, saveInfoKey, versionBackupsKey } from "./keys";
 
 function useSetDashboardCache() {
   const queryClient = useQueryClient();
@@ -73,9 +73,12 @@ export function useToggleAutoSyncMutation() {
   });
 }
 
-export function useGetSaveInfoMutation() {
-  return useMutation({
-    mutationFn: (gameId: string) => getSaveInfo(gameId),
+export function useGetSaveInfoQuery(gameId: string, enabled = true) {
+  return useQuery({
+    queryKey: saveInfoKey(gameId),
+    queryFn: () => getSaveInfo(gameId),
+    enabled,
+    staleTime: Infinity,
   });
 }
 

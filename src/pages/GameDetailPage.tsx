@@ -24,7 +24,7 @@ import {
 import {
   useCheckSyncDiffMutation,
   useDashboardQuery,
-  useGetSaveInfoMutation,
+  useGetSaveInfoQuery,
   usePushToCloudMutation,
   useRemoveGameMutation,
   useRestoreFromCloudMutation,
@@ -55,7 +55,7 @@ export function GameDetailPage() {
 
   // console.log("[GameDetailPage] game:", game);
 
-  const saveInfoMutation = useGetSaveInfoMutation();
+  const saveInfoQuery = useGetSaveInfoQuery(id ?? "", !!game?.savePath);
 
   const syncMutation = useSyncGameMutation();
 
@@ -207,15 +207,7 @@ export function GameDetailPage() {
           >
             {syncLibraryMutation.isPending
               ? "Syncing…"
-              : "↓ Sync settings from Drive"}
-          </button>
-          <button
-            className={SECONDARY_BTN}
-            type="button"
-            disabled={!game.savePath || saveInfoMutation.isPending || isSyncing}
-            onClick={() => game.savePath && saveInfoMutation.mutate(game.id)}
-          >
-            {saveInfoMutation.isPending ? "Loading…" : "Get save info"}
+              : "Download settings from Drive"}
           </button>
           <button
             className={SECONDARY_BTN}
@@ -283,12 +275,12 @@ export function GameDetailPage() {
         </div>
 
         {/* Save Info Result */}
-        {saveInfoMutation.data && (
-          <SaveInfoPanel info={saveInfoMutation.data} />
+        {saveInfoQuery.data && (
+          <SaveInfoPanel info={saveInfoQuery.data} />
         )}
-        {saveInfoMutation.isError && (
+        {saveInfoQuery.isError && (
           <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
-            {msg(saveInfoMutation.error, "Unable to get save info.")}
+            {msg(saveInfoQuery.error, "Unable to get save info.")}
           </p>
         )}
 
@@ -459,7 +451,7 @@ function SaveInfoPanel({ info }: { info: SaveInfo }) {
         </div>
         <div>
           <dt className="text-[#c7d3f7] text-sm">Last modified</dt>
-          <dd className={`${MUTED} m-0`}>{info.lastModified ?? "N/A"}</dd>
+          <dd className={`${MUTED} m-0`}>{formatLocalTime(info.lastModified)}</dd>
         </div>
       </dl>
       {info.files.length > 0 && <SaveFileTree info={info} />}

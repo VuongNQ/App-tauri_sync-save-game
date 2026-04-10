@@ -14,6 +14,7 @@ export type SettingsKey = typeof SETTINGS_KEY;
 
 export const SAVE_INFO_KEY = ["save-info"] as const;
 export type SaveInfoKey = typeof SAVE_INFO_KEY;
+export const saveInfoKey = (gameId: string) => ["save-info", gameId] as const;
 
 export const VALIDATE_PATHS_KEY = ["validate-paths"] as const;
 export type ValidatePathsKey = typeof VALIDATE_PATHS_KEY;

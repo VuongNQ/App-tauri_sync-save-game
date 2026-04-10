@@ -111,7 +111,7 @@ function SaveTreeNode({
   onToggle,
   parentExcluded,
 }: SaveTreeNodeProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const indent = depth * 14;
 
   if (node.kind === "file") {
@@ -224,7 +224,7 @@ export function SaveFileTree({
   excluded = [],
   onToggle = () => {},
 }: SaveFileTreeProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const tree = buildSaveTree(info.files);
 
   return (

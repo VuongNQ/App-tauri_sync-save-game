@@ -24,7 +24,7 @@ export {
   useDeleteVersionBackupMutation,
   useDriveFilesQuery,
   useDriveFilesFlatQuery,
-  useGetSaveInfoMutation,
+  useGetSaveInfoQuery,
   useMoveDriveFileMutation,
   usePushToCloudMutation,
   useRenameDriveFileMutation,

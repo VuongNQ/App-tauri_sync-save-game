@@ -1,8 +1,8 @@
-import { useDashboardQuery, useSyncLibraryFromCloudMutation, useValidatePathsQuery } from "../queries";
 import { AddGameCard } from "../components/AddGameCard";
 import { GamesList } from "../components/GamesList";
 import { HeroCard } from "../components/HeroCard";
-import { CARD, EYEBROW, SECONDARY_BTN } from "../components/styles";
+import { CARD, EYEBROW } from "../components/styles";
+import { useDashboardQuery, useValidatePathsQuery } from "../queries";
 import { msg } from "../utils";
 
 function DashboardSkeleton() {
@@ -51,7 +51,6 @@ function DashboardSkeleton() {
 export function DashboardPage() {
   const dashboardQuery = useDashboardQuery();
   const validateQuery = useValidatePathsQuery();
-  const syncLibraryMutation = useSyncLibraryFromCloudMutation();
   const games = dashboardQuery.data?.games ?? [];
 
   const invalidGameIds = new Set(
@@ -72,14 +71,6 @@ export function DashboardPage() {
           <p className={EYEBROW}>Home</p>
           <h2 className="m-0">Your game library</h2>
         </div>
-        <button
-          className={SECONDARY_BTN}
-          type="button"
-          disabled={syncLibraryMutation.isPending}
-          onClick={() => syncLibraryMutation.mutate()}
-        >
-          {syncLibraryMutation.isPending ? "Syncing…" : "↓ Sync all from Drive"}
-        </button>
       </div>
 
       {/* Error */}
