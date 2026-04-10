@@ -51,6 +51,11 @@ function useAuthStatusCallbacks() {
       void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
     });
 
+    // Tracking detected a local file change — re-scan to update Last local save time.
+    const unlistenSyncPendingPromise = listen("game-sync-pending", () => {
+      void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
+    });
+
     const syncAuthStatus = () => {
       void queryClient.invalidateQueries({ queryKey: AUTH_STATUS_KEY });
     };
@@ -70,6 +75,7 @@ function useAuthStatusCallbacks() {
       void unlistenPromise.then((unlisten) => unlisten());
       void unlistenRestorePromise.then((unlisten) => unlisten());
       void unlistenPostLoginSyncPromise.then((unlisten) => unlisten());
+      void unlistenSyncPendingPromise.then((unlisten) => unlisten());
     };
   }, [queryClient]);
 }

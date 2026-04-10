@@ -395,7 +395,6 @@ pub fn restore_version_backup(
 
     // Update game timestamps.
     settings::update_game_field(app, game_id, |g| {
-        g.last_local_modified = Some(now_iso.clone());
         g.last_cloud_modified = Some(now_iso.clone());
     })?;
 

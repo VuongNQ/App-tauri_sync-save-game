@@ -20,7 +20,15 @@ use models::{
 
 #[tauri::command]
 fn load_dashboard(app: tauri::AppHandle) -> Result<DashboardData, String> {
-    let state = settings::load_state(&app)?;
+    let mut state = settings::load_state(&app)?;
+    // Populate last_local_modified dynamically by scanning local save folders.
+    for game in state.games.iter_mut() {
+        if let Some(ref save_path) = game.save_path.clone() {
+            let expanded = settings::expand_env_vars(save_path);
+            game.last_local_modified =
+                sync::scan_last_modified(std::path::Path::new(&expanded));
+        }
+    }
     Ok(DashboardData { games: state.games })
 }
 

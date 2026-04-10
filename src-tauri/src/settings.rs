@@ -398,19 +398,19 @@ pub fn validate_save_paths(app: &AppHandle) -> Result<Vec<PathValidation>, Strin
 pub fn get_browse_default_path(app: &AppHandle) -> Result<Option<String>, String> {
     let state = load_state(app)?;
 
-    // Find the game with the most recent last_local_modified that has a valid save_path
+    // Find the game whose save folder has the most recently modified file.
     let best = state
         .games
         .iter()
         .filter_map(|g| {
             let path = g.save_path.as_deref()?;
-            let ts = g.last_local_modified.as_deref()?;
             let expanded = expand_env_vars(path);
-            if std::path::Path::new(&expanded).exists() {
-                Some((ts.to_string(), expanded))
-            } else {
-                None
+            let dir = std::path::Path::new(&expanded);
+            if !dir.exists() {
+                return None;
             }
+            let ts = crate::sync::scan_last_modified(dir)?;
+            Some((ts, expanded))
         })
         .max_by_key(|(ts, _)| ts.clone());
 

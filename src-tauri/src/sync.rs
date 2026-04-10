@@ -110,6 +110,19 @@ fn projected_game_cloud_bytes(local_files: &[LocalFileInfo], cloud_meta: &SyncMe
 
     local_total + cloud_only
 }
+
+/// Scan a save directory and return the ISO 8601 timestamp of the most recently
+/// modified file.  Returns `None` if the directory does not exist, is empty, or
+/// cannot be read.
+pub fn scan_last_modified(save_path: &Path) -> Option<String> {
+    let files = collect_local_files(save_path).ok()?;
+    files
+        .iter()
+        .map(|f| f.modified_iso.as_str())
+        .max()
+        .map(String::from)
+}
+
 pub fn get_save_info(app: &AppHandle, game_id: &str) -> Result<SaveInfo, String> {
     let state = settings::load_state(app)?;
     let game = state
@@ -406,7 +419,6 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
     let now_iso = chrono::Utc::now().to_rfc3339();
     let new_cloud_bytes: u64 = new_meta.files.values().map(|f| f.size).sum();
     let _ = settings::update_game_field(app, game_id, |g| {
-        g.last_local_modified = Some(now_iso.clone());
         g.last_cloud_modified = Some(now_iso.clone());
         g.cloud_storage_bytes = Some(new_cloud_bytes);
     });
@@ -627,7 +639,6 @@ fn restore_from_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult
     let now_iso = chrono::Utc::now().to_rfc3339();
     let new_cloud_bytes: u64 = new_meta.files.values().map(|f| f.size).sum();
     let _ = settings::update_game_field(app, game_id, |g| {
-        g.last_local_modified = Some(now_iso.clone());
         g.last_cloud_modified = Some(now_iso.clone());
         g.cloud_storage_bytes = Some(new_cloud_bytes);
     });
@@ -770,7 +781,6 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
     let now_iso = chrono::Utc::now().to_rfc3339();
     let new_cloud_bytes: u64 = new_meta.files.values().map(|f| f.size).sum();
     let _ = settings::update_game_field(app, game_id, |g| {
-        g.last_local_modified = Some(now_iso.clone());
         g.last_cloud_modified = Some(now_iso.clone());
         g.cloud_storage_bytes = Some(new_cloud_bytes);
     });
