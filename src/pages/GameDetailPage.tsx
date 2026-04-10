@@ -16,10 +16,10 @@ import {
   SECONDARY_BTN,
   SOFT_BADGE,
   SOURCE_BADGE,
-  TOGGLE_TRACK_ON,
-  TOGGLE_TRACK_OFF,
-  TOGGLE_THUMB_ON,
   TOGGLE_THUMB_OFF,
+  TOGGLE_THUMB_ON,
+  TOGGLE_TRACK_OFF,
+  TOGGLE_TRACK_ON,
 } from "../components/styles";
 import {
   useCheckSyncDiffMutation,
@@ -34,84 +34,21 @@ import {
   useToggleTrackChangesMutation,
   useValidatePathsQuery,
 } from "../queries";
-import type {
-  SaveInfo,
-  SyncStructureDiff,
-} from "../types/dashboard";
+import type { SaveInfo, SyncStructureDiff } from "../types/dashboard";
 import { formatLocalTime, msg, toImgSrc } from "../utils";
-
-function GameDetailSkeleton() {
-  const shimmer =
-    "animate-pulse bg-[rgba(165,185,255,0.08)] rounded-xl";
-  return (
-    <>
-      {/* Breadcrumb */}
-      <div className={`h-4 w-28 ${shimmer} rounded-full`} />
-
-      {/* Header card */}
-      <div className={CARD}>
-        <div className="flex items-start gap-5 mb-5">
-          <div className={`w-24 h-24 shrink-0 rounded-2xl ${shimmer}`} />
-          <div className="grid gap-3 flex-1">
-            <div className={`h-3 w-20 rounded-full ${shimmer}`} />
-            <div className={`h-7 w-48 ${shimmer}`} />
-            <div className={`h-5 w-16 rounded-full ${shimmer}`} />
-          </div>
-        </div>
-        {/* Metadata grid */}
-        <div className="grid gap-[14px] grid-cols-2 max-[720px]:grid-cols-1">
-          {[0, 1, 2, 3, 4].map((i) => (
-            <div
-              key={i}
-              className="p-[18px] rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]"
-            >
-              <div className={`h-3 w-24 rounded-full mb-2 ${shimmer}`} />
-              <div className={`h-4 w-36 ${shimmer}`} />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Actions card */}
-      <div className={CARD}>
-        <div className={`h-5 w-20 mb-5 ${shimmer}`} />
-        <div className="grid gap-4 grid-cols-2 max-[900px]:grid-cols-1">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className={`h-11 rounded-2xl ${shimmer}`} />
-          ))}
-        </div>
-      </div>
-
-      {/* Tracking toggles card */}
-      <div className={CARD}>
-        <div className={`h-5 w-40 mb-5 ${shimmer}`} />
-        <div className="flex flex-col gap-4">
-          {[0, 1].map((i) => (
-            <div key={i} className="flex items-center justify-between gap-3">
-              <div className="grid gap-1.5">
-                <div className={`h-4 w-32 ${shimmer}`} />
-                <div className={`h-3 w-52 rounded-full ${shimmer}`} />
-              </div>
-              <div className={`w-12 h-6 rounded-full shrink-0 ${shimmer}`} />
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
-  );
-}
 
 export function GameDetailPage() {
   const { id } = useParams<{ id: string }>();
 
   const navigate = useNavigate();
 
-  const { data: dashboard, isLoading: isDashboardLoading } = useDashboardQuery();
+  const { data: dashboard, isLoading: isDashboardLoading } =
+    useDashboardQuery();
 
   const removeMutation = useRemoveGameMutation();
 
   const [showRemoveModal, setShowRemoveModal] = useState(false);
-  
+
   const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   const game = dashboard?.games.find((g) => g.id === id) ?? null;
@@ -192,7 +129,7 @@ export function GameDetailPage() {
             <h2 className="m-0">{game.name}</h2>
             <span className={sourceBadge}>{game.source}</span>
             {game.description && (
-              <p className="m-0 text-sm text-[#9aa8c7] max-w-[480px] whitespace-pre-wrap">
+              <p className="m-0 text-sm text-[#9aa8c7] max-w-120 whitespace-pre-wrap">
                 {game.description}
               </p>
             )}
@@ -200,9 +137,13 @@ export function GameDetailPage() {
         </div>
 
         {/* Metadata grid */}
-        <dl className="grid gap-[14px] grid-cols-2 m-0 max-[720px]:grid-cols-1">
+        <dl className="grid gap-3.5 grid-cols-2 m-0 max-[720px]:grid-cols-1">
           {[
             { label: "Save folder", value: game.savePath ?? "Not set" },
+            {
+              label: "Google Drive folder",
+              value: game.gdriveFolderId ?? "Not synced",
+            },
             {
               label: "Last local save",
               value: formatLocalTime(game.lastLocalModified),
@@ -210,10 +151,6 @@ export function GameDetailPage() {
             {
               label: "Last cloud save",
               value: formatLocalTime(game.lastCloudModified),
-            },
-            {
-              label: "Google Drive folder",
-              value: game.gdriveFolderId ?? "Not synced",
             },
             {
               label: "Drive storage used",
@@ -225,10 +162,10 @@ export function GameDetailPage() {
           ].map(({ label, value }) => (
             <div
               key={label}
-              className="p-[18px] rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]"
+              className="p-4.5 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]"
             >
               <dt className="mb-2 text-[#c7d3f7] text-[0.92rem]">{label}</dt>
-              <dd className="m-0 break-words text-[#9aa8c7]">{value}</dd>
+              <dd className="m-0 wrap-break-word text-[#9aa8c7]">{value}</dd>
             </div>
           ))}
         </dl>
@@ -268,7 +205,9 @@ export function GameDetailPage() {
               })
             }
           >
-            {syncLibraryMutation.isPending ? "Syncing…" : "↓ Sync settings from Drive"}
+            {syncLibraryMutation.isPending
+              ? "Syncing…"
+              : "↓ Sync settings from Drive"}
           </button>
           <button
             className={SECONDARY_BTN}
@@ -439,6 +378,66 @@ export function GameDetailPage() {
         }}
         onCancel={() => setShowRemoveModal(false)}
       />
+    </>
+  );
+}
+
+function GameDetailSkeleton() {
+  const shimmer = "animate-pulse bg-[rgba(165,185,255,0.08)] rounded-xl";
+  return (
+    <>
+      {/* Breadcrumb */}
+      <div className={`h-4 w-28 ${shimmer} rounded-full`} />
+
+      {/* Header card */}
+      <div className={CARD}>
+        <div className="flex items-start gap-5 mb-5">
+          <div className={`w-24 h-24 shrink-0 rounded-2xl ${shimmer}`} />
+          <div className="grid gap-3 flex-1">
+            <div className={`h-3 w-20 rounded-full ${shimmer}`} />
+            <div className={`h-7 w-48 ${shimmer}`} />
+            <div className={`h-5 w-16 rounded-full ${shimmer}`} />
+          </div>
+        </div>
+        {/* Metadata grid */}
+        <div className="grid gap-3.5 grid-cols-2 max-[720px]:grid-cols-1">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              className="p-4.5 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]"
+            >
+              <div className={`h-3 w-24 rounded-full mb-2 ${shimmer}`} />
+              <div className={`h-4 w-36 ${shimmer}`} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Actions card */}
+      <div className={CARD}>
+        <div className={`h-5 w-20 mb-5 ${shimmer}`} />
+        <div className="grid gap-4 grid-cols-2 max-[900px]:grid-cols-1">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className={`h-11 rounded-2xl ${shimmer}`} />
+          ))}
+        </div>
+      </div>
+
+      {/* Tracking toggles card */}
+      <div className={CARD}>
+        <div className={`h-5 w-40 mb-5 ${shimmer}`} />
+        <div className="flex flex-col gap-4">
+          {[0, 1].map((i) => (
+            <div key={i} className="flex items-center justify-between gap-3">
+              <div className="grid gap-1.5">
+                <div className={`h-4 w-32 ${shimmer}`} />
+                <div className={`h-3 w-52 rounded-full ${shimmer}`} />
+              </div>
+              <div className={`w-12 h-6 rounded-full shrink-0 ${shimmer}`} />
+            </div>
+          ))}
+        </div>
+      </div>
     </>
   );
 }
@@ -683,7 +682,7 @@ function SyncConflictModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-[480px] rounded-3xl border border-[rgba(165,185,255,0.15)] bg-[rgba(9,14,28,0.97)] p-6 shadow-2xl grid gap-5">
+      <div className="w-full max-w-120 rounded-3xl border border-[rgba(165,185,255,0.15)] bg-[rgba(9,14,28,0.97)] p-6 shadow-2xl grid gap-5">
         {/* Header */}
         <div>
           <p className={EYEBROW}>Sync conflict detected</p>

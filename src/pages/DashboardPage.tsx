@@ -19,17 +19,17 @@ function DashboardSkeleton() {
 
       {/* Hero + Add cards */}
       <div className="grid grid-cols-[1fr_1fr] gap-5 max-[900px]:grid-cols-1">
-        <div className={`${CARD} h-[140px] ${shimmer}`} />
-        <div className={`${CARD} h-[140px] ${shimmer}`} />
+        <div className={`${CARD} h-35 ${shimmer}`} />
+        <div className={`${CARD} h-35 ${shimmer}`} />
       </div>
 
       {/* Games list */}
       <div className={CARD}>
-        <div className="flex items-center justify-between mb-[18px]">
+        <div className="flex items-center justify-between mb-4.5">
           <div className={`h-5 w-20 ${shimmer}`} />
           <div className={`h-4 w-16 ${shimmer}`} />
         </div>
-        <div className="grid gap-[14px]">
+        <div className="grid gap-3.5">
           {[0, 1, 2].map((i) => (
             <div
               key={i}
@@ -84,7 +84,7 @@ export function DashboardPage() {
 
       {/* Error */}
       {dashboardQuery.isError && (
-        <p className="py-4 px-[18px] border rounded-3xl border-[rgba(255,100,100,0.24)] bg-[rgba(62,18,22,0.7)] text-[#ffd5d5]">
+        <p className="py-4 px-4.5 border rounded-3xl border-[rgba(255,100,100,0.24)] bg-[rgba(62,18,22,0.7)] text-[#ffd5d5]">
           {msg(dashboardQuery.error, "Unable to load the dashboard.")}
         </p>
       )}
