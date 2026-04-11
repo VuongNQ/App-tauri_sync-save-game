@@ -51,7 +51,9 @@ const gameSettingsSchema = z.object({
     .string()
     .max(1000, "Description must be 1000 characters or fewer."),
   savePath: z.string(),
-  exeName: z.string().max(260, "Executable name must be 260 characters or fewer."),
+  exeName: z
+    .string()
+    .max(260, "Executable name must be 260 characters or fewer."),
   trackChanges: z.boolean(),
   autoSync: z.boolean(),
   syncExcludes: z.array(z.string()),
@@ -63,7 +65,6 @@ type GameSettingsFormValues = z.infer<typeof gameSettingsSchema>;
 
 interface GameSettingsFormProps {
   isOpen: boolean;
-  onToggle: () => void;
   isSyncing: boolean;
   isPathInvalid: boolean;
   id?: string;
@@ -71,7 +72,6 @@ interface GameSettingsFormProps {
 
 export function GameSettingsForm({
   isOpen,
-  onToggle,
   isSyncing,
   isPathInvalid,
   id,
@@ -148,7 +148,6 @@ export function GameSettingsForm({
       autoSync: values.autoSync,
       syncExcludes: values.syncExcludes,
     });
-    onToggle();
   }
 
   const isSaving = isUploadingLogo || updateMutation.isPending;
@@ -159,66 +158,58 @@ export function GameSettingsForm({
       : null);
 
   return (
-    <div className={`${CARD} mt-4`}>
-      <FormProvider {...methods}>
-        <form onSubmit={handleSubmit(onSaveSettings)}>
-          <div className="flex items-center gap-3 justify-between">
-            <h3 className="m-0 font-semibold">Edit settings</h3>
-            <div className="flex items-center gap-5 justify-end-safe">
-              {isDirty && (
-                <>
-                  <button
-                    type="button"
-                    className={GHOST_BTN}
-                    onClick={() => {
-                      reset();
-                      onToggle();
-                    }}
-                    disabled={isSaving}
-                  >
-                    Discard
-                  </button>
-                  <button
-                    type="submit"
-                    className={PRIMARY_BTN}
-                    disabled={isSaving}
-                  >
-                    {isSaving ? "Saving…" : "Save"}
-                  </button>
-                </>
+    <FormProvider {...methods}>
+      <form onSubmit={handleSubmit(onSaveSettings)}>
+        <div className="flex items-center gap-3 justify-between">
+          <h3 className="m-0 font-semibold">Edit settings</h3>
+          <div className="flex items-center gap-5 justify-end-safe">
+            {isDirty && (
+              <>
+                <button
+                  type="button"
+                  className={GHOST_BTN}
+                  onClick={() => {
+                    reset();
+                    onToggle();
+                  }}
+                  disabled={isSaving}
+                >
+                  Discard
+                </button>
+                <button
+                  type="submit"
+                  className={PRIMARY_BTN}
+                  disabled={isSaving}
+                >
+                  {isSaving ? "Saving…" : "Save"}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {isOpen && gameSettings && (
+          <div className="flex flex-col gap-5 pt-4">
+            <ThumbnailSection isSyncing={isSyncing} />
+            <DescriptionSection />
+            <SaveFolderSection
+              game={gameSettings}
+              isSyncing={isSyncing}
+              isPathInvalid={isPathInvalid}
+            />
+            <ExeNameSection />
+            <SyncExclusionsSection game={gameSettings} />
+            <div className="flex items-center gap-3 justify-end">
+              {saveError && (
+                <span className="text-sm text-[#ffd5d5] mr-auto">
+                  {saveError}
+                </span>
               )}
-              <span
-                className="text-[#7dc9ff] text-lg shrink-0 cursor-pointer"
-                onClick={onToggle}
-              >
-                {isOpen ? "▲" : "▼"}
-              </span>
             </div>
           </div>
-
-          {isOpen && gameSettings && (
-            <div className="flex flex-col gap-5 pt-4">
-              <ThumbnailSection isSyncing={isSyncing} />
-              <DescriptionSection />
-              <SaveFolderSection
-                game={gameSettings}
-                isSyncing={isSyncing}
-                isPathInvalid={isPathInvalid}
-              />
-              <ExeNameSection />
-              <SyncExclusionsSection game={gameSettings} />
-              <div className="flex items-center gap-3 justify-end">
-                {saveError && (
-                  <span className="text-sm text-[#ffd5d5] mr-auto">
-                    {saveError}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-        </form>
-      </FormProvider>
-    </div>
+        )}
+      </form>
+    </FormProvider>
   );
 }
 
@@ -439,7 +430,10 @@ function ExeNameSection() {
     if (typeof p === "string") {
       // Extract only the filename (e.g. "REANIMAL.exe") from the full path.
       const filename = p.split(/[\\/]/).pop() ?? p;
-      setValue("exeName", filename, { shouldDirty: true, shouldValidate: true });
+      setValue("exeName", filename, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
     }
   }
 

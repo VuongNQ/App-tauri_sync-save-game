@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
@@ -25,13 +26,14 @@ import {
   useValidatePathsQuery,
 } from "../../queries";
 import { gamePlayingKey } from "../../queries/keys";
-import { useQuery } from "@tanstack/react-query";
 import { expandSavePath } from "../../services/tauri";
 import { formatLocalTime, msg, toImgSrc } from "../../utils";
 import { useRestoreFromDriveFlow } from "./hooks";
 import { SaveInfoPanel, SyncResultPanel } from "./SupportUI";
 import SyncConflictModal from "./SyncConflictModal";
 import TrackingSyncCard from "./TrackingSyncCard";
+
+type TabId = "status" | "config";
 
 export function GameDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -45,7 +47,7 @@ export function GameDetailPage() {
 
   const [showRemoveModal, setShowRemoveModal] = useState(false);
 
-  const [showSettings, setShowSettings] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabId>("status");
 
   const game = dashboard?.games.find((g) => g.id === id) ?? null;
 
@@ -174,191 +176,224 @@ export function GameDetailPage() {
           <div className="mt-4 px-4 py-3 rounded-2xl border border-[rgba(255,200,80,0.3)] bg-[rgba(62,45,12,0.55)] text-[#ffd5a0] text-sm flex items-center gap-2">
             <span>⚠</span>
             <span>
-              <strong>Process tracking is on but no executable is set.</strong> Open{" "}
+              <strong>Process tracking is on but no executable is set.</strong>{" "}
+              Switch to the{" "}
               <button
                 type="button"
                 className="underline text-[#ffd5a0] bg-transparent border-0 p-0 cursor-pointer"
-                onClick={() => setShowSettings(true)}
+                onClick={() => setActiveTab("config")}
               >
-                Edit settings
+                Configuration
               </button>{" "}
-              and enter the game&apos;s .exe name to activate tracking.
+              tab and enter the game&apos;s .exe name to activate tracking.
             </span>
           </div>
         )}
       </div>
 
-      {/* Actions */}
-      <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold">Actions</h3>
-
-        <div className="grid gap-4 grid-cols-2 max-[900px]:grid-cols-1">
+      {/* Tabs */}
+      <div className="flex gap-1 p-1 rounded-2xl bg-[rgba(9,14,28,0.6)] border border-white/[0.07]">
+        {(
+          [
+            { id: "status", label: "Status & Sync" },
+            { id: "config", label: "Configuration" },
+          ] as { id: TabId; label: string }[]
+        ).map((tab) => (
           <button
-            className={SECONDARY_BTN}
+            key={tab.id}
             type="button"
-            disabled={isSyncing}
-            onClick={() =>
-              syncLibraryMutation.mutate(undefined, {
-                onSuccess: () =>
-                  setToast({
-                    message: "Game settings refreshed from Drive.",
-                    type: "success",
-                  }),
-                onError: (err) =>
-                  setToast({
-                    message: msg(err, "Failed to sync settings from Drive."),
-                    type: "error",
-                  }),
-              })
+            onClick={() => setActiveTab(tab.id)}
+            className={
+              activeTab === tab.id
+                ? "flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-linear-to-br from-[#6d7dff] to-[#55c5ff] transition-colors"
+                : "flex-1 py-2.5 rounded-xl text-sm font-semibold text-[#9aa8c7] hover:text-white hover:bg-white/6 transition-colors"
             }
           >
-            {syncLibraryMutation.isPending
-              ? "Syncing…"
-              : "Download settings from Drive"}
+            {tab.label}
           </button>
-          <button
-            className={SECONDARY_BTN}
-            type="button"
-            disabled={!game.savePath || isSyncing}
-            onClick={() => game.savePath && restoreFlow.start()}
-          >
-            {restoreFlow.isChecking ? "Checking…" : "Restore from Drive"}
-          </button>
-          <button
-            className={`${PRIMARY_BTN} col-span-full inline-flex items-center justify-center gap-2`}
-            type="button"
-            disabled={!game.savePath || isSyncing}
-            onClick={() =>
-              game.savePath &&
-              syncMutation.mutate(game.id, {
-                onSuccess: (data) => {
-                  if (data.error) {
-                    setToast({ message: data.error, type: "error" });
-                  } else {
-                    setToast({
-                      message: `Sync complete — ↑${data.uploaded} ↓${data.downloaded} file(s)`,
-                      type: "success",
-                    });
-                  }
-                },
-                onError: (err) => {
-                  setToast({
-                    message: msg(err, "Sync failed."),
-                    type: "error",
-                  });
-                },
-              })
-            }
-          >
-            {isSyncing ? (
-              <>
-                <svg
-                  className="animate-spin h-4 w-4 shrink-0"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                  />
-                </svg>
-                Syncing…
-              </>
-            ) : (
-              "Sync to Google Drive"
-            )}
-          </button>
-        </div>
-
-        {/* Save Info Result */}
-        {saveInfoQuery.data && (
-          <SaveInfoPanel
-            info={saveInfoQuery.data}
-            onRefresh={() => void saveInfoQuery.refetch()}
-            isRefreshing={saveInfoQuery.isFetching}
-            onOpenFolder={() => {
-              if (!game?.savePath) return;
-              void expandSavePath(game.savePath).then((p) => openPath(p));
-            }}
-          />
-        )}
-        {saveInfoQuery.isError && (
-          <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
-            {msg(saveInfoQuery.error, "Unable to get save info.")}
-          </p>
-        )}
-
-        {/* Sync Result */}
-        {syncMutation.data && <SyncResultPanel result={syncMutation.data} />}
-        {syncMutation.isError && (
-          <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
-            {msg(syncMutation.error, "Sync failed.")}
-          </p>
-        )}
-
-        {/* Settings form */}
-
-        {/* Settings (collapsible) */}
-        <GameSettingsForm
-          isOpen={showSettings}
-          onToggle={() => setShowSettings((v) => !v)}
-          isSyncing={isSyncing}
-          isPathInvalid={isPathInvalid}
-          id={id}
-        />
+        ))}
       </div>
 
-      {/* Tracking & Sync quick-toggles */}
-      <TrackingSyncCard
-        gameId={game.id}
-        savePath={game.savePath}
-        trackChanges={game.trackChanges}
-        autoSync={game.autoSync}
-        isSyncing={isSyncing}
-        exeName={game.exeName ?? null}
-        isGamePlaying={isGamePlaying}
-        onError={(msg) => setToast({ message: msg, type: "error" })}
-      />
+      {/* ── Tab 1: Status & Sync ── */}
+      {activeTab === "status" && (
+        <>
+          {/* Actions */}
+          <div className={CARD}>
+            <h3 className="m-0 mb-4 font-semibold">Actions</h3>
 
-      {/* Drive file manager */}
-      {game.gdriveFolderId && (
-        <DriveFilesSection
-          gameId={game.id}
-          gameFolderId={game.gdriveFolderId}
-        />
+            <div className="grid gap-4 grid-cols-2 max-[900px]:grid-cols-1">
+              <button
+                className={SECONDARY_BTN}
+                type="button"
+                disabled={isSyncing}
+                onClick={() =>
+                  syncLibraryMutation.mutate(undefined, {
+                    onSuccess: () =>
+                      setToast({
+                        message: "Game settings refreshed from Drive.",
+                        type: "success",
+                      }),
+                    onError: (err) =>
+                      setToast({
+                        message: msg(err, "Failed to sync settings from Drive."),
+                        type: "error",
+                      }),
+                  })
+                }
+              >
+                {syncLibraryMutation.isPending
+                  ? "Syncing…"
+                  : "Download settings from Drive"}
+              </button>
+              <button
+                className={SECONDARY_BTN}
+                type="button"
+                disabled={!game.savePath || isSyncing}
+                onClick={() => game.savePath && restoreFlow.start()}
+              >
+                {restoreFlow.isChecking ? "Checking…" : "Restore from Drive"}
+              </button>
+              <button
+                className={`${PRIMARY_BTN} col-span-full inline-flex items-center justify-center gap-2`}
+                type="button"
+                disabled={!game.savePath || isSyncing}
+                onClick={() =>
+                  game.savePath &&
+                  syncMutation.mutate(game.id, {
+                    onSuccess: (data) => {
+                      if (data.error) {
+                        setToast({ message: data.error, type: "error" });
+                      } else {
+                        setToast({
+                          message: `Sync complete — ↑${data.uploaded} ↓${data.downloaded} file(s)`,
+                          type: "success",
+                        });
+                      }
+                    },
+                    onError: (err) => {
+                      setToast({
+                        message: msg(err, "Sync failed."),
+                        type: "error",
+                      });
+                    },
+                  })
+                }
+              >
+                {isSyncing ? (
+                  <>
+                    <svg
+                      className="animate-spin h-4 w-4 shrink-0"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                      />
+                    </svg>
+                    Syncing…
+                  </>
+                ) : (
+                  "Sync to Google Drive"
+                )}
+              </button>
+            </div>
+
+            {/* Save Info Result */}
+            {saveInfoQuery.data && (
+              <SaveInfoPanel
+                info={saveInfoQuery.data}
+                onRefresh={() => void saveInfoQuery.refetch()}
+                isRefreshing={saveInfoQuery.isFetching}
+                onOpenFolder={() => {
+                  if (!game?.savePath) return;
+                  void expandSavePath(game.savePath).then((p) => openPath(p));
+                }}
+              />
+            )}
+            {saveInfoQuery.isError && (
+              <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
+                {msg(saveInfoQuery.error, "Unable to get save info.")}
+              </p>
+            )}
+
+            {/* Sync Result */}
+            {syncMutation.data && <SyncResultPanel result={syncMutation.data} />}
+            {syncMutation.isError && (
+              <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
+                {msg(syncMutation.error, "Sync failed.")}
+              </p>
+            )}
+          </div>
+
+          {/* Tracking & Sync status */}
+          <TrackingSyncCard
+            gameId={game.id}
+            savePath={game.savePath}
+            trackChanges={game.trackChanges}
+            autoSync={game.autoSync}
+            isSyncing={isSyncing}
+            exeName={game.exeName ?? null}
+            isGamePlaying={isGamePlaying}
+            onError={(m) => setToast({ message: m, type: "error" })}
+          />
+
+          {/* Drive file manager */}
+          {game.gdriveFolderId && (
+            <DriveFilesSection
+              gameId={game.id}
+              gameFolderId={game.gdriveFolderId}
+            />
+          )}
+
+          {/* Version backups */}
+          {game.gdriveFolderId && <VersionBackupsSection gameId={game.id} />}
+        </>
       )}
 
-      {/* Version backups */}
-      {game.gdriveFolderId && <VersionBackupsSection gameId={game.id} />}
+      {/* ── Tab 2: Configuration ── */}
+      {activeTab === "config" && (
+        <>
+          {/* Settings form — always open in config tab */}
+          <div className={CARD}>
+            <GameSettingsForm
+              isOpen={true}
+              isSyncing={isSyncing}
+              isPathInvalid={isPathInvalid}
+              id={id}
+            />
+          </div>
 
-      {/* Danger zone */}
-      <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold text-[#ff9e9e]">Danger zone</h3>
-        <button
-          className={DANGER_BTN}
-          type="button"
-          disabled={removeMutation.isPending || isSyncing}
-          onClick={() => setShowRemoveModal(true)}
-        >
-          {removeMutation.isPending ? "Removing…" : "Remove game"}
-        </button>
-        {removeMutation.isError && (
-          <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
-            {msg(removeMutation.error, "Unable to remove game.")}
-          </p>
-        )}
-      </div>
+          {/* Danger zone */}
+          <div className={CARD}>
+            <h3 className="m-0 mb-4 font-semibold text-[#ff9e9e]">Danger zone</h3>
+            <button
+              className={DANGER_BTN}
+              type="button"
+              disabled={removeMutation.isPending || isSyncing}
+              onClick={() => setShowRemoveModal(true)}
+            >
+              {removeMutation.isPending ? "Removing…" : "Remove game"}
+            </button>
+            {removeMutation.isError && (
+              <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
+                {msg(removeMutation.error, "Unable to remove game.")}
+              </p>
+            )}
+          </div>
+        </>
+      )}
 
       {toast && (
         <Toast
