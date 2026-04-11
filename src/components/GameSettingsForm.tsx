@@ -170,7 +170,6 @@ export function GameSettingsForm({
                   className={GHOST_BTN}
                   onClick={() => {
                     reset();
-                    onToggle();
                   }}
                   disabled={isSaving}
                 >
