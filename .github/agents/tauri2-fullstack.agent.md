@@ -26,7 +26,7 @@ src-tauri/src/
   gdrive_auth.rs            # OAuth token lifecycle
   gdrive.rs                 # Drive REST API (upload, download, list, folders)
   sync.rs                   # Conflict-aware sync logic
-  watcher.rs                # notify + debouncer file watcher
+  watcher.rs                # sysinfo process poller (7-second poll, replaces file watcher)
   tray.rs                   # System tray setup
   drive_mgmt.rs             # Drive file management (list, rename, move, delete, version backups)
 ```

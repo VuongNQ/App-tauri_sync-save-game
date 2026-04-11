@@ -8,7 +8,7 @@ A **Windows desktop tool** built with [Tauri 2](https://tauri.app/) that tracks 
 
 - **Game Library** — Manually add games with name, description, logo/thumbnail, source, and save-game folder location.
 - **Google Drive Sync** — All save data is synced to Google Drive via OAuth 2.0. Authentication is required before using the app.
-- **Background Tracking** — File-change watching per game (default: off, user opts in). Runs silently from the system tray.
+- **Background Tracking** — Process-based monitoring per game: detects when the game `.exe` starts/stops and syncs saves on exit (default: off, user opts in per game and sets the executable name).
 - **Auto-Sync** — Automatically backs up local saves to Drive when changes are detected.
 - **Conflict Resolution** — Compares local vs. Drive `last_modified` timestamps and always picks the newest save.
 - **In-App Updater** — Checks GitHub Releases for new versions and installs them automatically.
@@ -25,7 +25,7 @@ A **Windows desktop tool** built with [Tauri 2](https://tauri.app/) that tracks 
 | Server state | TanStack React Query 5 |
 | Forms | react-hook-form 7 + Zod 4 |
 | HTTP (Rust) | ureq 3 (blocking) |
-| File watcher | notify 8 + notify-debouncer-mini 0.6 |
+| Process monitor | sysinfo 0.32 (7-second poll, replaces file-system watcher) |
 | Auth | tauri-plugin-google-auth 0.5 (browser-based OAuth) |
 | Cloud DB | Firestore REST API (game library, settings, sync metadata) |
 
@@ -49,7 +49,7 @@ src-tauri/src/
   gdrive_auth.rs              # OAuth token management (persist, refresh, check status)
   gdrive.rs                   # Google Drive API client (upload, download, list, folders)
   firestore.rs                # Firestore REST API client (game library, settings, SyncMeta mirror)
-  watcher.rs                  # File-system watcher for background save-game tracking
+  watcher.rs                  # Process monitor / poller — detects game launch/exit, triggers sync on exit
   sync.rs                     # Sync logic: compare timestamps, upload/download newest save
   drive_mgmt.rs               # Drive file manager + version backup commands
   tray.rs                     # System-tray setup and background lifecycle

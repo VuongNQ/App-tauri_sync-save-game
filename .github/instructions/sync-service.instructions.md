@@ -1,5 +1,5 @@
 ---
-description: "Use when: syncing save-game files to Google Drive, implementing sync logic, modifying sync.rs, modifying watcher.rs, modifying gdrive.rs, modifying drive_mgmt.rs, modifying firestore.rs, adding file-watcher features, changing background tracking, extending sync algorithm, handling sync conflicts, adding sync Tauri commands, creating sync React Query hooks, building sync UI components, emitting or listening to sync events, syncing library.json or config.json to Google Drive as a file-based database, storing game library or settings in Firestore, implementing Firestore REST API, SyncMeta Firestore mirror, cloud library restore on first login, forced-direction sync (restore from cloud, push to cloud), checking sync structure diff, SyncStructureDiff, Drive file manager, list Drive files, rename Drive file, move Drive file, delete Drive file, version backup, create backup, restore version backup, delete version backup. Covers the full sync pipeline: local file collection, timestamp comparison, Drive upload/download, .sync-meta.json management, Firestore game library/settings/SyncMeta mirror, local-first strategy, file-watcher lifecycle, Drive file management, version snapshots, and frontend sync integration."
+description: "Use when: syncing save-game files to Google Drive, implementing sync logic, modifying sync.rs, modifying watcher.rs, modifying gdrive.rs, modifying drive_mgmt.rs, modifying firestore.rs, adding process-monitoring features, changing background tracking, changing process tracking, adding exeName game executable, extending sync algorithm, handling sync conflicts, adding sync Tauri commands, creating sync React Query hooks, building sync UI components, emitting or listening to sync events, game-status-changed event, game-sync-pending event, sysinfo process poller, syncing library.json or config.json to Google Drive as a file-based database, storing game library or settings in Firestore, implementing Firestore REST API, SyncMeta Firestore mirror, cloud library restore on first login, forced-direction sync (restore from cloud, push to cloud), checking sync structure diff, SyncStructureDiff, Drive file manager, list Drive files, rename Drive file, move Drive file, delete Drive file, version backup, create backup, restore version backup, delete version backup. Covers the full sync pipeline: local file collection, timestamp comparison, Drive upload/download, .sync-meta.json management, Firestore game library/settings/SyncMeta mirror, local-first strategy, process-monitor lifecycle, Drive file management, version snapshots, and frontend sync integration."
 ---
 
 # Save-Game Sync Service
@@ -13,7 +13,7 @@ The sync system spans five Rust modules and their frontend counterparts:
 | `gdrive.rs` | Google Drive REST API client (folders, upload, download, metadata, rename, move, copy) |
 | `firestore.rs` | Firestore REST API client (game library, settings, SyncMeta mirror) |
 | `sync.rs` | Per-game sync algorithm (collect → compare → transfer → update) |
-| `watcher.rs` | File-system watcher manager (per-game, debounced, with sync locks) |
+| `watcher.rs` | Process monitor / poller — detects game launch/exit, triggers sync on exit |
 | `settings.rs` | Persistence for `AppSettings` and `GameEntry` state |
 | `drive_mgmt.rs` | Drive file manager + version backup commands (list, rename, move, delete, backup CRUD) |
 
@@ -289,33 +289,92 @@ Content-Type: application/octet-stream
 - **New file** → `POST /upload/drive/v3/files` with `parents` in metadata.
 - **Update file** → `PATCH /upload/drive/v3/files/{fileId}` without `parents`.
 
-## File Watcher (watcher.rs)
+## Process Monitor (watcher.rs)
+
+> **Architecture changed from file-system watcher to process poller.** `notify` / `notify-debouncer-mini` have been removed. The crate `sysinfo = "0.32"` is used instead.
 
 ### WatcherManager Design
 
 - Stored as `Arc<Mutex<WatcherManager>>` in Tauri managed state.
-- Holds `HashMap<game_id, Debouncer<RecommendedWatcher>>` + per-game `sync_locks: HashMap<game_id, Arc<Mutex<()>>>`.
-- Uses `notify_debouncer_mini` with 2-second debounce window.
+- Fields:
+  ```rust
+  pub struct WatcherManager {
+      tracked_games: HashMap<String, String>,   // game_id → exe_name (lowercased)
+      sync_locks:    HashMap<String, Arc<Mutex<()>>>,
+      playing_games: HashMap<String, bool>,     // game_id → was_playing last tick
+  }
+  ```
+- NO file-system watchers — no `Debouncer`, no `RecommendedWatcher`.
 
-### Watcher Lifecycle
+### Tracking Lifecycle
 
-| Action | When |
-|--------|------|
-| `init_watchers(app)` | App startup (`.setup()` callback) — starts watchers for games with `track_changes == true` |
-| `start_watching(game_id, save_path)` | User enables tracking toggle, or on init |
-| `stop_watching(game_id)` | User disables tracking toggle |
+| Function | When |
+|----------|------|
+| `init_watchers(app)` | App startup — calls `start_tracking` for every game with `track_changes == true` and a non-empty `exe_name` |
+| `start_tracking(game_id, exe_name)` | User enables tracking toggle (and `exe_name` is set) |
+| `stop_tracking(game_id)` | User disables tracking toggle |
+| `handle_track_changes_toggle(app, game_id, enabled)` | Tauri command handler for `toggle_track_changes` |
 
-### Auto-Sync Decision
+### Poll Thread (`start_poll_thread`)
 
-On file change event (after debounce):
-1. Check `game.auto_sync`.
-2. If true → `try_lock()` the per-game sync lock (non-blocking), then `sync::sync_game()`.
-3. If lock unavailable → skip (sync already in progress).
-4. If auto-sync disabled → emit `"game-sync-pending"` event for frontend notification.
+A **single** background thread polls all tracked games every **7 seconds**:
 
-### Important: Sync Locks
+```
+loop:
+  sleep(7s)
+  lock WatcherManager → snapshot tracked_games + sync_locks + playing_games → unlock
+  #[cfg(target_os = "windows")] refresh sysinfo processes
+  for each (game_id, exe_name) in snapshot:
+    is_now_playing = process_list contains exe_name (partial / lowercase match)
+    was_playing = snapshot.playing_games[game_id]
+    if !was_playing && is_now_playing:
+      emit "game-status-changed" { gameId, status: "playing" }
+    if was_playing && !is_now_playing:  // game just exited
+      emit "game-status-changed" { gameId, status: "idle" }
+      check game.auto_sync from settings:
+        true  → try_lock(sync_lock) → sync::sync_game(app, game_id)
+        false → emit "game-sync-pending" { gameId }
+  lock WatcherManager → update playing_games → unlock
+```
 
-Per-game `Arc<Mutex<()>>` prevents concurrent sync for the same game. Always use **non-blocking** `try_lock()` in the watcher callback to avoid deadlocks.
+### Windows-Only Guard
+
+Process list refresh is wrapped in `#[cfg(target_os = "windows")]`. On other platforms the `sysinfo` call is a no-op; all games appear as not-playing (safe).
+
+```rust
+#[cfg(target_os = "windows")]
+let running_exes: HashSet<String> = {
+    let mut sys = System::new();
+    sys.refresh_processes(ProcessesToUpdate::All, true);
+    sys.processes().values()
+        .filter_map(|p| p.exe().and_then(|e| e.file_name()).map(|n| n.to_string_lossy().to_lowercase()))
+        .collect()
+};
+#[cfg(not(target_os = "windows"))]
+let running_exes: HashSet<String> = HashSet::new();
+```
+
+### Auto-Sync Decision (on process exit)
+
+1. Game process exits (was_playing → !is_now_playing).
+2. Emit `"game-status-changed"` with `status: "idle"`.
+3. Check `game.auto_sync` from `settings::load_state`.
+4. If true → `try_lock()` per-game sync lock (non-blocking) → `sync::sync_game()`.
+5. If lock unavailable → skip (sync already in progress).
+6. If auto_sync disabled → emit `"game-sync-pending"` for frontend notification.
+
+### Sync Locks
+
+Per-game `Arc<Mutex<()>>` prevents concurrent sync for the same game. Always use **non-blocking** `try_lock()` in the poll loop to avoid deadlocks.
+
+### Diagnostic Logging
+
+Every tick the poll thread logs (prefixed `[watcher]`):
+- `Poll tick: no games tracked` — when tracked_games is empty.
+- `Poll tick: checking N game(s): [...]` — logged exe names.
+- `'exe' → partial matches in process list: [...]` or `'exe' → not found in process list`.
+- `[game_id] was_playing=X is_now_playing=Y` — per-game state per tick.
+- `Game started: game_id` / `Game stopped: game_id` — on state transitions.
 
 ## Tauri Command Patterns
 
@@ -373,7 +432,8 @@ fn toggle_track_changes(app: tauri::AppHandle, game_id: String, enabled: bool) -
 | `"sync-started"` | `game_id: &str` | `sync.rs` — before sync begins |
 | `"sync-completed"` | `SyncResult` | `sync.rs` — on success |
 | `"sync-error"` | `SyncResult` (with `error` field) | `sync.rs` — on failure |
-| `"game-sync-pending"` | `game_id: &str` | `watcher.rs` — change detected but auto-sync disabled || `"library-restored"` | — | `lib.rs` — first-login cloud library restore succeeded |
+| `"game-sync-pending"` | `{ gameId }` | `watcher.rs` — process exited but auto-sync disabled |
+| `"game-status-changed"` | `{ gameId, status: "playing" \| "idle" }` | `watcher.rs` — emitted each time game process starts or stops || `"library-restored"` | — | `lib.rs` — first-login cloud library restore succeeded |
 Frontend listens via `listen()` from `@tauri-apps/api/event` and updates React Query cache.
 
 ## Frontend Integration

@@ -230,6 +230,8 @@ export const driveFilesFolderKey = (gameId: string, folderId: string) => ["drive
 /** Full recursive flat listing of all files/folders in a game's Drive folder tree. */
 export const driveFilesFlatKey = (gameId: string) => ["drive-files-flat", gameId] as const;
 export const versionBackupsKey = (gameId: string) => ["version-backups", gameId] as const;
+/** Reactive process-playing state for a single game — pushed by "game-status-changed" event from App.tsx. */
+export const gamePlayingKey = (gameId: string) => ["game-playing", gameId] as const;
 ```
 
 ### Query Hook Pattern
@@ -311,6 +313,7 @@ export interface GameEntry {
   thumbnail: string | null;         // local file path or remote URL for logo
   source: GameSource;               // "manual" | "emulator"
   savePath: string | null;
+  exeName: string | null;           // game executable filename (e.g. "MyGame.exe"); used by process monitor
   trackChanges: boolean;
   autoSync: boolean;
   lastLocalModified: string | null; // ISO 8601
@@ -465,6 +468,7 @@ function useAuthStatusCallbacks() {
 | `sync-completed` | `SyncResult` | `invalidateQueries(DASHBOARD_KEY)` |
 | `sync-error` | `{ gameId, error }` | display error toast |
 | `game-sync-pending` | `{ gameId }` | show pending indicator |
+| `game-status-changed` | `{ gameId, status: "playing" \| "idle" }` | `setQueryData(gamePlayingKey(gameId), status === "playing")` |
 
 ---
 

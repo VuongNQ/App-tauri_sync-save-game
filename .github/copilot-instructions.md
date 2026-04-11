@@ -8,7 +8,7 @@ This is a **Windows desktop tool** built with Tauri 2 that tracks and syncs save
 
 1. **Game Library** — Users manually add games with: name, description, logo/thumbnail (local file or URL), source (Manual, Emulator), and save-game folder location.
 2. **Google Drive Sync** — All game save data is synced to Google Drive via the Google Drive API. OAuth 2.0 authentication is required before the app is usable.
-3. **Background Tracking** — The app runs in the background (system tray) on Windows startup. Per-game file-change tracking watches the save-game folder for modifications (**default: off**, user must opt-in per game).
+3. **Background Tracking** — The app runs in the background (system tray) on Windows startup. Per-game **process tracking** monitors whether the game executable is running; syncs save files when the process exits (**default: off**, user must opt-in per game and set the game's executable name `exeName`).
 4. **Auto-Sync** — When enabled, automatically backs up local save files to Google Drive whenever changes are detected.
 5. **Conflict Resolution** — On each sync, compare the local file's last-modified timestamp with the Google Drive version's timestamp; always pick the **newest** save.
 
@@ -31,7 +31,7 @@ src-tauri/src/
   settings.rs                   # JSON persistence (load_state / save_state)
   gdrive_auth.rs                # OAuth token management (persist, refresh, check status)
   gdrive.rs                     # Google Drive API client (upload, download, list, folders)
-  watcher.rs                    # File-system watcher for background save-game tracking
+  watcher.rs                    # Process monitor / poller — detects game launch/exit, triggers sync on exit
   sync.rs                       # Sync logic: compare timestamps, upload/download newest save
   tray.rs                       # System-tray setup and background lifecycle
   lib.rs                        # Tauri commands wired to handler functions
@@ -80,7 +80,8 @@ src-tauri/src/
 | `thumbnail` | `Option<String>` | `string \| null` | Local file path **or** remote URL for logo/thumbnail |
 | `source` | `String` | `string` | One of: `"manual"`, `"emulator"` |
 | `save_path` | `Option<String>` | `string \| null` | Save-game folder path, stored with `%VAR%` tokens (e.g. `%LOCALAPPDATA%\Game\Saves`); expanded to absolute at runtime |
-| `track_changes` | `bool` | `boolean` | Watch this game's save folder for file changes (default `false`) |
+| `exe_name` | `Option<String>` | `string \| null` | Game executable filename (e.g. `"MyGame.exe"`); used by the process monitor to detect when the game is running |
+| `track_changes` | `bool` | `boolean` | Monitor game process and sync on exit (default `false`) |
 | `auto_sync` | `bool` | `boolean` | Automatically sync on change detection (default `false`) |
 | `last_local_modified` | `Option<String>` | `string \| null` | ISO 8601 timestamp of last known local save modification |
 | `last_cloud_modified` | `Option<String>` | `string \| null` | ISO 8601 timestamp of last Google Drive save version |
@@ -203,14 +204,17 @@ pub struct StoredState {
 4. **Compare**: if local is newer → upload local saves to Drive. If Drive is newer → download Drive saves to local. If equal → no-op.
 5. After sync, update `.sync-meta.json` on Drive and `last_local_modified` / `last_cloud_modified` / `cloud_storage_bytes` in local state.
 
-### Background File Watcher
+### Background Process Monitor
 
-- Uses `notify` + `notify-debouncer-mini` with a **2-second debounce** window.
-- `WatcherManager` holds a `HashMap<game_id, Debouncer<RecommendedWatcher>>` + per-game `Arc<Mutex<()>>` sync locks.
-- Only active for games where `track_changes == true`.
-- On detected change: check `game.auto_sync`. If true → `try_lock()` the per-game mutex (non-blocking) and run `sync::sync_game()`. If lock unavailable → skip (sync already in progress). If auto-sync disabled → emit `"game-sync-pending"` event.
-- `init_watchers()` is called at app startup; starts watchers for all eligible games.
-- The watcher runs in a dedicated background thread managed by the Tauri app lifecycle.
+- Uses `sysinfo = "0.32"` — polls the OS process list every **7 seconds** (no file-system watcher).
+- `WatcherManager` struct: `tracked_games: HashMap<game_id, exe_name>` + `sync_locks: HashMap<game_id, Arc<Mutex<()>>>` + `playing_games: HashMap<game_id, bool>`.
+- Only active for games where `track_changes == true` **and** `exe_name` is set.
+- `start_poll_thread(app)` spawns one permanent background thread that loops every 7 s:
+  - Snapshot tracked games → refresh process list (Windows-only `#[cfg]`) → diff `was_playing` vs `is_now_playing` per exe.
+  - On **game start**: emit `"game-status-changed"` `{ gameId, status: "playing" }`.
+  - On **game exit**: emit `"game-status-changed"` `{ gameId, status: "idle" }` → check `auto_sync` → `try_lock()` per-game mutex → `sync::sync_game()` or emit `"game-sync-pending"`.
+- `init_watchers()` is called at app startup; calls `start_tracking` for all eligible games and then `start_poll_thread`.
+- Process list refresh is wrapped in `#[cfg(target_os = "windows")]` — non-Windows is a safe no-op.
 
 ---
 
@@ -334,8 +338,8 @@ Import `HKEY` from `winreg::HKEY` (not `winreg::enums::HKEY` — that path does 
 | `tauri-plugin-google-auth` 0.5 | Browser-based Google OAuth |
 | `serde` + `serde_json` | Serialisation |
 | `ureq` 3 (feature `json`) | **Blocking** HTTP client for Google Drive API |
-| `tokio` 1 (feature `rt`) | Async runtime (for watcher tasks) |
-| `notify` 8 + `notify-debouncer-mini` 0.6 | Filesystem watcher with debounce |
+| `tokio` 1 (feature `rt`) | Async runtime (for sync tasks) |
+| `sysinfo` 0.32 | Process list polling (replaces file-system watcher) |
 | `chrono` 0.4 (feature `serde`) | Timestamp handling |
 | `walkdir` 2 | Recursive directory traversal |
 | `sha2` 0.10 | File hashing |
@@ -422,7 +426,8 @@ The Rust backend emits these events that the frontend can listen to:
 | `"sync-started"` | `{ gameId }` | `sync.rs` before sync begins |
 | `"sync-completed"` | `SyncResult` | `sync.rs` after successful sync |
 | `"sync-error"` | `{ gameId, error }` | `sync.rs` on sync failure |
-| `"game-sync-pending"` | `{ gameId }` | `watcher.rs` when change detected but auto-sync disabled |
+| `"game-sync-pending"` | `{ gameId }` | `watcher.rs` when game exits but auto-sync disabled |
+| `"game-status-changed"` | `{ gameId, status: "playing" \| "idle" }` | `watcher.rs` on game process start/exit |
 
 ---
 
