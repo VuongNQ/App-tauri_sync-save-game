@@ -111,6 +111,11 @@ export function GamesList({ games, invalidGameIds }: Props) {
                         <span>⚠</span> Save path not found
                       </p>
                     )}
+                    {g.trackChanges && !g.exeName && (
+                      <p className="m-0 text-xs text-[#ffd5a0] flex items-center gap-1">
+                        <span>⚠</span> No executable set — process tracking inactive
+                      </p>
+                    )}
                     {g.description && (
                       <p className={`${MUTED} m-0 text-xs truncate`}>{g.description}</p>
                     )}                    {g.cloudStorageBytes != null && (

@@ -168,6 +168,24 @@ export function GameDetailPage() {
             </div>
           ))}
         </dl>
+
+        {/* No-exe warning */}
+        {game.trackChanges && !game.exeName && (
+          <div className="mt-4 px-4 py-3 rounded-2xl border border-[rgba(255,200,80,0.3)] bg-[rgba(62,45,12,0.55)] text-[#ffd5a0] text-sm flex items-center gap-2">
+            <span>⚠</span>
+            <span>
+              <strong>Process tracking is on but no executable is set.</strong> Open{" "}
+              <button
+                type="button"
+                className="underline text-[#ffd5a0] bg-transparent border-0 p-0 cursor-pointer"
+                onClick={() => setShowSettings(true)}
+              >
+                Edit settings
+              </button>{" "}
+              and enter the game&apos;s .exe name to activate tracking.
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Actions */}
