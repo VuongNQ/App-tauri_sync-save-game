@@ -1,15 +1,9 @@
 use std::{
     collections::HashMap,
-    path::Path,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-    time::{Duration, Instant},
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 
-use notify_debouncer_mini::{new_debouncer, DebouncedEventKind, Debouncer};
-use notify::RecommendedWatcher;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{settings, sync};
@@ -17,199 +11,211 @@ use crate::{settings, sync};
 // ── Watcher Manager ───────────────────────────────────────
 
 pub struct WatcherManager {
-    app: AppHandle,
-    watchers: HashMap<String, Debouncer<RecommendedWatcher>>,
-    /// Per-game sync locks to prevent concurrent syncs for the same game.
+    /// game_id → exe_name (lower-cased for case-insensitive comparison).
+    tracked_games: HashMap<String, String>,
+    /// Per-game sync locks to prevent concurrent syncs.
     sync_locks: HashMap<String, Arc<Mutex<()>>>,
-    /// Per-game: timestamp of the most recent detected change (for interval debounce).
-    last_change_times: HashMap<String, Arc<Mutex<Instant>>>,
-    /// Per-game: whether an interval-debounce timer thread is already running.
-    pending_timers: HashMap<String, Arc<AtomicBool>>,
+    /// Per-game: whether the game process was running on the last poll tick.
+    playing_games: HashMap<String, bool>,
 }
 
 impl WatcherManager {
-    pub fn new(app: AppHandle) -> Self {
+    pub fn new(_app: AppHandle) -> Self {
         Self {
-            app,
-            watchers: HashMap::new(),
+            tracked_games: HashMap::new(),
             sync_locks: HashMap::new(),
-            last_change_times: HashMap::new(),
-            pending_timers: HashMap::new(),
+            playing_games: HashMap::new(),
         }
     }
 
-    /// Start watching a game's save folder for file changes.
-    pub fn start_watching(&mut self, game_id: &str, save_path: &str) -> Result<(), String> {
-        // Stop any existing watcher for this game first
-        self.stop_watching(game_id);
+    /// Register a game for process-based tracking.
+    pub fn start_tracking(&mut self, game_id: &str, exe_name: &str) {
+        // Stop any existing tracking entry first (idempotent).
+        self.stop_tracking(game_id);
 
-        let path = Path::new(save_path);
-        if !path.exists() {
-            return Err(format!(
-                "Save path does not exist: {}",
-                path.display()
-            ));
+        let key = game_id.to_string();
+        // Store exe_name lower-cased for case-insensitive matching on every poll.
+        self.tracked_games
+            .insert(key.clone(), exe_name.to_lowercase());
+        self.sync_locks
+            .entry(key.clone())
+            .or_insert_with(|| Arc::new(Mutex::new(())));
+        self.playing_games.insert(key, false);
+
+        println!("[watcher] Tracking process for game '{game_id}': {exe_name}");
+    }
+
+    /// Unregister a game from process-based tracking.
+    pub fn stop_tracking(&mut self, game_id: &str) {
+        if self.tracked_games.remove(game_id).is_some() {
+            self.playing_games.remove(game_id);
+            println!("[watcher] Stopped tracking '{game_id}'");
         }
+    }
 
-        let app_handle = self.app.clone();
-        let gid = game_id.to_string();
-        let sync_lock = self
-            .sync_locks
-            .entry(game_id.to_string())
-            .or_insert_with(|| Arc::new(Mutex::new(())))
-            .clone();
-        let last_change_time = self
-            .last_change_times
-            .entry(game_id.to_string())
-            .or_insert_with(|| Arc::new(Mutex::new(Instant::now())))
-            .clone();
-        let pending_timer = self
-            .pending_timers
-            .entry(game_id.to_string())
-            .or_insert_with(|| Arc::new(AtomicBool::new(false)))
-            .clone();
+    /// Snapshot of currently tracked games for the poll thread (avoids holding the lock during I/O).
+    fn snapshot(&self) -> Vec<(String, String, bool, Arc<Mutex<()>>)> {
+        self.tracked_games
+            .iter()
+            .map(|(id, exe)| {
+                let was_playing = *self.playing_games.get(id).unwrap_or(&false);
+                let lock = self
+                    .sync_locks
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| Arc::new(Mutex::new(())));
+                (id.clone(), exe.clone(), was_playing, lock)
+            })
+            .collect()
+    }
 
-        // Create a debounced watcher with a 2-second debounce window
-        let mut debouncer = new_debouncer(
-            Duration::from_secs(2),
-            move |events: Result<Vec<notify_debouncer_mini::DebouncedEvent>, notify::Error>| {
-                match events {
-                    Ok(evts) => {
-                        // Filter to only actual data changes (not just access-time changes)
-                        let has_data_change = evts.iter().any(|e| {
-                            matches!(e.kind, DebouncedEventKind::Any)
-                        });
-                        if !has_data_change {
-                            return;
-                        }
+    /// Bulk-update playing state after a poll tick.
+    fn update_playing(&mut self, id: &str, is_playing: bool) {
+        self.playing_games.insert(id.to_string(), is_playing);
+    }
+}
 
-                        println!("[watcher] Change detected for game: {gid}");
+// ── Background poll thread ────────────────────────────────
 
-                        // Read auto_sync and sync_interval_minutes from current settings
-                        let game_settings = settings::load_state(&app_handle)
-                            .ok()
-                            .and_then(|state| {
-                                let game = state.games.iter().find(|g| g.id == gid)?;
-                                let interval = state.settings.sync_interval_minutes;
-                                Some((game.auto_sync, interval))
-                            });
+/// Spawn a single background thread that polls running processes every ~7 seconds.
+/// Call this ONCE at app startup (from `init_watchers`).
+pub fn start_poll_thread(app: AppHandle) {
+    std::thread::spawn(move || {
+        println!("[watcher] Process poll thread started (interval: 7s)");
 
-                        let (should_auto_sync, sync_interval_minutes) =
-                            game_settings.unwrap_or((false, 0));
+        loop {
+            std::thread::sleep(Duration::from_secs(7));
 
-                        // Guard: auto-sync disabled — notify frontend and bail out early.
-                        if !should_auto_sync {
-                            let _ = app_handle.emit("game-sync-pending", &gid);
-                            return;
-                        }
+            // 1. Snapshot tracked games (lock → collect → unlock immediately).
+            let manager_state = app.state::<Arc<Mutex<WatcherManager>>>();
+            let snapshot = match manager_state.lock() {
+                Ok(m) => m.snapshot(),
+                Err(e) => {
+                    println!("[watcher] Failed to lock WatcherManager in poll: {e}");
+                    continue;
+                }
+            };
 
-                        if sync_interval_minutes == 0 {
-                            // Immediate auto-sync (interval = 0 means "on change")
-                            if let Ok(_guard) = sync_lock.try_lock() {
-                                println!("[watcher] Auto-syncing game: {gid}");
-                                let _ = sync::sync_game(&app_handle, &gid);
-                            } else {
-                                println!("[watcher] Sync already in progress for: {gid}");
-                            }
-                        } else {
-                            // Debounced by interval: sync only after
-                            // `sync_interval_minutes` of inactivity from the last change.
-                            *last_change_time.lock().unwrap() = Instant::now();
+            if snapshot.is_empty() {
+                println!("[watcher] Poll tick: no games tracked, sleeping");
+                continue;
+            }
 
-                            // Only one timer thread per game at a time.
-                            if !pending_timer.swap(true, Ordering::Relaxed) {
-                                let delay =
-                                    Duration::from_secs(sync_interval_minutes as u64 * 60);
-                                let last_change_clone = last_change_time.clone();
-                                let pending_clone = pending_timer.clone();
-                                let app_clone = app_handle.clone();
-                                let gid_clone = gid.clone();
-                                let sync_lock_clone = sync_lock.clone();
+            println!(
+                "[watcher] Poll tick: checking {} game(s): {:?}",
+                snapshot.len(),
+                snapshot.iter().map(|(id, exe, _, _)| format!("{id}={exe}")).collect::<Vec<_>>()
+            );
 
-                                std::thread::spawn(move || {
-                                    let mut sleep_for = delay;
-                                    loop {
-                                        std::thread::sleep(sleep_for);
-                                        let elapsed =
-                                            last_change_clone.lock().unwrap().elapsed();
-                                        if elapsed >= delay {
-                                            // No new change in the last `delay` window.
-                                            // Re-read auto_sync in case it was toggled off.
-                                            let still_on =
-                                                settings::load_state(&app_clone)
-                                                    .ok()
-                                                    .and_then(|s| {
-                                                        s.games
-                                                            .iter()
-                                                            .find(|g| g.id == gid_clone)
-                                                            .map(|g| g.auto_sync)
-                                                    })
-                                                    .unwrap_or(false);
-                                            if still_on {
-                                                if let Ok(_guard) =
-                                                    sync_lock_clone.try_lock()
-                                                {
-                                                    println!(
-                                                        "[watcher] Interval-debounce sync: {gid_clone}"
-                                                    );
-                                                    let _ = sync::sync_game(
-                                                        &app_clone,
-                                                        &gid_clone,
-                                                    );
-                                                }
-                                            }
-                                            break;
-                                        }
-                                        // A newer change arrived during sleep; wait
-                                        // the remaining time from that change.
-                                        sleep_for = delay - elapsed;
-                                    }
-                                    pending_clone.store(false, Ordering::Relaxed);
-                                });
-                            } else {
-                                println!(
-                                    "[watcher] Change queued (interval timer active): {gid}"
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        println!("[watcher] Error for game event: {e}");
+            // 2. Check which exe_names are currently running (Windows-only).
+            #[cfg(target_os = "windows")]
+            let running_exes: std::collections::HashSet<String> = {
+                use sysinfo::{ProcessesToUpdate, System};
+                let mut sys = System::new();
+                sys.refresh_processes(ProcessesToUpdate::All, true);
+                let all: std::collections::HashSet<String> = sys
+                    .processes()
+                    .values()
+                    .map(|p| p.name().to_string_lossy().to_lowercase())
+                    .collect();
+
+                // Log any process name that partially matches a tracked exe (helps spot name mismatches).
+                for (_, exe_lower, _, _) in &snapshot {
+                    let stem = exe_lower.trim_end_matches(".exe");
+                    let matches: Vec<&String> = all
+                        .iter()
+                        .filter(|name| name.contains(stem))
+                        .collect();
+                    if matches.is_empty() {
+                        println!("[watcher] '{exe_lower}' → not found in running processes");
+                    } else {
+                        println!("[watcher] '{exe_lower}' → partial matches in process list: {matches:?}");
                     }
                 }
-            },
-        )
-        .map_err(|e| format!("Failed to create watcher: {e}"))?;
 
-        debouncer
-            .watcher()
-            .watch(path, notify::RecursiveMode::Recursive)
-            .map_err(|e| format!("Failed to watch {}: {e}", path.display()))?;
+                all
+            };
 
-        println!("[watcher] Started watching {game_id} → {save_path}");
-        self.watchers.insert(game_id.to_string(), debouncer);
-        Ok(())
-    }
+            #[cfg(not(target_os = "windows"))]
+            let running_exes: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
 
-    /// Stop watching a game's save folder.
-    pub fn stop_watching(&mut self, game_id: &str) {
-        if self.watchers.remove(game_id).is_some() {
-            self.last_change_times.remove(game_id);
-            self.pending_timers.remove(game_id);
-            println!("[watcher] Stopped watching {game_id}");
+            // 3. Determine state changes and collect actions.
+            let mut state_updates: Vec<(String, bool)> = Vec::new();
+
+            for (game_id, exe_name_lower, was_playing, sync_lock) in &snapshot {
+                let is_now_playing = running_exes.contains(exe_name_lower.as_str());
+
+                println!(
+                    "[watcher] '{game_id}' ({exe_name_lower}): was_playing={was_playing} is_now_playing={is_now_playing}"
+                );
+
+                match (was_playing, is_now_playing) {
+                    // Newly started
+                    (false, true) => {
+                        println!("[watcher] Game started: '{game_id}' ({exe_name_lower})");
+                        let _ = app.emit(
+                            "game-status-changed",
+                            serde_json::json!({ "gameId": game_id, "status": "playing" }),
+                        );
+                        state_updates.push((game_id.clone(), true));
+                    }
+                    // Just exited
+                    (true, false) => {
+                        println!("[watcher] Game stopped: '{game_id}' ({exe_name_lower})");
+                        let _ = app.emit(
+                            "game-status-changed",
+                            serde_json::json!({ "gameId": game_id, "status": "idle" }),
+                        );
+
+                        // Decide whether to auto-sync.
+                        let should_auto_sync = settings::load_state(&app)
+                            .ok()
+                            .and_then(|s| {
+                                s.games
+                                    .iter()
+                                    .find(|g| g.id == *game_id)
+                                    .map(|g| g.auto_sync)
+                            })
+                            .unwrap_or(false);
+
+                        if should_auto_sync {
+                            if let Ok(_guard) = sync_lock.try_lock() {
+                                println!(
+                                    "[watcher] Auto-sync triggered for '{game_id}' after process exit"
+                                );
+                                let _ = sync::sync_game(&app, game_id);
+                            } else {
+                                println!(
+                                    "[watcher] Sync already in progress for '{game_id}', skipping"
+                                );
+                            }
+                        } else {
+                            let _ = app.emit("game-sync-pending", game_id);
+                        }
+
+                        state_updates.push((game_id.clone(), false));
+                    }
+                    // No change
+                    _ => {}
+                }
+            }
+
+            // 4. Persist state updates (re-acquire lock briefly).
+            if !state_updates.is_empty() {
+                if let Ok(mut m) = manager_state.lock() {
+                    for (id, playing) in state_updates {
+                        m.update_playing(&id, playing);
+                    }
+                }
+            }
         }
-    }
-
-    /// Check if a game is currently being watched.
-    #[allow(dead_code)]
-    pub fn is_watching(&self, game_id: &str) -> bool {
-        self.watchers.contains_key(game_id)
-    }
+    });
 }
 
 // ── Initialization ────────────────────────────────────────
 
-/// Initialize watchers for all games that have tracking enabled.
+/// Initialize process tracking for all games that have it enabled.
 /// Called once at app startup via `Builder::setup()`.
 pub fn init_watchers(app: &AppHandle) {
     let state = match settings::load_state(app) {
@@ -220,25 +226,34 @@ pub fn init_watchers(app: &AppHandle) {
         }
     };
 
-    let manager_state = app.state::<Arc<Mutex<WatcherManager>>>();
-    let mut manager = match manager_state.lock() {
-        Ok(m) => m,
-        Err(e) => {
-            println!("[watcher] Failed to lock WatcherManager: {e}");
-            return;
-        }
-    };
+    {
+        let manager_state = app.state::<Arc<Mutex<WatcherManager>>>();
+        let mut manager = match manager_state.lock() {
+            Ok(m) => m,
+            Err(e) => {
+                println!("[watcher] Failed to lock WatcherManager: {e}");
+                return;
+            }
+        };
 
-    for game in &state.games {
-        if game.track_changes {
-            if let Some(ref sp) = game.save_path {
-                let expanded = settings::expand_env_vars(sp);
-                if let Err(e) = manager.start_watching(&game.id, &expanded) {
-                    println!("[watcher] Failed to start watcher for {}: {e}", game.id);
+        for game in &state.games {
+            if game.track_changes {
+                match &game.exe_name {
+                    Some(exe) if !exe.is_empty() => {
+                        manager.start_tracking(&game.id, exe);
+                    }
+                    _ => {
+                        println!(
+                            "[watcher] Skipping '{}': track_changes=true but no exe_name set",
+                            game.id
+                        );
+                    }
                 }
             }
         }
-    }
+    } // release lock before spawning thread
+
+    start_poll_thread(app.clone());
 }
 
 // ── Toggle helpers (called from Tauri commands) ───────────
@@ -254,22 +269,27 @@ pub fn handle_track_changes_toggle(
         .map_err(|e| format!("Lock error: {e}"))?;
 
     if enabled {
-        let state = settings::load_state(app)?;
+        let state =
+            settings::load_state(app).map_err(|e| format!("Failed to load state: {e}"))?;
         let game = state
             .games
             .iter()
             .find(|g| g.id == game_id)
-            .ok_or_else(|| format!("Game not found: {game_id}"))?;
+            .ok_or_else(|| format!("Game '{game_id}' not found"))?;
 
-        let save_path = game
-            .save_path
-            .as_deref()
-            .ok_or("Save path must be set before enabling tracking")?;
-
-        let expanded = settings::expand_env_vars(save_path);
-        manager.start_watching(game_id, &expanded)?;
+        match &game.exe_name {
+            Some(exe) if !exe.is_empty() => {
+                manager.start_tracking(game_id, exe);
+            }
+            _ => {
+                println!(
+                    "[watcher] Cannot enable tracking for '{game_id}': no exe_name configured"
+                );
+                // Return Ok so the toggle state is still saved; UI shows a hint.
+            }
+        }
     } else {
-        manager.stop_watching(game_id);
+        manager.stop_tracking(game_id);
     }
 
     Ok(())

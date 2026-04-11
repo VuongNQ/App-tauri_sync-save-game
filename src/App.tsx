@@ -5,7 +5,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 
 import { AppLayout } from "./components/AppLayout";
 import { AuthGuard } from "./components/AuthGuard";
-import { AUTH_STATUS_KEY, DASHBOARD_KEY } from "./queries/keys";
+import { AUTH_STATUS_KEY, DASHBOARD_KEY, gamePlayingKey } from "./queries/keys";
 import { DashboardPage } from "./pages/DashboardPage";
 import { GameDetailPage } from "./pages/GameDetailPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -51,6 +51,14 @@ function useAuthStatusCallbacks() {
       void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
     });
 
+    // Track game playing state for TrackingSyncCard status banner.
+    const unlistenGameStatusPromise = listen<{ gameId: string; status: "playing" | "idle" }>(
+      "game-status-changed",
+      ({ payload }) => {
+        queryClient.setQueryData(gamePlayingKey(payload.gameId), payload.status === "playing");
+      },
+    );
+
     // Tracking detected a local file change — re-scan to update Last local save time.
     const unlistenSyncPendingPromise = listen("game-sync-pending", () => {
       void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
@@ -76,6 +84,7 @@ function useAuthStatusCallbacks() {
       void unlistenRestorePromise.then((unlisten) => unlisten());
       void unlistenPostLoginSyncPromise.then((unlisten) => unlisten());
       void unlistenSyncPendingPromise.then((unlisten) => unlisten());
+      void unlistenGameStatusPromise.then((unlisten) => unlisten());
     };
   }, [queryClient]);
 }

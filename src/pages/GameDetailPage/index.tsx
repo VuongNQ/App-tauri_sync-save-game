@@ -24,6 +24,8 @@ import {
   useSyncLibraryFromCloudMutation,
   useValidatePathsQuery,
 } from "../../queries";
+import { gamePlayingKey } from "../../queries/keys";
+import { useQuery } from "@tanstack/react-query";
 import { expandSavePath } from "../../services/tauri";
 import { formatLocalTime, msg, toImgSrc } from "../../utils";
 import { useRestoreFromDriveFlow } from "./hooks";
@@ -63,6 +65,13 @@ export function GameDetailPage() {
   } | null>(null);
 
   const restoreFlow = useRestoreFromDriveFlow(id ?? "", setToast);
+
+  const { data: isGamePlaying = false } = useQuery<boolean>({
+    queryKey: gamePlayingKey(id ?? ""),
+    queryFn: () => false,
+    staleTime: Infinity,
+    enabled: !!id,
+  });
 
   const isSyncing =
     syncMutation.isPending ||
@@ -299,6 +308,8 @@ export function GameDetailPage() {
         trackChanges={game.trackChanges}
         autoSync={game.autoSync}
         isSyncing={isSyncing}
+        exeName={game.exeName ?? null}
+        isGamePlaying={isGamePlaying}
         onError={(msg) => setToast({ message: msg, type: "error" })}
       />
 

@@ -64,6 +64,7 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
         thumbnail: payload.thumbnail,
         source: payload.source,
         save_path: normalize_optional_path(payload.save_path),
+        exe_name: None,
         track_changes: false,
         auto_sync: false,
         last_local_modified: None,

@@ -27,3 +27,6 @@ export const driveFilesFolderKey = (gameId: string, folderId: string) =>
 /** Flat (recursive) listing of all files in a game's Drive folder. */
 export const driveFilesFlatKey = (gameId: string) => ["drive-files-flat", gameId] as const;
 export const versionBackupsKey = (gameId: string) => ["version-backups", gameId] as const;
+
+/** Playing state set by the game-status-changed Tauri event. */
+export const gamePlayingKey = (gameId: string) => ["game-playing", gameId] as const;

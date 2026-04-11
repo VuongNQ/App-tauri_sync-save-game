@@ -19,6 +19,9 @@ pub struct GameEntry {
     pub thumbnail: Option<String>,
     pub source: String,
     pub save_path: Option<String>,
+    /// Process name to watch (e.g. "GameName.exe"). Sync triggers when this process exits.
+    #[serde(default)]
+    pub exe_name: Option<String>,
     pub track_changes: bool,
     pub auto_sync: bool,
     pub last_local_modified: Option<String>,
@@ -289,6 +292,10 @@ pub struct DriveFileFlatItem {
     pub is_folder: bool,
     /// Drive ID of the parent folder that directly contains this item.
     pub parent_folder_id: String,
+    /// The `path_file` from SyncMeta that matched this file's Drive ID, e.g.
+    /// `"76561198241997832/UserMetaData.sav"`. `None` when the file is not
+    /// tracked in SyncMeta (e.g. folders, unsynced files).
+    pub sync_path: Option<String>,
 }
 
 /// Metadata written as `.backup-meta.json` inside each version-backup folder on Drive.

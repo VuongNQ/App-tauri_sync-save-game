@@ -34,12 +34,33 @@ fn require_game_folder(app: &AppHandle, game_id: &str) -> Result<String, String>
 /// Recursively list every item in the game's Drive folder with relative paths.
 /// Files inside subfolders are included; each item's `relative_path` is relative
 /// to the game's Drive root folder (e.g. `"76561197960271872/Default_0.sav"`).
+/// Each item's `sync_path` is populated from SyncMeta when its Drive file ID
+/// matches a tracked entry (e.g. `"76561198241997832/UserMetaData.sav"`).
 pub fn list_game_drive_files_flat(
     app: &AppHandle,
     game_id: &str,
 ) -> Result<Vec<DriveFileFlatItem>, String> {
     let folder_id = require_game_folder(app, game_id)?;
-    gdrive::list_drive_items_recursive(app, &folder_id, "")
+    let mut items = gdrive::list_drive_items_recursive(app, &folder_id, "")?;
+
+    // Build a Drive-file-ID → pathFile lookup from SyncMeta so we can show
+    // the real save path (e.g. `76561198241997832/UserMetaData.sav`) for each
+    // Drive file, even when multiple files share the same name at root level.
+    let id_to_path: std::collections::HashMap<String, String> =
+        match gdrive::download_sync_meta(app, &folder_id) {
+            Ok((Some(meta), _)) => meta
+                .files
+                .into_iter()
+                .filter_map(|e| e.drive_file_id.map(|id| (id, e.path_file)))
+                .collect(),
+            _ => std::collections::HashMap::new(),
+        };
+
+    for item in &mut items {
+        item.sync_path = id_to_path.get(&item.id).cloned();
+    }
+
+    Ok(items)
 }
 
 /// List all items (files + folders) in the game's Google Drive folder root,

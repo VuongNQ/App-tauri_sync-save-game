@@ -115,6 +115,7 @@ type DriveTreeLeaf = {
   kind: "file";
   name: string;
   relativePath: string;
+  syncPath: string | null;
   size: number | null;
   modifiedTime: string | null;
   id: string;
@@ -154,6 +155,7 @@ function buildDriveTree(items: DriveFileFlatItem[]): DriveTreeItem[] {
         kind: "file",
         name: parts[0],
         relativePath: item.relativePath,
+        syncPath: item.syncPath ?? null,
         size: item.size,
         modifiedTime: item.modifiedTime,
         id: item.id,
@@ -448,8 +450,16 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
               </button>
             </div>
           ) : (
-            <span className="text-[#c7d3f7] truncate" title={node.relativePath}>
-              {node.name}
+            <span className="min-w-0">
+              <span className="text-[#c7d3f7] truncate block">{node.name}</span>
+              {(node.syncPath ?? node.relativePath) !== node.name && (
+                <span
+                  className="text-[0.65rem] text-[#9aa8c7]/60 truncate block"
+                  title={node.syncPath ?? node.relativePath}
+                >
+                  {node.syncPath ?? node.relativePath}
+                </span>
+              )}
             </span>
           )}
         </div>

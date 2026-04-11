@@ -7,6 +7,8 @@ export interface GameEntry {
   thumbnail: string | null;
   source: GameSource;
   savePath: string | null;
+  /** Process name to watch (e.g. "GameName.exe"). Sync triggers when this process exits. */
+  exeName: string | null;
   trackChanges: boolean;
   autoSync: boolean;
   lastLocalModified: string | null;
@@ -27,6 +29,7 @@ export interface AddGamePayload {
   thumbnail: string | null;
   source: GameSource;
   savePath: string | null;
+  exeName?: string | null;
 }
 
 export interface UpdateGamePayload {
@@ -135,6 +138,11 @@ export interface DriveFileFlatItem {
   isFolder: boolean;
   /** Drive ID of the parent folder that directly contains this item. */
   parentFolderId: string;
+  /**
+   * The `pathFile` from SyncMeta matched by this file's Drive ID, e.g.
+   * `"76561198241997832/UserMetaData.sav"`. `null` when not tracked in SyncMeta.
+   */
+  syncPath: string | null;
 }
 
 /** A version-backup snapshot stored under the game's `backups/` Drive folder. */

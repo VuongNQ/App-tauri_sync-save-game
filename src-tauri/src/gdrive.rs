@@ -319,6 +319,7 @@ pub fn list_drive_items_recursive(
             modified_time: item.modified_time.clone(),
             is_folder: item.is_folder,
             parent_folder_id: folder_id.to_string(),
+            sync_path: None,
         });
         if item.is_folder {
             let children = list_drive_items_recursive(app, &item.id, &relative_path)?;

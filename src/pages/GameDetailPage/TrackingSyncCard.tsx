@@ -10,6 +10,8 @@ interface TrackingSyncCardProps {
   trackChanges: boolean;
   autoSync: boolean;
   isSyncing: boolean;
+  exeName: string | null;
+  isGamePlaying: boolean;
   onError: (message: string) => void;
 }
 
@@ -19,6 +21,8 @@ function TrackingSyncCard({
   trackChanges,
   autoSync,
   isSyncing,
+  exeName,
+  isGamePlaying,
   onError,
 }: TrackingSyncCardProps) {
   const toggleTrack = useToggleTrackChangesMutation();
@@ -39,7 +43,7 @@ function TrackingSyncCard({
   }
 
   const trackDisabled =
-    isSyncing || toggleTrack.isPending || toggleAuto.isPending || !savePath;
+    isSyncing || toggleTrack.isPending || toggleAuto.isPending;
   const autoDisabled =
     isSyncing || toggleTrack.isPending || toggleAuto.isPending;
 
@@ -47,22 +51,43 @@ function TrackingSyncCard({
     <div className={CARD}>
       <h3 className="m-0 mb-4 font-semibold">Tracking &amp; Sync</h3>
 
+      {/* Game running status banner */}
+      {trackChanges && isGamePlaying && (
+        <div
+          className={`mb-4 px-4 py-3 rounded-2xl text-sm font-medium flex items-center gap-2 ${
+            autoSync
+              ? "bg-[rgba(255,180,40,0.12)] border border-[rgba(255,180,40,0.3)] text-[#ffd580]"
+              : "bg-[rgba(80,160,255,0.12)] border border-[rgba(80,160,255,0.3)] text-[#7dc9ff]"
+          }`}
+        >
+          <span>🎮</span>
+          {autoSync
+            ? "Game is running — will sync on close"
+            : "Game is running — Sync pending..."}
+        </div>
+      )}
+
       {!savePath && (
         <p className="m-0 mb-4 text-sm text-[#ffd5a0]">
-          Set a save folder path before enabling tracking.
+          Set a save folder path so synced files have a destination.
         </p>
       )}
 
       <div className="grid gap-4">
-        {/* Track file changes */}
+        {/* Track process */}
         <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-2xl border border-[rgba(165,185,255,0.08)] bg-[rgba(9,14,28,0.55)]">
           <div className="grid gap-0.5">
             <span className="font-semibold text-sm text-[#c7d3f7]">
-              Track file changes
+              Track process
             </span>
             <span className="text-xs text-[#9aa8c7]">
-              Watch the save folder for modifications in the background
+              Detect when the game process exits and trigger sync
             </span>
+            {trackChanges && !exeName && (
+              <span className="text-xs text-[#ffd5a0] mt-1">
+                Open settings and enter the game’s .exe name to activate process tracking.
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -89,7 +114,7 @@ function TrackingSyncCard({
               Auto-sync to Google Drive
             </span>
             <span className="text-xs text-[#9aa8c7]">
-              Automatically back up saves when changes are detected
+              Automatically back up saves when the game process exits
             </span>
           </div>
           <button
