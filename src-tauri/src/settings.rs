@@ -148,7 +148,9 @@ pub fn update_game_field(
         .find(|g| g.id == game_id)
         .ok_or_else(|| format!("Game not found: {game_id}"))?;
     updater(game);
+    let game_snapshot = game.clone();
     save_state(app, &state)?;
+    spawn_firestore_game_upsert(app, game_snapshot);
     Ok(state)
 }
 

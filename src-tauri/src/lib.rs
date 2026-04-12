@@ -461,14 +461,13 @@ fn toggle_track_changes(
     enabled: bool,
 ) -> Result<DashboardData, String> {
     // Update the game entry first
-    settings::update_game_field(&app, &game_id, |g| {
+    let state = settings::update_game_field(&app, &game_id, |g| {
         g.track_changes = enabled;
     })?;
 
     // Start or stop the watcher
     watcher::handle_track_changes_toggle(&app, &game_id, enabled)?;
 
-    let state = settings::load_state(&app)?;
     Ok(DashboardData { games: state.games })
 }
 
@@ -478,11 +477,10 @@ fn toggle_auto_sync(
     game_id: String,
     enabled: bool,
 ) -> Result<DashboardData, String> {
-    settings::update_game_field(&app, &game_id, |g| {
+    let state = settings::update_game_field(&app, &game_id, |g| {
         g.auto_sync = enabled;
     })?;
 
-    let state = settings::load_state(&app)?;
     Ok(DashboardData { games: state.games })
 }
 

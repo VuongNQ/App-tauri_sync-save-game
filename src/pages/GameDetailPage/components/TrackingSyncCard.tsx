@@ -35,6 +35,7 @@ function TrackingSyncCard({
   onError,
 }: TrackingSyncCardProps) {
   const toggleTrack = useToggleTrackChangesMutation();
+
   const toggleAuto = useToggleAutoSyncMutation();
 
   function handleTrackChanges(enabled: boolean) {
