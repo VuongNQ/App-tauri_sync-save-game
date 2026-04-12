@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   addManualGame,
@@ -21,12 +21,13 @@ function useSetDashboardCache() {
 }
 
 // ─── Query ────────────────────────────────────────────────────────────────────
+export const DashboardQuery = queryOptions({
+  queryKey: DASHBOARD_KEY,
+  queryFn: loadDashboard,
+});
 
 export function useDashboardQuery() {
-  return useQuery({
-    queryKey: DASHBOARD_KEY,
-    queryFn: loadDashboard,
-  });
+    return useQuery(DashboardQuery);
 }
 
 // ─── Mutations ───────────────────────────────────────────────────────────────
@@ -57,9 +58,11 @@ export function useRemoveGameMutation() {
 
 // ─── Path Validation ─────────────────────────────────────────────────────────
 
+export const ValidatePathsQuery = queryOptions({
+  queryKey: VALIDATE_PATHS_KEY,
+  queryFn: validateSavePaths,
+});
+
 export function useValidatePathsQuery() {
-  return useQuery({
-    queryKey: VALIDATE_PATHS_KEY,
-    queryFn: validateSavePaths,
-  });
+  return useQuery(ValidatePathsQuery);
 }

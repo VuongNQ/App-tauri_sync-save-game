@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  mutationOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import {
   checkSyncStructureDiff,
@@ -21,7 +26,15 @@ import {
   toggleTrackChanges,
 } from "../services/tauri";
 import type { DashboardData } from "../types/dashboard";
-import { DASHBOARD_KEY, VALIDATE_PATHS_KEY, driveFilesKey, driveFilesFlatKey, driveFilesFolderKey, saveInfoKey, versionBackupsKey } from "./keys";
+import {
+  DASHBOARD_KEY,
+  VALIDATE_PATHS_KEY,
+  driveFilesKey,
+  driveFilesFlatKey,
+  driveFilesFolderKey,
+  saveInfoKey,
+  versionBackupsKey,
+} from "./keys";
 
 function useSetDashboardCache() {
   const queryClient = useQueryClient();
@@ -29,10 +42,16 @@ function useSetDashboardCache() {
     queryClient.setQueryData<DashboardData>(DASHBOARD_KEY, data);
 }
 
-export function useSyncGameMutation() {
+export const SyncGameMutation = (id: string) =>
+  mutationOptions({
+    mutationKey: ["syncGame", id],
+    mutationFn: () => syncGame(id),
+  });
+
+export function useSyncGameMutation(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (gameId: string) => syncGame(gameId),
+    ...SyncGameMutation(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY }),
   });
 }
@@ -40,6 +59,7 @@ export function useSyncGameMutation() {
 export function useSyncAllMutation() {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: ["syncAllGames"],
     mutationFn: () => syncAllGames(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY }),
   });
@@ -78,7 +98,6 @@ export function useGetSaveInfoQuery(gameId: string, enabled = true) {
     queryKey: saveInfoKey(gameId),
     queryFn: () => getSaveInfo(gameId),
     enabled,
-    staleTime: Infinity,
   });
 }
 
@@ -110,7 +129,11 @@ export function usePushToCloudMutation() {
 // ── Drive file management hooks ────────────────────────────────────────────────
 
 /** Lazily fetch the list of Drive items for a game folder or subfolder. Pass `enabled: false` to skip. */
-export function useDriveFilesQuery(gameId: string, folderId: string, enabled = true) {
+export function useDriveFilesQuery(
+  gameId: string,
+  folderId: string,
+  enabled = true,
+) {
   return useQuery({
     queryKey: driveFilesFolderKey(gameId, folderId),
     queryFn: () => listGameDriveFiles(gameId, folderId),

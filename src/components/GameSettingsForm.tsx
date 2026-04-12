@@ -1,3 +1,4 @@
+import { ValidatePathsQuery } from "@/queries/dashboard";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -66,14 +67,12 @@ type GameSettingsFormValues = z.infer<typeof gameSettingsSchema>;
 interface GameSettingsFormProps {
   isOpen: boolean;
   isSyncing: boolean;
-  isPathInvalid: boolean;
   id?: string;
 }
 
 export function GameSettingsForm({
   isOpen,
   isSyncing,
-  isPathInvalid,
   id,
 }: GameSettingsFormProps) {
   const updateMutation = useUpdateGameMutation();
@@ -84,9 +83,15 @@ export function GameSettingsForm({
 
   const queryClient = useQueryClient();
 
+  const validateQuery = queryClient.getQueryData(ValidatePathsQuery.queryKey);
+
   const gameSettings = queryClient
     .getQueryData<DashboardData>(DASHBOARD_KEY)
     ?.games.find((g) => g.id === id);
+
+  const isPathInvalid =
+    gameSettings != null &&
+    (validateQuery ?? []).some((v) => v.gameId === gameSettings.id && !v.valid);
 
   const methods = useForm<GameSettingsFormValues>({
     defaultValues: {

@@ -1,7 +1,12 @@
 // ── useRestoreFromDriveFlow ───────────────────────────────────────────────────
 
 import { useState } from "react";
-import { useCheckSyncDiffMutation, usePushToCloudMutation, useRestoreFromCloudMutation, useSyncGameMutation } from "../../queries";
+import {
+  useCheckSyncDiffMutation,
+  usePushToCloudMutation,
+  useRestoreFromCloudMutation,
+  useSyncGameMutation,
+} from "../../queries";
 import { SyncStructureDiff } from "../../types/dashboard";
 import { msg } from "../../utils";
 
@@ -17,7 +22,7 @@ export function useRestoreFromDriveFlow(
   const checkDiffMutation = useCheckSyncDiffMutation();
   const restoreMutation = useRestoreFromCloudMutation();
   const pushMutation = usePushToCloudMutation();
-  const syncMutation = useSyncGameMutation();
+  const syncMutation = useSyncGameMutation(gameId);
 
   const isChecking = checkDiffMutation.isPending;
   const isExecuting =
@@ -62,7 +67,7 @@ export function useRestoreFromDriveFlow(
   function executeMethod(method: SyncMethod) {
     setShowModal(false);
     if (method === "auto") {
-      syncMutation.mutate(gameId, {
+      syncMutation.mutate(undefined, {
         onSuccess: (data) => {
           if (data.error) setToast({ message: data.error, type: "error" });
           else
