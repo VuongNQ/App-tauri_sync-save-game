@@ -131,16 +131,20 @@ Use `react-router` (v7+) — **not** the legacy `react-router-dom` v6 package.
 npm install react-router
 ```
 
+### Router
+
+Use `HashRouter` — **not** `BrowserRouter`. Tauri serves the app from a local `tauri://` or `http://localhost` origin; `HashRouter` avoids server-side routing issues that `BrowserRouter` would cause in that environment. URLs use the `#` hash format (e.g. `/#/game/:id`).
+
 ### Route Config
 
 Define routes in `App.tsx` using `<Routes>` and `<Route>`:
 
 ```tsx
-import { BrowserRouter, Routes, Route, Navigate } from "react-router";
+import { HashRouter, Routes, Route, Navigate } from "react-router";
 
 function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route element={<AuthGuard />}>
@@ -152,7 +156,7 @@ function App() {
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 ```
