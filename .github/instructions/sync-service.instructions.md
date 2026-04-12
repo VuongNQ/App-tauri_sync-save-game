@@ -243,6 +243,29 @@ fn spawn_sync_meta_mirror(app: &AppHandle, game_id: &str, meta: crate::models::S
 - `delete_game_drive_file` — after SyncMeta delete update
 - `restore_version_backup` — after SyncMeta post-restore update
 
+## Path Utilities (`settings.rs`)
+
+### `expand_env_vars` / `contract_env_vars`
+
+Both functions operate on the same `VARS` array. Supported tokens (most-specific first):
+
+| Token | Windows env var |
+|-------|----------------|
+| `%TEMP%` | `TEMP` |
+| `%LOCALAPPDATA%` | `LOCALAPPDATA` |
+| `%APPDATA%` | `APPDATA` |
+| `%USERPROFILE%` | `USERPROFILE` |
+| `%PROGRAMDATA%` | `PROGRAMDATA` |
+| `%PROGRAMFILES%` | `PROGRAMFILES` |
+
+Both `save_path` **and** `exe_path` fields on `GameEntry` are stored with tokens and expanded at runtime via `expand_env_vars()`.
+
+### `pub fn contract_path(path: &str) -> String`
+
+Public wrapper over `contract_env_vars` (normalises backslashes then tokenises). Exposed as the `contract_path` Tauri command. The frontend calls this immediately after a file-picker returns an absolute path so the portable token form is stored and displayed.
+
+---
+
 ## Sync Algorithm (sync.rs)
 
 ### Pipeline

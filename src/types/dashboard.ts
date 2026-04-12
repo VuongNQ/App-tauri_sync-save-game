@@ -9,6 +9,8 @@ export interface GameEntry {
   savePath: string | null;
   /** Process name to watch (e.g. "GameName.exe"). Sync triggers when this process exits. */
   exeName: string | null;
+  /** Full path to the game executable. Used to launch the game from the app. */
+  exePath: string | null;
   trackChanges: boolean;
   autoSync: boolean;
   lastLocalModified: string | null;

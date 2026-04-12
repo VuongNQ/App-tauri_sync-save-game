@@ -239,6 +239,14 @@ fn expand_save_path(path: String) -> String {
     settings::expand_env_vars(&path)
 }
 
+/// Replace absolute path prefixes with portable env-var tokens (e.g. `%PROGRAMFILES%\...`).
+/// Mirrors the server-side `contract_env_vars` used on save, so the frontend can show
+/// the portable form immediately after a file-picker selection.
+#[tauri::command]
+fn contract_path(path: String) -> String {
+    settings::contract_path(&path)
+}
+
 #[tauri::command]
 fn validate_save_paths(app: tauri::AppHandle) -> Result<Vec<PathValidation>, String> {
     settings::validate_save_paths(&app)
@@ -452,6 +460,33 @@ async fn push_to_cloud(
         .map_err(|e| format!("Push task failed: {e}"))?
 }
 
+// ── Launcher command ──────────────────────────────────────
+
+#[tauri::command]
+fn launch_game(app: tauri::AppHandle, game_id: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let state = settings::load_state(&app)?;
+    let game = state
+        .games
+        .iter()
+        .find(|g| g.id == game_id)
+        .ok_or_else(|| format!("Game not found: {game_id}"))?;
+
+    let raw_path = game
+        .exe_path
+        .as_deref()
+        .ok_or_else(|| "No executable path configured for this game.".to_string())?;
+
+    let full_path = settings::expand_env_vars(raw_path);
+
+    println!("[launcher] Launching '{}' at: {}", game.name, full_path);
+
+    app.opener()
+        .open_path(&full_path, None::<&str>)
+        .map_err(|e| format!("Failed to launch game: {e}"))
+}
+
 // ── Watcher commands ──────────────────────────────────────
 
 #[tauri::command]
@@ -535,9 +570,11 @@ pub fn run() {
             push_to_cloud,
             toggle_track_changes,
             toggle_auto_sync,
+            launch_game,
             validate_save_paths,
             get_browse_default_path,
             expand_save_path,
+            contract_path,
             upload_game_logo,
             list_game_drive_files_flat,
             list_game_drive_files,

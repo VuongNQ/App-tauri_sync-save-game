@@ -65,6 +65,7 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
         source: payload.source,
         save_path: normalize_optional_path(payload.save_path),
         exe_name: None,
+        exe_path: None,
         track_changes: false,
         auto_sync: false,
         last_local_modified: None,
@@ -97,6 +98,7 @@ pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
     let mut state = load_state(app)?;
     let normalized = GameEntry {
         save_path: normalize_optional_path(game.save_path),
+        exe_path: normalize_optional_path(game.exe_path),
         ..game
     };
 
@@ -294,7 +296,7 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
 pub fn expand_env_vars(path: &str) -> String {
     // Order: most-specific first so that overlapping prefixes resolve correctly
     // (e.g. %TEMP% is a subdirectory of %LOCALAPPDATA%, so try TEMP first).
-    const VARS: &[&str] = &["TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA"];
+    const VARS: &[&str] = &["TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA", "PROGRAMFILES"];
     let mut result = path.to_string();
     for var in VARS {
         let token = format!("%{}%", var.to_uppercase());
@@ -309,12 +311,18 @@ pub fn expand_env_vars(path: &str) -> String {
     result
 }
 
+/// Replace absolute path prefixes with portable env-var tokens (e.g. `%PROGRAMFILES%\\...`).
+/// Public wrapper around `contract_env_vars` for use in Tauri commands.
+pub fn contract_path(path: &str) -> String {
+    contract_env_vars(&path.replace('/', "\\"))
+}
+
 /// Replace a known Windows user-folder prefix with its environment-variable
 /// token so that paths are portable across accounts and machines.
 fn contract_env_vars(path: &str) -> String {
     // Most-specific first: TEMP ≈ %LOCALAPPDATA%\Temp, so replace it before
     // we would replace the longer LOCALAPPDATA prefix.
-    const VARS: &[&str] = &["TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA"];
+    const VARS: &[&str] = &["TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA", "PROGRAMFILES"];
     let path_upper = path.to_uppercase();
     for var in VARS {
         if let Ok(val) = std::env::var(var) {

@@ -37,3 +37,4 @@ export {
   useToggleTrackChangesMutation,
   useVersionBackupsQuery,
 } from "./sync";
+export { useSyncAndLaunchFlow } from "./detail";

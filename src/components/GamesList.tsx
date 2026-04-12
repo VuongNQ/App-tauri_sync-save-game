@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Link } from "react-router";
 
 import { useRemoveGameMutation } from "../queries";
+import { useSyncAndLaunchFlow } from "../queries/detail";
 import type { GameEntry } from "../types/dashboard";
 import { toImgSrc, formatBytes } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
-import { CARD, MUTED, SEC_HDR, SOURCE_BADGE, SOFT_BADGE } from "./styles";
+import { BTN, CARD, MUTED, SEC_HDR, SOURCE_BADGE, SOFT_BADGE } from "./styles";
 
 function LazyThumbnail({ src }: { src: string }) {
   const [loaded, setLoaded] = useState(false);
@@ -77,7 +78,7 @@ export function GamesList({ games, invalidGameIds }: Props) {
             return (
               <div
                 key={g.id}
-                className={`flex items-center gap-4 p-4 rounded-2xl bg-[rgba(10,16,31,0.72)] border transition-colors ${
+                className={`relative flex items-center gap-4 p-4 rounded-2xl bg-[rgba(10,16,31,0.72)] border transition-colors ${
                   isInvalid
                     ? "border-[rgba(255,100,100,0.4)] hover:border-[rgba(255,100,100,0.6)]"
                     : "border-[rgba(154,177,255,0.08)] hover:border-[rgba(111,171,255,0.4)]"
@@ -125,6 +126,9 @@ export function GamesList({ games, invalidGameIds }: Props) {
                     )}                  </div>
                 </Link>
 
+                {/* Play button */}
+                <GamePlayButton game={g} />
+
                 {/* Remove button */}
                 <button
                   type="button"
@@ -149,5 +153,72 @@ export function GamesList({ games, invalidGameIds }: Props) {
         onCancel={() => setRemoveTarget(null)}
       />
     </section>
+  );
+}
+
+// ── GamePlayButton ────────────────────────────────────────────────────────────
+
+function GamePlayButton({ game }: { game: GameEntry }) {
+  const [error, setError] = useState<string | null>(null);
+  const [canForce, setCanForce] = useState(false);
+
+  const flow = useSyncAndLaunchFlow({
+    onError: (msg, canForceArg) => {
+      setError(msg);
+      setCanForce(canForceArg);
+    },
+  });
+
+  if (!game.exePath) return null;
+
+  const label =
+    flow.phase === "syncing"
+      ? "⏳"
+      : flow.phase === "launching"
+        ? "▶"
+        : "▶";
+
+  const title =
+    flow.phase === "syncing"
+      ? "Syncing saves…"
+      : flow.phase === "launching"
+        ? "Launching…"
+        : "Sync saves then launch game";
+
+  return (
+    <div className="flex flex-col items-center gap-1 shrink-0">
+      <button
+        type="button"
+        title={title}
+        disabled={flow.isPending}
+        className={`${BTN} w-9 h-9 grid place-items-center rounded-xl border text-[#7dc9ff] hover:text-[#05111f] hover:bg-[rgba(122,180,255,0.85)] hover:border-[rgba(122,180,255,0.6)] border-[rgba(122,180,255,0.25)] bg-[rgba(122,180,255,0.08)] transition-colors`}
+        onClick={(e) => {
+          e.preventDefault();
+          setError(null);
+          setCanForce(false);
+          flow.start(game);
+        }}
+      >
+        {label}
+      </button>
+      {error && (
+        <div className="absolute right-16 top-1/2 -translate-y-1/2 z-10 w-48 rounded-xl border border-[rgba(255,100,100,0.3)] bg-[rgba(18,10,24,0.96)] p-2.5 text-xs text-[#ff9e9e] shadow-lg">
+          <p className="m-0 mb-1.5 leading-snug">{error}</p>
+          {canForce && (
+            <button
+              type="button"
+              className={`${BTN} w-full text-xs min-h-7 px-2 rounded-lg bg-[rgba(255,255,255,0.06)] text-[#eaf3ff]`}
+              onClick={(e) => {
+                e.preventDefault();
+                setError(null);
+                flow.forceLaunch(game.id);
+              }}
+            >
+              Launch anyway
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

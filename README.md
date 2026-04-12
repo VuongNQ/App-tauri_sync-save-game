@@ -11,6 +11,7 @@ A **Windows desktop tool** built with [Tauri 2](https://tauri.app/) that tracks 
 - **Background Tracking** — Process-based monitoring per game: detects when the game `.exe` starts/stops and syncs saves on exit (default: off, user opts in per game and sets the executable name).
 - **Auto-Sync** — Automatically backs up local saves to Drive when changes are detected.
 - **Conflict Resolution** — Compares local vs. Drive `last_modified` timestamps and always picks the newest save.
+- **Game Launcher** — Launch games directly from the app (Play button on each game card and detail page). Before launching, the latest save is automatically restored from Google Drive so the newest cloud save is always loaded first.
 - **In-App Updater** — Checks GitHub Releases for new versions and installs them automatically.
 
 ---
@@ -102,7 +103,19 @@ appDataFolder/
 
 ## Save Path Portability
 
-Save paths are stored with Windows environment-variable tokens (e.g. `%LOCALAPPDATA%\Game\Saves`) so they work across accounts and machines. Paths are expanded to absolute paths at runtime by `expand_env_vars()` in `settings.rs`.
+Both save-folder paths and game executable paths are stored with Windows environment-variable tokens so they work across accounts and machines:
+
+| Token | Expands to |
+|---|---|
+| `%LOCALAPPDATA%` | `C:\Users\<user>\AppData\Local` |
+| `%APPDATA%` | `C:\Users\<user>\AppData\Roaming` |
+| `%USERPROFILE%` | `C:\Users\<user>` |
+| `%PROGRAMDATA%` | `C:\ProgramData` |
+| `%PROGRAMFILES%` | `C:\Program Files` |
+| `%TEMP%` | `C:\Users\<user>\AppData\Local\Temp` |
+
+- `expand_env_vars()` in `settings.rs` expands tokens to absolute paths at runtime.
+- `contract_env_vars()` (exposed as the `contract_path` Tauri command) converts an absolute path back to a portable token path immediately after a file-picker selection — so `C:\Program Files\Steam\game.exe` is stored as `%PROGRAMFILES%\Steam\game.exe`.
 
 ---
 

@@ -13,6 +13,7 @@ import {
 import { z } from "zod";
 import { DASHBOARD_KEY, useUpdateGameMutation } from "../queries";
 import {
+  contractPath,
   expandSavePath,
   getBrowseDefaultPath,
   getSaveInfo,
@@ -55,6 +56,7 @@ const gameSettingsSchema = z.object({
   exeName: z
     .string()
     .max(260, "Executable name must be 260 characters or fewer."),
+  exePath: z.string().optional().nullable(),
   trackChanges: z.boolean(),
   autoSync: z.boolean(),
   syncExcludes: z.array(z.string()),
@@ -99,6 +101,7 @@ export function GameSettingsForm({
       description: gameSettings?.description ?? "",
       savePath: gameSettings?.savePath ?? "",
       exeName: gameSettings?.exeName ?? "",
+      exePath: gameSettings?.exePath ?? "",
       trackChanges: gameSettings?.trackChanges ?? false,
       autoSync: gameSettings?.autoSync ?? false,
       syncExcludes: gameSettings?.syncExcludes ?? [],
@@ -115,6 +118,7 @@ export function GameSettingsForm({
       description: gameSettings?.description ?? "",
       savePath: gameSettings?.savePath ?? "",
       exeName: gameSettings?.exeName ?? "",
+      exePath: gameSettings?.exePath ?? "",
       trackChanges: gameSettings?.trackChanges ?? false,
       autoSync: gameSettings?.autoSync ?? false,
       syncExcludes: gameSettings?.syncExcludes ?? [],
@@ -149,6 +153,7 @@ export function GameSettingsForm({
       description: trimmed || null,
       savePath: norm(values.savePath),
       exeName: values.exeName.trim() || null,
+      exePath: norm(values.exePath ?? ""),
       trackChanges: values.trackChanges,
       autoSync: values.autoSync,
       syncExcludes: values.syncExcludes,
@@ -202,6 +207,7 @@ export function GameSettingsForm({
               isPathInvalid={isPathInvalid}
             />
             <ExeNameSection />
+            <ExePathSection game={gameSettings} />
             <SyncExclusionsSection game={gameSettings} />
             <div className="flex items-center gap-3 justify-end">
               {saveError && (
@@ -468,6 +474,71 @@ function ExeNameSection() {
           {errors.exeName && (
             <span className={FIELD_ERROR}>{errors.exeName.message}</span>
           )}
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// ── Exe path section ──────────────────────────────────────────────────────────
+
+interface ExePathSectionProps {
+  game: GameEntry;
+}
+
+function ExePathSection({ game }: ExePathSectionProps) {
+  const { register, setValue } = useFormContext<GameSettingsFormValues>();
+
+  async function handleBrowse() {
+    let defaultPath: string | undefined;
+    if (game.exePath) {
+      const resolved = game.exePath.includes("%")
+        ? await expandSavePath(game.exePath)
+        : game.exePath;
+      const sep = resolved.lastIndexOf("\\");
+      if (sep > 0) defaultPath = resolved.slice(0, sep);
+    }
+    const p = await open({
+      multiple: false,
+      title: "Choose the game launch executable",
+      defaultPath,
+      filters: [{ name: "Executable", extensions: ["exe"] }],
+    });
+    if (typeof p === "string") {
+      // Immediately tokenize the absolute path for portability across devices
+      // (e.g. C:\Program Files\Steam\... → %PROGRAMFILES%\Steam\...).
+      // Rust does the same via normalize_optional_path on save, but showing
+      // the token form right away makes portability visible to the user.
+      const portable = await contractPath(p);
+      setValue("exePath", portable, { shouldDirty: true, shouldValidate: true });
+    }
+  }
+
+  return (
+    <div className={CARD}>
+      <h3 className="m-0 mb-4 font-semibold">Launch Path</h3>
+      <div className={FORM_GRID}>
+        <label className={FORM_LABEL}>
+          <span className={LABEL_SPAN}>Game executable path</span>
+          <div className={INPUT_ROW}>
+            <input
+              className={INPUT_CLS}
+              {...register("exePath")}
+              placeholder="e.g. %PROGRAMFILES%\Steam\steamapps\common\Game\Game.exe"
+            />
+            <button
+              type="button"
+              className={SECONDARY_BTN}
+              onClick={handleBrowse}
+            >
+              Browse
+            </button>
+          </div>
+          <span className={MUTED + " text-xs mt-1"}>
+            Full path to the .exe used to launch the game. Enables the Play
+            button on the game detail page. Stored with env-var tokens (e.g.{" "}
+            <code>%PROGRAMFILES%</code>) for portability.
+          </span>
         </label>
       </div>
     </div>

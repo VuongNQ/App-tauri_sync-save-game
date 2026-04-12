@@ -22,6 +22,10 @@ pub struct GameEntry {
     /// Process name to watch (e.g. "GameName.exe"). Sync triggers when this process exits.
     #[serde(default)]
     pub exe_name: Option<String>,
+    /// Full path to the game executable (e.g. `%PROGRAMFILES%\Steam\game.exe`).
+    /// Used to launch the game directly from the app.
+    #[serde(default)]
+    pub exe_path: Option<String>,
     pub track_changes: bool,
     pub auto_sync: bool,
     pub last_local_modified: Option<String>,

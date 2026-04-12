@@ -1,7 +1,9 @@
-import { CARD, EYEBROW, SOFT_BADGE, SOURCE_BADGE } from "@/components/styles";
+import { CARD, EYEBROW, GHOST_BTN, PRIMARY_BTN, SOFT_BADGE, SOURCE_BADGE } from "@/components/styles";
 import { DashboardQuery } from "@/queries/dashboard";
+import { useSyncAndLaunchFlow } from "@/queries/detail";
 import { formatBytes, formatLocalTime, toImgSrc } from "@/utils";
 import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useParams } from "react-router";
 
 const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => void }) => {
@@ -11,10 +13,40 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
 
   const game = queryClient.getQueryData(DashboardQuery.queryKey)?.games.find((g) => g.id === id);
 
-  
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [canForceAfterError, setCanForceAfterError] = useState(false);
+
+  const flow = useSyncAndLaunchFlow({
+    onError: (msg, canForce) => {
+      setLaunchError(msg);
+      setCanForceAfterError(canForce);
+    },
+  });
+
   const sourceBadge = game ? SOURCE_BADGE[game.source] : SOFT_BADGE;
 
   if (!game) return null;
+
+  const canLaunch = !!game.exePath;
+
+  function handlePlay() {
+    setLaunchError(null);
+    setCanForceAfterError(false);
+    flow.start(game!);
+  }
+
+  function handleForceLaunch() {
+    setLaunchError(null);
+    setCanForceAfterError(false);
+    flow.forceLaunch(game!.id);
+  }
+
+  const playLabel =
+    flow.phase === "syncing"
+      ? "Syncing saves…"
+      : flow.phase === "launching"
+        ? "Launching…"
+        : "▶ Play";
 
   return (
     <div className={CARD}>
@@ -34,7 +66,7 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
           )}
         </div>
 
-        <div className="grid gap-2">
+        <div className="grid gap-2 flex-1 min-w-0">
           <p className={EYEBROW}>Game details</p>
           <h2 className="m-0">{game.name}</h2>
           <span className={sourceBadge}>{game.source}</span>
@@ -42,6 +74,44 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
             <p className="m-0 text-sm text-[#9aa8c7] max-w-120 whitespace-pre-wrap">
               {game.description}
             </p>
+          )}
+        </div>
+
+        {/* Play button */}
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <button
+            type="button"
+            className={`${PRIMARY_BTN} w-auto px-6`}
+            disabled={!canLaunch || flow.isPending}
+            title={
+              canLaunch
+                ? "Sync saves from Drive then launch the game"
+                : "Set an executable path in Settings to enable launching"
+            }
+            onClick={handlePlay}
+          >
+            {playLabel}
+          </button>
+          {!canLaunch && (
+            <span className="text-xs text-[#9aa8c7] text-right max-w-[140px]">
+              Set an exe path in Settings
+            </span>
+          )}
+          {launchError && (
+            <div className="flex flex-col items-end gap-1.5 max-w-[220px]">
+              <span className="text-xs text-[#ff9e9e] text-right">
+                {launchError}
+              </span>
+              {canForceAfterError && (
+                <button
+                  type="button"
+                  className={`${GHOST_BTN} text-xs min-h-8 px-3`}
+                  onClick={handleForceLaunch}
+                >
+                  Launch anyway
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>

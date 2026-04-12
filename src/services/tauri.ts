@@ -134,6 +134,10 @@ export async function toggleAutoSync(
   return invoke<DashboardData>("toggle_auto_sync", { gameId, enabled });
 }
 
+export async function launchGame(gameId: string): Promise<void> {
+  return invoke<void>("launch_game", { gameId });
+}
+
 // ── Path Validation ──────────────────────────────────────────────────────────
 
 export async function validateSavePaths(): Promise<PathValidation[]> {
@@ -146,6 +150,10 @@ export async function getBrowseDefaultPath(): Promise<string | null> {
 
 export async function expandSavePath(path: string): Promise<string> {
   return invoke<string>("expand_save_path", { path });
+}
+
+export async function contractPath(path: string): Promise<string> {
+  return invoke<string>("contract_path", { path });
 }
 
 // ── Logo upload ───────────────────────────────────────────────────────────────

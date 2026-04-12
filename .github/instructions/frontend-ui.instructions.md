@@ -35,6 +35,7 @@ src/
     keys.ts            # Query key constants
     auth.ts            # Auth query/mutation hooks
     dashboard.ts       # Game library query/mutation hooks
+    detail.ts          # Per-game hooks: useSyncAndLaunchFlow (phase state machine)
     sync.ts            # Sync mutation hooks
     settings.ts        # Settings query/mutation hooks
     index.ts           # Re-exports from all query files
@@ -188,6 +189,16 @@ export async function syncGame(gameId: string): Promise<SyncResult> {
 export async function expandSavePath(path: string): Promise<string> {
   return invoke<string>("expand_save_path", { path });
 }
+
+// Tokenises an absolute path back to portable %VAR% form — call after every file-picker selection
+export async function contractPath(path: string): Promise<string> {
+  return invoke<string>("contract_path", { path });
+}
+
+// Launches the game executable (expands %VAR% tokens at runtime)
+export async function launchGame(gameId: string): Promise<void> {
+  return invoke<void>("launch_game", { gameId });
+}
 ```
 
 **Rules:**
@@ -296,6 +307,46 @@ export function useRestoreVersionBackupMutation() {
 |---|---|
 | Read: `use{Feature}Query` | `useDashboardQuery`, `useSettingsQuery` |
 | Write: `use{Feature}Mutation` | `useAddGameMutation`, `useSyncGameMutation`, `useGetSaveInfoMutation` |
+| Multi-step flow: `use{Feature}Flow` | `useSyncAndLaunchFlow` — chained mutations with a phase state machine |
+
+### Multi-Step Flow Hook Pattern
+
+When an action requires two sequential async steps (e.g. restore-then-launch), model it as a **phase state machine** hook kept in `detail.ts`, not as nested callbacks:
+
+```ts
+type LaunchPhase = "idle" | "syncing" | "launching";
+
+export function useSyncAndLaunchFlow({ onError }: { onError?: (msg: string, canForce: boolean) => void } = {}) {
+  const [phase, setPhase] = useState<LaunchPhase>("idle");
+
+  const launchMutation = useMutation({
+    mutationFn: (gameId: string) => launchGame(gameId),
+    onSuccess: () => setPhase("idle"),
+    onError: (err) => { setPhase("idle"); onError?.(String(err), false); },
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: (gameId: string) => restoreFromCloud(gameId),
+    onSuccess: (_data, gameId) => { setPhase("launching"); launchMutation.mutate(gameId); },
+    onError: (err) => { setPhase("idle"); onError?.(String(err), true /* canForce */); },
+  });
+
+  function start(game: GameEntry) {
+    // Skip restore when no Drive folder exists yet (nothing to pull down)
+    if (!game.gdriveFolderId) { setPhase("launching"); launchMutation.mutate(game.id); return; }
+    setPhase("syncing");
+    restoreMutation.mutate(game.id);
+  }
+
+  function forceLaunch(gameId: string) { setPhase("launching"); launchMutation.mutate(gameId); }
+
+  return { start, forceLaunch, phase, isPending: phase !== "idle" };
+}
+```
+
+**Rules for flow hooks:**
+- `canForce: true` is passed to `onError` only when the **sync** step fails (not launch) so the UI can offer a "Launch anyway" escape button.
+- Keep `start()` guard logic (`gdriveFolderId == null`) inside the hook — callers just call `start(game)`.
 
 ---
 
@@ -314,6 +365,7 @@ export interface GameEntry {
   source: GameSource;               // "manual" | "emulator"
   savePath: string | null;
   exeName: string | null;           // game executable filename (e.g. "MyGame.exe"); used by process monitor
+  exePath: string | null;           // full exe path with %VAR% tokens (e.g. "%PROGRAMFILES%\\Steam\\game.exe"); used by launch_game
   trackChanges: boolean;
   autoSync: boolean;
   lastLocalModified: string | null; // ISO 8601
