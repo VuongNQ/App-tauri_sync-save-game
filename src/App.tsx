@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { HashRouter, Routes, Route, Navigate } from "react-router";
@@ -6,6 +6,7 @@ import { HashRouter, Routes, Route, Navigate } from "react-router";
 import { AppLayout } from "./components/AppLayout";
 import { AuthGuard } from "./components/AuthGuard";
 import { AUTH_STATUS_KEY, DASHBOARD_KEY, gamePlayingKey } from "./queries/keys";
+import { useAuthStatusQuery, useSyncLibraryFromCloudMutation } from "./queries";
 import { DashboardPage } from "./pages/DashboardPage";
 import { GameDetailPage } from "./pages/GameDetailPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -15,6 +16,7 @@ import "./App.css";
 
 export function App() {
   useAuthStatusCallbacks();
+  useStartupFirestoreSync();
 
   return (
     <HashRouter>
@@ -64,6 +66,11 @@ function useAuthStatusCallbacks() {
       void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
     });
 
+    // Refresh dashboard after any background or watcher-triggered sync completes.
+    const unlistenSyncCompletedPromise = listen("sync-completed", () => {
+      void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
+    });
+
     const syncAuthStatus = () => {
       void queryClient.invalidateQueries({ queryKey: AUTH_STATUS_KEY });
     };
@@ -84,7 +91,23 @@ function useAuthStatusCallbacks() {
       void unlistenRestorePromise.then((unlisten) => unlisten());
       void unlistenPostLoginSyncPromise.then((unlisten) => unlisten());
       void unlistenSyncPendingPromise.then((unlisten) => unlisten());
+      void unlistenSyncCompletedPromise.then((unlisten) => unlisten());
       void unlistenGameStatusPromise.then((unlisten) => unlisten());
     };
   }, [queryClient]);
+}
+
+function useStartupFirestoreSync() {
+  const { data: authStatus } = useAuthStatusQuery();
+  const { mutate } = useSyncLibraryFromCloudMutation();
+  const hasRun = useRef(false);
+
+  useEffect(() => {
+    if (authStatus?.authenticated && !hasRun.current) {
+      hasRun.current = true;
+      mutate();
+    }
+    // mutate is stable; hasRun is a ref — omit from deps intentionally
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authStatus?.authenticated]);
 }

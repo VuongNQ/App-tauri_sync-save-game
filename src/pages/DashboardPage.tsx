@@ -1,8 +1,9 @@
 import { AddGameCard } from "../components/AddGameCard";
 import { GamesList } from "../components/GamesList";
 import { HeroCard } from "../components/HeroCard";
-import { CARD, EYEBROW } from "../components/styles";
+import { BTN, CARD, EYEBROW } from "../components/styles";
 import { useDashboardQuery, useValidatePathsQuery } from "../queries";
+import { useSyncLibraryFromCloudMutation } from "../queries/sync";
 import { msg } from "../utils";
 
 function DashboardSkeleton() {
@@ -51,6 +52,7 @@ function DashboardSkeleton() {
 export function DashboardPage() {
   const dashboardQuery = useDashboardQuery();
   const validateQuery = useValidatePathsQuery();
+  const refreshMutation = useSyncLibraryFromCloudMutation();
   const games = dashboardQuery.data?.games ?? [];
 
   const invalidGameIds = new Set(
@@ -71,6 +73,29 @@ export function DashboardPage() {
           <p className={EYEBROW}>Home</p>
           <h2 className="m-0">Your game library</h2>
         </div>
+        <button
+          className={`${BTN} mt-1 p-2 rounded-xl text-[#9aa8c7] hover:text-[#c7d3f7] hover:bg-[rgba(165,185,255,0.08)]`}
+          title="Refresh from cloud"
+          disabled={refreshMutation.isPending}
+          onClick={() => refreshMutation.mutate()}
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={refreshMutation.isPending ? "animate-spin" : undefined}
+          >
+            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+            <path d="M3 3v5h5" />
+            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+            <path d="M16 16h5v5" />
+          </svg>
+        </button>
       </div>
 
       {/* Error */}
