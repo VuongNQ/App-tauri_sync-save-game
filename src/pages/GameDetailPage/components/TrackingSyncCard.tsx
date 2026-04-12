@@ -1,8 +1,17 @@
 // ── TrackingSyncCard ──────────────────────────────────────────────────────────
 
-import { CARD, TOGGLE_THUMB_OFF, TOGGLE_THUMB_ON, TOGGLE_TRACK_OFF, TOGGLE_TRACK_ON } from "../../components/styles";
-import { useToggleAutoSyncMutation, useToggleTrackChangesMutation } from "../../queries";
-import { msg } from "../../utils";
+import {
+  CARD,
+  TOGGLE_THUMB_OFF,
+  TOGGLE_THUMB_ON,
+  TOGGLE_TRACK_OFF,
+  TOGGLE_TRACK_ON,
+} from "@/components/styles";
+import {
+  useToggleAutoSyncMutation,
+  useToggleTrackChangesMutation,
+} from "@/queries";
+import { msg } from "@/utils";
 
 interface TrackingSyncCardProps {
   gameId: string;
@@ -85,7 +94,8 @@ function TrackingSyncCard({
             </span>
             {trackChanges && !exeName && (
               <span className="text-xs text-[#ffd5a0] mt-1">
-                Open settings and enter the game’s .exe name to activate process tracking.
+                Open settings and enter the game’s .exe name to activate process
+                tracking.
               </span>
             )}
           </div>

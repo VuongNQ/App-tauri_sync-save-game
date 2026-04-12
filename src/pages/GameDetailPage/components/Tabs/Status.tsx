@@ -15,7 +15,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
 import { useParams } from "react-router";
-import { useRestoreFromDriveFlow } from "../hooks";
+import { useRestoreFromDriveFlow } from "../../hooks";
 import { SaveInfoPanel, SyncResultPanel } from "../SupportUI";
 import SyncConflictModal from "../SyncConflictModal";
 import TrackingSyncCard from "../TrackingSyncCard";

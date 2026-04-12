@@ -1,9 +1,9 @@
 // ── SyncConflictModal ─────────────────────────────────────────────────────────
 
+import { EYEBROW, GHOST_BTN, MUTED, PRIMARY_BTN } from "@/components/styles";
+import { SyncStructureDiff } from "@/types/dashboard";
 import { useState } from "react";
-import { SyncStructureDiff } from "../../types/dashboard";
-import { EYEBROW, GHOST_BTN, MUTED, PRIMARY_BTN } from "../../components/styles";
-import { SyncMethod } from "./hooks";
+import { SyncMethod } from "../hooks";
 
 interface SyncConflictModalProps {
   open: boolean;

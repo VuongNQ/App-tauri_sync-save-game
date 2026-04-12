@@ -1,9 +1,9 @@
 // ── Co-located components ─────────────────────────────────────────────────────
 
-import { SaveFileTree } from "../../components/SaveFileTree";
-import { EYEBROW, MUTED } from "../../components/styles";
-import { SaveInfo } from "../../types/dashboard";
-import { formatBytes, formatLocalTime } from "../../utils";
+import { SaveFileTree } from "@/components/SaveFileTree";
+import { EYEBROW, MUTED } from "@/components/styles";
+import { SaveInfo } from "@/types/dashboard";
+import { formatBytes, formatLocalTime } from "@/utils";
 
 export function SaveInfoPanel({
   info,
@@ -49,23 +49,23 @@ export function SaveInfoPanel({
               title="Refresh local save info"
               className="p-1 rounded-lg cursor-pointer text-[#9aa8c7] hover:text-white hover:bg-white/10 transition-colors disabled:opacity-40"
             >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className={isRefreshing ? "animate-spin" : ""}
-            >
-              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-              <path d="M21 3v5h-5" />
-              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-              <path d="M8 16H3v5" />
-            </svg>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={isRefreshing ? "animate-spin" : ""}
+              >
+                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                <path d="M21 3v5h-5" />
+                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                <path d="M8 16H3v5" />
+              </svg>
             </button>
           )}
         </div>
@@ -81,7 +81,9 @@ export function SaveInfoPanel({
         </div>
         <div>
           <dt className="text-[#c7d3f7] text-sm">Last modified</dt>
-          <dd className={`${MUTED} m-0`}>{formatLocalTime(info.lastModified)}</dd>
+          <dd className={`${MUTED} m-0`}>
+            {formatLocalTime(info.lastModified)}
+          </dd>
         </div>
       </dl>
       {info.files.length > 0 && <SaveFileTree info={info} />}

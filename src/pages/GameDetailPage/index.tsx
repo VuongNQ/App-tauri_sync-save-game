@@ -6,8 +6,8 @@ import { msg } from "@/utils";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import Header from "./Header";
-import TabStatus from "./Tabs/Status";
+import Header from "./components/Header";
+import TabStatus from "./components/Tabs/Status";
 import { SyncGameMutation } from "@/queries/sync";
 
 type TabId = "status" | "config";
