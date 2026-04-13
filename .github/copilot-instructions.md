@@ -81,7 +81,7 @@ src-tauri/src/
 | `source` | `String` | `string` | One of: `"manual"`, `"emulator"` |
 | `save_path` | `Option<String>` | `string \| null` | Save-game folder path, stored with `%VAR%` tokens (e.g. `%LOCALAPPDATA%\Game\Saves`); expanded to absolute at runtime |
 | `exe_name` | `Option<String>` | `string \| null` | Game executable filename (e.g. `"MyGame.exe"`); used by the process monitor to detect when the game is running |
-| `exe_path` | `Option<String>` | `string \| null` | Full path to the game executable (e.g. `%PROGRAMFILES%\Steam\game.exe`); used by the `launch_game` command to start the game directly from the app |
+| `exe_path` | `Option<String>` | `string \| null` | Full path to the game executable (e.g. `%PROGRAMFILES%\Steam\game.exe`); used by the `launch_game` command. **LOCAL-ONLY — never synced to Firestore or Drive; stripped to `None` before any cloud write; restored from local state after any cloud-to-local overwrite.** |
 | `track_changes` | `bool` | `boolean` | Monitor game process and sync on exit (default `false`) |
 | `auto_sync` | `bool` | `boolean` | Automatically sync on change detection (default `false`) |
 | `last_local_modified` | `Option<String>` | `string \| null` | ISO 8601 timestamp of last known local save modification |
@@ -218,7 +218,8 @@ pub struct StoredState {
   - Snapshot tracked games → refresh process list (Windows-only `#[cfg]`) → diff `was_playing` vs `is_now_playing` per exe.
   - On **game start**: emit `"game-status-changed"` `{ gameId, status: "playing" }`.
   - On **game exit**: emit `"game-status-changed"` `{ gameId, status: "idle" }` → check `auto_sync` → `try_lock()` per-game mutex → `sync::sync_game()` or emit `"game-sync-pending"`.
-- `init_watchers()` is called at app startup; calls `start_tracking` for all eligible games and then `start_poll_thread`.
+- `init_watchers()` is called at app startup. For each game with `track_changes == true`: if `exe_path` expands to a real file on this machine (`Path::is_file()`), **skip startup registration** — the watcher is armed on-demand when the user clicks Play. Only games without a valid local `exe_path` register at startup.
+- `arm_on_launch(app, game_id, exe_name)` — called from `launch_game` command after successful `open_path()`; guards: `track_changes == true && exe_name` non-empty. Idempotent (calls `start_tracking` which handles duplicates).
 - Process list refresh is wrapped in `#[cfg(target_os = "windows")]` — non-Windows is a safe no-op.
 
 ---
@@ -281,16 +282,17 @@ Save paths are stored with Windows environment-variable tokens instead of hardco
 - Converts an absolute path back to a portable token path (e.g. `C:\Program Files\Steam\game.exe` → `%PROGRAMFILES%\Steam\game.exe`).
 - Called immediately after a file-picker returns a path so the tokenised form is stored and displayed.
 - Frontend wrapper: `contractPath(path: string): Promise<string>` in `src/services/tauri.ts`.
-- Used by both `ExePathSection` (game executable picker) and `useSavePathForm.handleBrowse()` (save-folder picker) so stored paths are always portable.
+- Used by both `GameExecutableSection` (game executable picker, inside `GameSettingsForm`) and `useSavePathForm.handleBrowse()` (save-folder picker) so stored paths are always portable.
 
 ### `launch_game` Tauri command
 - Loads `GameEntry.exe_path` from state, expands env-var tokens via `expand_env_vars`, then opens the executable via `app.opener().open_path()`.
+- After a successful launch, calls `watcher::arm_on_launch()` if `track_changes == true` and `exe_name` is set — arming the process watcher on-demand.
 - Requires `tauri-plugin-opener` with capability `opener:allow-open-path { path: "**" }`.
 
 ### Frontend rule
 In `useSavePathForm.handleBrowse()`: if `game.savePath` contains `%`, call `expandSavePath()` before extracting the parent directory for the folder-picker `defaultPath`.
 
-In `ExePathSection.handleBrowse()` (game settings form): after the file-picker returns an absolute `.exe` path, call `contractPath()` and store the result — never store raw absolute paths.
+In `GameExecutableSection.handleBrowse()` (game settings form): after the file-picker returns an absolute `.exe` path, call `contractPath()` and store the result — never store raw absolute paths.
 
 ---
 

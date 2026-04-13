@@ -176,9 +176,42 @@ appDataFolder/
 | Function | Direction | Status |
 |----------|-----------|--------|
 | `sync_library_to_cloud(app)` | Local → Cloud | **Dead code** — replaced by Firestore |
-| `fetch_library_from_cloud(app)` | Cloud → Local | Kept — used by migration path in `settings::fetch_all_from_firestore` |
+| `fetch_library_from_cloud(app)` | Cloud → Local | Kept — migration path in `settings::fetch_all_from_firestore` |
 | `sync_settings_to_cloud(app)` | Local → Cloud | **Dead code** — replaced by Firestore |
-| `fetch_settings_from_cloud(app)` | Cloud → Local | Kept — used by migration path in `settings::fetch_all_from_firestore` |
+| `fetch_settings_from_cloud(app)` | Cloud → Local | Kept — migration path in `settings::fetch_all_from_firestore` |
+
+### exe_path is LOCAL-ONLY — Strip Before All Cloud Writes
+
+`GameEntry.exe_path` is a device-specific absolute path (with `%VAR%` tokens). It must **never** be serialised to Firestore or Google Drive, because the path is meaningless (or missing entirely) on other machines.
+
+**Rule:** Any code that serialises a `GameEntry` for cloud upload must replace `exe_path` with `None` first.
+
+```rust
+// ✅ Required pattern — strip exe_path before cloud write
+let cloud_game = GameEntry { exe_path: None, ..game.clone() };
+```
+
+Apply this pattern in:
+- `firestore::save_game()` — before PATCH to Firestore
+- `gdrive::sync_library_to_cloud()` — before writing `library.json`
+
+**Rule:** Any code that overwrites local state from cloud data must restore the local `exe_path` values after the overwrite.
+
+```rust
+// ✅ Required pattern — preserve local exe_path after cloud-to-local overwrite
+let local_exe_paths: HashMap<String, Option<String>> =
+    existing.games.iter().map(|g| (g.id.clone(), g.exe_path.clone())).collect();
+// ... overwrite games from cloud ...
+for g in &mut state.games {
+    if let Some(local_path) = local_exe_paths.get(&g.id) {
+        g.exe_path = local_path.clone();
+    }
+}
+```
+
+Apply this pattern in:
+- `settings::fetch_all_from_firestore()` — after loading games from Firestore
+- `gdrive::fetch_library_from_cloud()` — after loading games from Drive `library.json`
 
 ### Common Drive Operations
 

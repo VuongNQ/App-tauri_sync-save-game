@@ -333,10 +333,43 @@ Content-Type: application/octet-stream
 
 | Function | When |
 |----------|------|
-| `init_watchers(app)` | App startup — calls `start_tracking` for every game with `track_changes == true` and a non-empty `exe_name` |
-| `start_tracking(game_id, exe_name)` | User enables tracking toggle (and `exe_name` is set) |
+| `init_watchers(app)` | App startup — calls `start_tracking` for games with `track_changes == true`, non-empty `exe_name`, AND **no valid local `exe_path`** (see guard below) |
+| `arm_on_launch(app, game_id, exe_name)` | Called from `launch_game` command after successful `open_path()` — guards: `track_changes == true && exe_name` non-empty |
+| `start_tracking(game_id, exe_name)` | User enables tracking toggle in Settings (and `exe_name` is set); also called by `arm_on_launch` |
 | `stop_tracking(game_id)` | User disables tracking toggle |
 | `handle_track_changes_toggle(app, game_id, enabled)` | Tauri command handler for `toggle_track_changes` |
+
+#### `init_watchers` — exe_path guard
+
+If a game has `exe_path` set **and** that path expands to a real file on the current machine (`Path::is_file()` after `expand_env_vars`), it is **skipped** in the startup registration loop. The process watcher is armed on-demand via `arm_on_launch` when the user clicks Play instead.
+
+Games **without** a valid local `exe_path` (field is `None`, or the expanded path doesn't exist) retain the ambient startup-registration behavior.
+
+```rust
+// init_watchers inner loop guard
+if let Some(raw_path) = &game.exe_path {
+    let expanded = settings::expand_env_vars(raw_path);
+    if std::path::Path::new(&expanded).is_file() {
+        // Skip: watcher will be armed on Play click instead
+        continue;
+    }
+}
+```
+
+#### `arm_on_launch` — idempotent arming on Play
+
+```rust
+pub fn arm_on_launch(app: &AppHandle, game_id: &str, exe_name: &str) {
+    let arc = app.state::<Arc<Mutex<WatcherManager>>>().inner().clone();
+    let Ok(mut manager) = arc.lock() else { return; };
+    manager.start_tracking(game_id, exe_name);
+    println!("[watcher] Armed '{game_id}' for exit tracking (launched via Play)");
+}
+```
+
+- `start_tracking` is idempotent — safe to call even if already tracked.
+- Armed games stay in `tracked_games` for the rest of the session (re-arming on every Play is harmless).
+- After game exits, auto-sync / `game-sync-pending` fires as normal.
 
 ### Poll Thread (`start_poll_thread`)
 

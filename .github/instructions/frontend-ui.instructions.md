@@ -301,6 +301,44 @@ export function useRestoreVersionBackupMutation() {
 }
 ```
 
+### Exe Path Validation Surfacing
+
+`validate_save_paths` returns `PathValidation[]` where each entry includes:
+
+```ts
+export interface PathValidation {
+  gameId: string;
+  valid: boolean;               // save folder exists on this machine
+  exePathValid: boolean | null; // null=exe_path not set, true=file found, false=file missing
+}
+```
+
+Three places consume `ValidatePathsQuery` data to surface exe validation:
+
+1. **`Header.tsx`** (GameDetailPage) — `canLaunch = !!game.exePath && exePathValid !== false`. Shows two distinct hints: "Set an exe path in Settings" / "⚠ Exe not found on this device".
+2. **`GameSettingsForm`** — `exePathValid` prop passed to `GameExecutableSection`; shows a red warning banner when `false`.
+3. **`DashboardPage` → `GamesList`** — `missingExeIds = new Set(validateQuery.data?.filter(v => v.exePathValid === false).map(v => v.gameId))` passed as a prop. `GamePlayButton` is disabled with red styling when `exeMissing === true`.
+
+```tsx
+// DashboardPage.tsx pattern
+const missingExeIds = new Set(
+  (validateQuery.data ?? []).filter(v => v.exePathValid === false).map(v => v.gameId)
+);
+<GamesList games={games} missingExeIds={missingExeIds} />
+
+// GamesList.tsx pattern
+const isExeMissing = missingExeIds?.has(g.id) ?? false;
+```
+
+### GameExecutableSection (GameSettingsForm)
+
+`ExeNameSection` and `ExePathSection` have been merged into a single `GameExecutableSection` component inside `GameSettingsForm.tsx`.
+
+- One Browse button fills `exePath` (via `contractPath()` after the file-picker) and **auto-fills `exeName`** from the basename.
+- `useWatch({ name: "exeName" })` drives a dynamic hint: "Watcher will track: **X**".
+- Accepts `exePathValid: boolean | null` prop; renders a red warning banner when `false`.
+- Help text for `exePath` notes: **"Saved locally only"** — not synced to cloud, since paths differ between devices.
+
 ### Hook Naming
 
 | Pattern | Example |
@@ -366,6 +404,7 @@ export interface GameEntry {
   savePath: string | null;
   exeName: string | null;           // game executable filename (e.g. "MyGame.exe"); used by process monitor
   exePath: string | null;           // full exe path with %VAR% tokens (e.g. "%PROGRAMFILES%\\Steam\\game.exe"); used by launch_game
+                                    // LOCAL-ONLY — stripped before any Firestore / Drive upload; never synced to cloud
   trackChanges: boolean;
   autoSync: boolean;
   lastLocalModified: string | null; // ISO 8601
