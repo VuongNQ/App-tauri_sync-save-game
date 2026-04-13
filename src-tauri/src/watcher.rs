@@ -238,6 +238,19 @@ pub fn init_watchers(app: &AppHandle) {
 
         for game in &state.games {
             if game.track_changes {
+                // If a valid exe_path is set for this machine, skip ambient startup registration.
+                // The watcher will be armed on-demand when the user clicks Play instead.
+                if let Some(raw_path) = &game.exe_path {
+                    let expanded = settings::expand_env_vars(raw_path);
+                    if std::path::Path::new(&expanded).is_file() {
+                        println!(
+                            "[watcher] Skipping startup tracking for '{}': valid exe_path found — will arm on Play",
+                            game.id
+                        );
+                        continue;
+                    }
+                }
+
                 match &game.exe_name {
                     Some(exe) if !exe.is_empty() => {
                         manager.start_tracking(&game.id, exe);
@@ -293,4 +306,19 @@ pub fn handle_track_changes_toggle(
     }
 
     Ok(())
+}
+
+// ── On-demand arming (Play button) ───────────────────────
+
+/// Arm process tracking for a game that was just launched via the Play button.
+/// Only called when `track_changes == true` and `exe_name` is set.
+/// This is idempotent — safe to call even if the game is already being tracked.
+pub fn arm_on_launch(app: &AppHandle, game_id: &str, exe_name: &str) {
+    let arc = app.state::<Arc<Mutex<WatcherManager>>>().inner().clone();
+    let Ok(mut manager) = arc.lock() else {
+        println!("[watcher] Failed to lock WatcherManager for arm_on_launch");
+        return;
+    };
+    manager.start_tracking(game_id, exe_name);
+    println!("[watcher] Armed '{game_id}' for exit tracking (launched via Play)");
 }

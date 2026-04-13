@@ -484,7 +484,20 @@ fn launch_game(app: tauri::AppHandle, game_id: String) -> Result<(), String> {
 
     app.opener()
         .open_path(&full_path, None::<&str>)
-        .map_err(|e| format!("Failed to launch game: {e}"))
+        .map_err(|e| format!("Failed to launch game: {e}"))?;
+
+    // Arm the process watcher if this game has tracking enabled and an exe_name.
+    // The watcher is armed here (on Play) rather than at startup for games with a
+    // valid local exe_path, so we don't poll unnecessarily on other devices.
+    if game.track_changes {
+        if let Some(exe) = &game.exe_name {
+            if !exe.is_empty() {
+                watcher::arm_on_launch(&app, &game_id, exe);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 // ── Watcher commands ──────────────────────────────────────
