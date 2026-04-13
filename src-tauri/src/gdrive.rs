@@ -884,7 +884,13 @@ pub fn sync_library_to_cloud(app: &AppHandle) -> Result<(), String> {
         }
     }
 
-    let json_bytes = serde_json::to_vec_pretty(&state.games)
+    // Strip exe_path before uploading — it is device-specific and must not be synced.
+    let cloud_games: Vec<crate::models::GameEntry> = state
+        .games
+        .iter()
+        .map(|g| crate::models::GameEntry { exe_path: None, ..g.clone() })
+        .collect();
+    let json_bytes = serde_json::to_vec_pretty(&cloud_games)
         .map_err(|e| format!("Cannot serialize games: {e}"))?;
 
     let uploaded = upload_json_to_folder(
@@ -919,11 +925,22 @@ pub fn fetch_library_from_cloud(app: &AppHandle) -> Result<bool, String> {
     };
 
     let json = download_json_from_drive(app, &file.id)?;
-    let games: Vec<GameEntry> =
+    let cloud_games: Vec<GameEntry> =
         serde_json::from_str(&json).map_err(|e| format!("Parse library.json: {e}"))?;
 
     let mut state = settings::load_state(app)?;
-    state.games = games;
+    // Preserve local-only exe_path (device-specific) before overwriting game list.
+    let local_exe_paths: std::collections::HashMap<String, Option<String>> = state
+        .games
+        .iter()
+        .map(|g| (g.id.clone(), g.exe_path.clone()))
+        .collect();
+    state.games = cloud_games;
+    for game in &mut state.games {
+        if let Some(local_path) = local_exe_paths.get(&game.id) {
+            game.exe_path = local_path.clone();
+        }
+    }
     if let Some(modified) = file.modified_time {
         state.last_cloud_library_modified = Some(modified);
     }

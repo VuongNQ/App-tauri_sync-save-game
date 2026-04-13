@@ -331,7 +331,10 @@ pub struct DriveVersionBackup {
 #[serde(rename_all = "camelCase")]
 pub struct PathValidation {
     pub game_id: String,
+    /// Whether the configured save folder exists on this machine.
     pub valid: bool,
+    /// `None` = no exe_path configured; `Some(true)` = file exists; `Some(false)` = set but missing.
+    pub exe_path_valid: Option<bool>,
 }
 
 // ── Persistence ───────────────────────────────────────────

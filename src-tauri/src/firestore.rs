@@ -182,8 +182,11 @@ fn extract_doc_fields(doc: &Value) -> Value {
 // ── Game CRUD ─────────────────────────────────────────────
 
 /// Write (upsert) a `GameEntry` to Firestore at `users/{user_id}/games/{game_id}`.
+/// `exe_path` is intentionally stripped — it is local-only (differs per device).
 pub fn save_game(app: &AppHandle, user_id: &str, game: &GameEntry) -> Result<(), String> {
-    let game_val = serde_json::to_value(game)
+    // exe_path is device-specific and must not be synced to the cloud.
+    let cloud_game = GameEntry { exe_path: None, ..game.clone() };
+    let game_val = serde_json::to_value(&cloud_game)
         .map_err(|e| format!("Serialize GameEntry: {e}"))?;
 
     let fields = match game_val {

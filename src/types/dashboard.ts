@@ -111,7 +111,10 @@ export interface SyncResult {
 
 export interface PathValidation {
   gameId: string;
+  /** Whether the configured save folder exists on this machine. */
   valid: boolean;
+  /** null = exe_path not configured; true = file exists; false = configured but not found on this machine. */
+  exePathValid: boolean | null;
 }
 
 // ── Drive File Management ─────────────────────────────────

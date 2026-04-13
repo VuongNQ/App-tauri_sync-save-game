@@ -1,5 +1,5 @@
 import { CARD, EYEBROW, GHOST_BTN, PRIMARY_BTN, SOFT_BADGE, SOURCE_BADGE } from "@/components/styles";
-import { DashboardQuery } from "@/queries/dashboard";
+import { DashboardQuery, ValidatePathsQuery } from "@/queries/dashboard";
 import { useSyncAndLaunchFlow } from "@/queries/detail";
 import { formatBytes, formatLocalTime, toImgSrc } from "@/utils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -12,6 +12,11 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
   const queryClient = useQueryClient();
 
   const game = queryClient.getQueryData(DashboardQuery.queryKey)?.games.find((g) => g.id === id);
+
+  const validateQuery = queryClient.getQueryData(ValidatePathsQuery.queryKey);
+  const exeValidation = validateQuery?.find((v) => v.gameId === id);
+  // exePathValid: null = not set, true = ok, false = set but file not found
+  const exePathValid = exeValidation?.exePathValid ?? null;
 
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [canForceAfterError, setCanForceAfterError] = useState(false);
@@ -27,7 +32,8 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
 
   if (!game) return null;
 
-  const canLaunch = !!game.exePath;
+  // Can only launch if exe_path is set AND validated as present on this machine.
+  const canLaunch = !!game.exePath && exePathValid !== false;
 
   function handlePlay() {
     setLaunchError(null);
@@ -84,17 +90,24 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
             className={`${PRIMARY_BTN} w-auto px-6`}
             disabled={!canLaunch || flow.isPending}
             title={
-              canLaunch
-                ? "Sync saves from Drive then launch the game"
-                : "Set an executable path in Settings to enable launching"
+              !game.exePath
+                ? "Set an executable path in Settings to enable launching"
+                : exePathValid === false
+                  ? "Executable not found on this machine — update the path in Settings"
+                  : "Sync saves from Drive then launch the game"
             }
             onClick={handlePlay}
           >
             {playLabel}
           </button>
-          {!canLaunch && (
+          {!game.exePath && (
             <span className="text-xs text-[#9aa8c7] text-right max-w-[140px]">
               Set an exe path in Settings
+            </span>
+          )}
+          {game.exePath && exePathValid === false && (
+            <span className="text-xs text-[#ff9e9e] text-right max-w-[160px]">
+              ⚠ Exe not found on this device
             </span>
           )}
           {launchError && (

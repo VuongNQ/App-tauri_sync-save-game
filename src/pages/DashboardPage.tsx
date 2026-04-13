@@ -61,6 +61,13 @@ export function DashboardPage() {
       .map((v) => v.gameId),
   );
 
+  // exePathValid === false means exe_path is set but the file doesn't exist on this machine.
+  const missingExeIds = new Set(
+    (validateQuery.data ?? [])
+      .filter((v) => v.exePathValid === false)
+      .map((v) => v.gameId),
+  );
+
   if (dashboardQuery.isLoading) {
     return <DashboardSkeleton />;
   }
@@ -112,7 +119,7 @@ export function DashboardPage() {
       </div>
 
       {/* Game list */}
-      <GamesList games={games} invalidGameIds={invalidGameIds} />
+      <GamesList games={games} invalidGameIds={invalidGameIds} missingExeIds={missingExeIds} />
     </>
   );
 }

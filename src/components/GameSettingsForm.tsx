@@ -95,6 +95,10 @@ export function GameSettingsForm({
     gameSettings != null &&
     (validateQuery ?? []).some((v) => v.gameId === gameSettings.id && !v.valid);
 
+  // exePathValid: null = not set, true = ok, false = set but file not found on this machine.
+  const exePathValid =
+    (validateQuery ?? []).find((v) => v.gameId === gameSettings?.id)?.exePathValid ?? null;
+
   const methods = useForm<GameSettingsFormValues>({
     defaultValues: {
       thumbnail: gameSettings?.thumbnail ?? "",
@@ -206,8 +210,7 @@ export function GameSettingsForm({
               isSyncing={isSyncing}
               isPathInvalid={isPathInvalid}
             />
-            <ExeNameSection />
-            <ExePathSection game={gameSettings} />
+            <GameExecutableSection game={gameSettings} exePathValid={exePathValid} />
             <SyncExclusionsSection game={gameSettings} />
             <div className="flex items-center gap-3 justify-end">
               {saveError && (
@@ -422,72 +425,22 @@ function SaveFolderSection({
   );
 }
 
-// ── Exe name section ──────────────────────────────────────────────────────────
+// ── Game executable section (unified path + process name) ────────────────────
 
-function ExeNameSection() {
+interface GameExecutableSectionProps {
+  game: GameEntry;
+  exePathValid: boolean | null;
+}
+
+function GameExecutableSection({ game, exePathValid }: GameExecutableSectionProps) {
   const {
     register,
     setValue,
+    control,
     formState: { errors },
   } = useFormContext<GameSettingsFormValues>();
 
-  async function handleBrowse() {
-    const p = await open({
-      multiple: false,
-      title: "Choose the game executable",
-      filters: [{ name: "Executable", extensions: ["exe"] }],
-    });
-    if (typeof p === "string") {
-      // Extract only the filename (e.g. "REANIMAL.exe") from the full path.
-      const filename = p.split(/[\\/]/).pop() ?? p;
-      setValue("exeName", filename, {
-        shouldDirty: true,
-        shouldValidate: true,
-      });
-    }
-  }
-
-  return (
-    <div className={CARD}>
-      <h3 className="m-0 mb-4 font-semibold">Game Executable</h3>
-      <div className={FORM_GRID}>
-        <label className={FORM_LABEL}>
-          <span className={LABEL_SPAN}>Executable name</span>
-          <div className={INPUT_ROW}>
-            <input
-              className={INPUT_CLS}
-              {...register("exeName")}
-              placeholder="e.g. REANIMAL.exe"
-            />
-            <button
-              type="button"
-              className={SECONDARY_BTN}
-              onClick={handleBrowse}
-            >
-              Browse
-            </button>
-          </div>
-          <span className={MUTED + " text-xs mt-1"}>
-            The process name to watch. Sync triggers automatically when this
-            process exits. Leave empty to disable process tracking.
-          </span>
-          {errors.exeName && (
-            <span className={FIELD_ERROR}>{errors.exeName.message}</span>
-          )}
-        </label>
-      </div>
-    </div>
-  );
-}
-
-// ── Exe path section ──────────────────────────────────────────────────────────
-
-interface ExePathSectionProps {
-  game: GameEntry;
-}
-
-function ExePathSection({ game }: ExePathSectionProps) {
-  const { register, setValue } = useFormContext<GameSettingsFormValues>();
+  const watchedExeName = useWatch({ control, name: "exeName" });
 
   async function handleBrowse() {
     let defaultPath: string | undefined;
@@ -500,26 +453,34 @@ function ExePathSection({ game }: ExePathSectionProps) {
     }
     const p = await open({
       multiple: false,
-      title: "Choose the game launch executable",
+      title: "Choose the game executable",
       defaultPath,
       filters: [{ name: "Executable", extensions: ["exe"] }],
     });
     if (typeof p === "string") {
-      // Immediately tokenize the absolute path for portability across devices
-      // (e.g. C:\Program Files\Steam\... → %PROGRAMFILES%\Steam\...).
-      // Rust does the same via normalize_optional_path on save, but showing
-      // the token form right away makes portability visible to the user.
+      // Tokenize the absolute path for portability (e.g. C:\Program Files\... → %PROGRAMFILES%\...).
       const portable = await contractPath(p);
       setValue("exePath", portable, { shouldDirty: true, shouldValidate: true });
+      // Auto-fill the process name from the basename; user can override for launcher vs. process cases.
+      const filename = p.split(/[\\/]/).pop() ?? p;
+      setValue("exeName", filename, { shouldDirty: true, shouldValidate: true });
     }
   }
 
   return (
     <div className={CARD}>
-      <h3 className="m-0 mb-4 font-semibold">Launch Path</h3>
+      <h3 className="m-0 mb-4 font-semibold">Game Executable</h3>
+
+      {exePathValid === false && (
+        <div className="mb-4 p-3 rounded-2xl border border-[rgba(255,100,100,0.3)] bg-[rgba(62,18,22,0.5)] text-[#ff9e9e] text-sm flex items-center gap-2">
+          <span>⚠</span> The configured executable was not found on this machine. Update the path below to enable the ▶ Play button.
+        </div>
+      )}
+
       <div className={FORM_GRID}>
+        {/* Row 1 — launch path */}
         <label className={FORM_LABEL}>
-          <span className={LABEL_SPAN}>Game executable path</span>
+          <span className={LABEL_SPAN}>Executable path</span>
           <div className={INPUT_ROW}>
             <input
               className={INPUT_CLS}
@@ -535,10 +496,33 @@ function ExePathSection({ game }: ExePathSectionProps) {
             </button>
           </div>
           <span className={MUTED + " text-xs mt-1"}>
-            Full path to the .exe used to launch the game. Enables the Play
-            button on the game detail page. Stored with env-var tokens (e.g.{" "}
-            <code>%PROGRAMFILES%</code>) for portability.
+            Full path to the .exe used to launch the game. Enables the ▶ Play
+            button. Stored with env-var tokens (e.g.{" "}
+            <code>%PROGRAMFILES%</code>) for portability.{" "}
+            <strong className="text-amber-400/80">Saved locally only</strong>{" "}
+            — not synced to the cloud, since paths differ between devices.
           </span>
+        </label>
+
+        {/* Row 2 — process name (auto-filled, user-editable) */}
+        <label className={FORM_LABEL}>
+          <span className={LABEL_SPAN}>Process name</span>
+          <input
+            className={INPUT_CLS}
+            {...register("exeName")}
+            placeholder="e.g. Game.exe"
+          />
+          <span className={MUTED + " text-xs mt-1"}>
+            {watchedExeName
+              ? <>
+                  Watcher will track:{" "}
+                  <strong className="text-white/80">{watchedExeName}</strong>
+                </>
+              : "Auto-filled from the path above. Edit if the launcher differs from the main process. Leave empty to disable tracking."}
+          </span>
+          {errors.exeName && (
+            <span className={FIELD_ERROR}>{errors.exeName.message}</span>
+          )}
         </label>
       </div>
     </div>

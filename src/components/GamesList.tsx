@@ -40,9 +40,10 @@ function LazyThumbnail({ src }: { src: string }) {
 interface Props {
   games: GameEntry[];
   invalidGameIds?: Set<string>;
+  missingExeIds?: Set<string>;
 }
 
-export function GamesList({ games, invalidGameIds }: Props) {
+export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
   const removeMutation = useRemoveGameMutation();
   const [removeTarget, setRemoveTarget] = useState<GameEntry | null>(null);
 
@@ -75,11 +76,12 @@ export function GamesList({ games, invalidGameIds }: Props) {
           games.map((g) => {
             const badge = SOURCE_BADGE[g.source] ?? SOFT_BADGE;
             const isInvalid = invalidGameIds?.has(g.id) ?? false;
+            const isExeMissing = missingExeIds?.has(g.id) ?? false;
             return (
               <div
                 key={g.id}
                 className={`relative flex items-center gap-4 p-4 rounded-2xl bg-[rgba(10,16,31,0.72)] border transition-colors ${
-                  isInvalid
+                  isInvalid || isExeMissing
                     ? "border-[rgba(255,100,100,0.4)] hover:border-[rgba(255,100,100,0.6)]"
                     : "border-[rgba(154,177,255,0.08)] hover:border-[rgba(111,171,255,0.4)]"
                 }`}
@@ -112,6 +114,11 @@ export function GamesList({ games, invalidGameIds }: Props) {
                         <span>⚠</span> Save path not found
                       </p>
                     )}
+                    {isExeMissing && (
+                      <p className="m-0 text-xs text-[#ff9e9e] flex items-center gap-1">
+                        <span>⚠</span> Executable not found on this device
+                      </p>
+                    )}
                     {g.trackChanges && !g.exeName && (
                       <p className="m-0 text-xs text-[#ffd5a0] flex items-center gap-1">
                         <span>⚠</span> No executable set — process tracking inactive
@@ -127,7 +134,7 @@ export function GamesList({ games, invalidGameIds }: Props) {
                 </Link>
 
                 {/* Play button */}
-                <GamePlayButton game={g} />
+                <GamePlayButton game={g} exeMissing={isExeMissing} />
 
                 {/* Remove button */}
                 <button
@@ -158,7 +165,7 @@ export function GamesList({ games, invalidGameIds }: Props) {
 
 // ── GamePlayButton ────────────────────────────────────────────────────────────
 
-function GamePlayButton({ game }: { game: GameEntry }) {
+function GamePlayButton({ game, exeMissing }: { game: GameEntry; exeMissing: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [canForce, setCanForce] = useState(false);
 
@@ -171,6 +178,8 @@ function GamePlayButton({ game }: { game: GameEntry }) {
 
   if (!game.exePath) return null;
 
+  const isDisabled = flow.isPending || exeMissing;
+
   const label =
     flow.phase === "syncing"
       ? "⏳"
@@ -178,8 +187,9 @@ function GamePlayButton({ game }: { game: GameEntry }) {
         ? "▶"
         : "▶";
 
-  const title =
-    flow.phase === "syncing"
+  const title = exeMissing
+    ? "Executable not found on this device — update path in Settings"
+    : flow.phase === "syncing"
       ? "Syncing saves…"
       : flow.phase === "launching"
         ? "Launching…"
@@ -190,8 +200,12 @@ function GamePlayButton({ game }: { game: GameEntry }) {
       <button
         type="button"
         title={title}
-        disabled={flow.isPending}
-        className={`${BTN} w-9 h-9 grid place-items-center rounded-xl border text-[#7dc9ff] hover:text-[#05111f] hover:bg-[rgba(122,180,255,0.85)] hover:border-[rgba(122,180,255,0.6)] border-[rgba(122,180,255,0.25)] bg-[rgba(122,180,255,0.08)] transition-colors`}
+        disabled={isDisabled}
+        className={`${BTN} w-9 h-9 grid place-items-center rounded-xl border transition-colors ${
+          exeMissing
+            ? "text-[#ff9e9e] border-[rgba(255,100,100,0.25)] bg-[rgba(255,80,80,0.08)] cursor-not-allowed opacity-60"
+            : "text-[#7dc9ff] hover:text-[#05111f] hover:bg-[rgba(122,180,255,0.85)] hover:border-[rgba(122,180,255,0.6)] border-[rgba(122,180,255,0.25)] bg-[rgba(122,180,255,0.08)]"
+        }`}
         onClick={(e) => {
           e.preventDefault();
           setError(null);

@@ -208,9 +208,20 @@ pub fn fetch_all_from_firestore(app: &AppHandle) -> Result<bool, String> {
         }
     }
 
-    // Apply cloud data to local state.
+    // Apply cloud data to local state, preserving local-only exe_path per machine.
     let mut state = load_state(app)?;
+    // Collect local exe_paths before overwriting — they differ per device and are never synced.
+    let local_exe_paths: std::collections::HashMap<String, Option<String>> = state
+        .games
+        .iter()
+        .map(|g| (g.id.clone(), g.exe_path.clone()))
+        .collect();
     state.games = firestore_games;
+    for game in &mut state.games {
+        if let Some(local_path) = local_exe_paths.get(&game.id) {
+            game.exe_path = local_path.clone();
+        }
+    }
 
     if let Ok(Some(cloud_settings)) = firestore::load_settings(app, &user_id) {
         state.settings = cloud_settings;
@@ -397,9 +408,15 @@ pub fn validate_save_paths(app: &AppHandle) -> Result<Vec<PathValidation>, Strin
                 }
                 None => true, // no path set yet — not an error
             };
+            // Validate exe_path: check the file actually exists on this device.
+            let exe_path_valid = g.exe_path.as_deref().map(|raw| {
+                let expanded = expand_env_vars(raw);
+                std::path::Path::new(&expanded).is_file()
+            });
             PathValidation {
                 game_id: g.id.clone(),
                 valid,
+                exe_path_valid,
             }
         })
         .collect();
