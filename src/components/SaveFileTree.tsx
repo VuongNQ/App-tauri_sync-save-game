@@ -26,21 +26,13 @@ export type SaveTreeItem = SaveTreeLeaf | SaveTreeDir;
 export function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
-  const i = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1,
-  );
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const val = bytes / Math.pow(1024, i);
   return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 export function buildSaveTree(files: SaveFileInfo[]): SaveTreeItem[] {
-  function insert(
-    nodes: SaveTreeItem[],
-    parts: string[],
-    file: SaveFileInfo,
-    parentPath: string,
-  ): void {
+  function insert(nodes: SaveTreeItem[], parts: string[], file: SaveFileInfo, parentPath: string): void {
     if (parts.length === 1) {
       nodes.push({
         kind: "file",
@@ -52,9 +44,7 @@ export function buildSaveTree(files: SaveFileInfo[]): SaveTreeItem[] {
     }
     const dirName = parts[0];
     const dirPath = parentPath ? `${parentPath}/${dirName}` : dirName;
-    let dir = nodes.find(
-      (n): n is SaveTreeDir => n.kind === "folder" && n.name === dirName,
-    );
+    let dir = nodes.find((n): n is SaveTreeDir => n.kind === "folder" && n.name === dirName);
     if (!dir) {
       dir = {
         kind: "folder",
@@ -71,10 +61,7 @@ export function buildSaveTree(files: SaveFileInfo[]): SaveTreeItem[] {
 
   const roots: SaveTreeItem[] = [];
   for (const file of files) {
-    const parts = file.relativePath
-      .replace(/\\/g, "/")
-      .split("/")
-      .filter(Boolean);
+    const parts = file.relativePath.replace(/\\/g, "/").split("/").filter(Boolean);
     insert(roots, parts, file, "");
   }
   return roots;
@@ -103,14 +90,7 @@ interface SaveTreeNodeProps {
   parentExcluded: boolean;
 }
 
-function SaveTreeNode({
-  node,
-  depth,
-  checkable,
-  excluded,
-  onToggle,
-  parentExcluded,
-}: SaveTreeNodeProps) {
+function SaveTreeNode({ node, depth, checkable, excluded, onToggle, parentExcluded }: SaveTreeNodeProps) {
   const [open, setOpen] = useState(false);
   const indent = depth * 14;
 
@@ -133,9 +113,7 @@ function SaveTreeNode({
               title={checked ? "Unexclude from sync" : "Exclude from sync"}
             />
           )}
-          {!checkable && (
-            <span className="text-[#9aa8c7] shrink-0 select-none">↳</span>
-          )}
+          {!checkable && <span className="text-[#9aa8c7] shrink-0 select-none">↳</span>}
           <span className="text-[#c7d3f7] truncate block">{node.name}</span>
         </div>
         <span className="shrink-0 text-[0.72rem] text-[#9aa8c7] bg-white/6 px-1.75 py-0.5 rounded-full whitespace-nowrap">
@@ -178,13 +156,9 @@ function SaveTreeNode({
               </span>
             </>
           ) : (
-            <span className="text-[#9aa8c7] shrink-0 w-3 text-center text-[0.6rem]">
-              {open ? "▼" : "►"}
-            </span>
+            <span className="text-[#9aa8c7] shrink-0 w-3 text-center text-[0.6rem]">{open ? "▼" : "►"}</span>
           )}
-          <span className="text-[#7dc9ff] font-medium truncate">
-            {node.name}/
-          </span>
+          <span className="text-[#7dc9ff] font-medium truncate">{node.name}/</span>
         </div>
         <span className="shrink-0 text-[0.72rem] text-[#9aa8c7] bg-white/6 px-1.75 py-0.5 rounded-full whitespace-nowrap">
           {formatBytes(node.totalSize)}
@@ -218,12 +192,7 @@ interface SaveFileTreeProps {
   onToggle?: (path: string, isFolder: boolean) => void;
 }
 
-export function SaveFileTree({
-  info,
-  checkable = false,
-  excluded = [],
-  onToggle = () => {},
-}: SaveFileTreeProps) {
+export function SaveFileTree({ info, checkable = false, excluded = [], onToggle = () => {} }: SaveFileTreeProps) {
   const [open, setOpen] = useState(false);
   const tree = buildSaveTree(info.files);
 
@@ -235,13 +204,8 @@ export function SaveFileTree({
         onClick={() => setOpen((o) => !o)}
       >
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[#9aa8c7] shrink-0 w-3 text-center text-[0.6rem]">
-            {open ? "▼" : "►"}
-          </span>
-          <span
-            className="text-[#7dc9ff] font-medium truncate"
-            title={info.savePath}
-          >
+          <span className="text-[#9aa8c7] shrink-0 w-3 text-center text-[0.6rem]">{open ? "▼" : "►"}</span>
+          <span className="text-[#7dc9ff] font-medium truncate" title={info.savePath}>
             {info.savePath}
           </span>
         </div>

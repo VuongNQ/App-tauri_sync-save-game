@@ -1,21 +1,13 @@
 // ── useRestoreFromDriveFlow ───────────────────────────────────────────────────
 
 import { useState } from "react";
-import {
-  useCheckSyncDiffMutation,
-  usePushToCloudMutation,
-  useRestoreFromCloudMutation,
-  useSyncGameMutation,
-} from "../../queries";
+import { useCheckSyncDiffMutation, usePushToCloudMutation, useRestoreFromCloudMutation, useSyncGameMutation } from "../../queries";
 import { SyncStructureDiff } from "../../types/dashboard";
 import { msg } from "../../utils";
 
 export type SyncMethod = "auto" | "restore" | "push";
 
-export function useRestoreFromDriveFlow(
-  gameId: string,
-  setToast: (t: { message: string; type: "success" | "error" } | null) => void,
-) {
+export function useRestoreFromDriveFlow(gameId: string, setToast: (t: { message: string; type: "success" | "error" } | null) => void) {
   const [showModal, setShowModal] = useState(false);
   const [syncDiff, setSyncDiff] = useState<SyncStructureDiff | null>(null);
 
@@ -25,10 +17,7 @@ export function useRestoreFromDriveFlow(
   const syncMutation = useSyncGameMutation(gameId);
 
   const isChecking = checkDiffMutation.isPending;
-  const isExecuting =
-    restoreMutation.isPending ||
-    pushMutation.isPending ||
-    syncMutation.isPending;
+  const isExecuting = restoreMutation.isPending || pushMutation.isPending || syncMutation.isPending;
 
   function start() {
     checkDiffMutation.mutate(gameId, {
@@ -42,8 +31,7 @@ export function useRestoreFromDriveFlow(
         }
         if (!diff.hasDiff) {
           setToast({
-            message:
-              "Drive and local are already identical — nothing to restore.",
+            message: "Drive and local are already identical — nothing to restore.",
             type: "success",
           });
           return;
@@ -76,8 +64,7 @@ export function useRestoreFromDriveFlow(
               type: "success",
             });
         },
-        onError: (err) =>
-          setToast({ message: msg(err, "Sync failed."), type: "error" }),
+        onError: (err) => setToast({ message: msg(err, "Sync failed."), type: "error" }),
       });
     } else if (method === "restore") {
       restoreMutation.mutate(gameId, {
@@ -89,8 +76,7 @@ export function useRestoreFromDriveFlow(
               type: "success",
             });
         },
-        onError: (err) =>
-          setToast({ message: msg(err, "Restore failed."), type: "error" }),
+        onError: (err) => setToast({ message: msg(err, "Restore failed."), type: "error" }),
       });
     } else {
       pushMutation.mutate(gameId, {

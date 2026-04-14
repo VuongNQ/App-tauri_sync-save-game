@@ -20,9 +20,7 @@ const TabSettings = () => {
 
   const [showRemoveModal, setShowRemoveModal] = useState(false);
 
-  const game = queryClient
-    .getQueryData(DashboardQuery.queryKey)
-    ?.games.find((g) => g.id === id);
+  const game = queryClient.getQueryData(DashboardQuery.queryKey)?.games.find((g) => g.id === id);
 
   const isSyncing =
     queryClient.isMutating({
@@ -47,11 +45,7 @@ const TabSettings = () => {
         >
           {removeMutation.isPending ? "Removing…" : "Remove game"}
         </button>
-        {removeMutation.isError && (
-          <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
-            {msg(removeMutation.error, "Unable to remove game.")}
-          </p>
-        )}
+        {removeMutation.isError && <p className="m-0 mt-3 text-sm text-[#ffd5d5]">{msg(removeMutation.error, "Unable to remove game.")}</p>}
       </div>
 
       <ConfirmModal

@@ -11,8 +11,7 @@ type TabId = "status" | "config";
 export function GameDetailPage() {
   const { id } = useParams<{ id: string }>();
 
-  const { data: dashboard, isLoading: isDashboardLoading } =
-    useDashboardQuery();
+  const { data: dashboard, isLoading: isDashboardLoading } = useDashboardQuery();
 
   const [activeTab, setActiveTab] = useState<TabId>("status");
 
@@ -97,10 +96,7 @@ function GameDetailSkeleton() {
         {/* Metadata grid */}
         <div className="grid gap-3.5 grid-cols-2 max-[720px]:grid-cols-1">
           {[0, 1, 2, 3, 4].map((i) => (
-            <div
-              key={i}
-              className="p-4.5 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]"
-            >
+            <div key={i} className="p-4.5 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]">
               <div className={`h-3 w-24 rounded-full mb-2 ${shimmer}`} />
               <div className={`h-4 w-36 ${shimmer}`} />
             </div>

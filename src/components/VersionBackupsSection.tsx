@@ -9,16 +9,7 @@ import {
 import type { DriveVersionBackup } from "../types/dashboard";
 import { msg } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
-import {
-  CARD,
-  DANGER_BTN,
-  EYEBROW,
-  GHOST_BTN,
-  INPUT_CLS,
-  MUTED,
-  PRIMARY_BTN,
-  SECONDARY_BTN,
-} from "./styles";
+import { CARD, DANGER_BTN, EYEBROW, GHOST_BTN, INPUT_CLS, MUTED, PRIMARY_BTN, SECONDARY_BTN } from "./styles";
 
 interface Props {
   gameId: string;
@@ -27,13 +18,7 @@ interface Props {
 export function VersionBackupsSection({ gameId }: Props) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const {
-    data: backups,
-    isLoading,
-    isError,
-    error,
-    refetch,
-  } = useVersionBackupsQuery(gameId, isOpen);
+  const { data: backups, isLoading, isError, error, refetch } = useVersionBackupsQuery(gameId, isOpen);
 
   const createMutation = useCreateVersionBackupMutation();
 
@@ -51,7 +36,7 @@ export function VersionBackupsSection({ gameId }: Props) {
           setLabelInput("");
         },
         onError: (err) => setCreateError(msg(err, "Failed to create backup.")),
-      },
+      }
     );
   }
 
@@ -67,9 +52,7 @@ export function VersionBackupsSection({ gameId }: Props) {
           <p className={EYEBROW}>Version backups</p>
           <h3 className="m-0 font-semibold">Save snapshots</h3>
         </div>
-        <span className="text-[#7dc9ff] text-lg shrink-0">
-          {isOpen ? "▲" : "▼"}
-        </span>
+        <span className="text-[#7dc9ff] text-lg shrink-0">{isOpen ? "▲" : "▼"}</span>
       </button>
 
       {isOpen && (
@@ -89,14 +72,9 @@ export function VersionBackupsSection({ gameId }: Props) {
             </button>
           ) : (
             <div className="rounded-2xl border border-[rgba(165,185,255,0.12)] bg-[rgba(9,14,28,0.75)] p-4 grid gap-3">
-              <p className="m-0 text-sm font-medium text-[#c7d3f7]">
-                New version backup
-              </p>
+              <p className="m-0 text-sm font-medium text-[#c7d3f7]">New version backup</p>
               <div>
-                <label
-                  htmlFor="backup-label"
-                  className="block text-xs text-[#9aa8c7] mb-1"
-                >
+                <label htmlFor="backup-label" className="block text-xs text-[#9aa8c7] mb-1">
                   Label <span className="italic">(optional)</span>
                 </label>
                 <input
@@ -113,9 +91,7 @@ export function VersionBackupsSection({ gameId }: Props) {
                   autoFocus
                 />
               </div>
-              {createError && (
-                <p className="m-0 text-xs text-[#ff9e9e]">{createError}</p>
-              )}
+              {createError && <p className="m-0 text-xs text-[#ff9e9e]">{createError}</p>}
               <div className="flex gap-3">
                 <button
                   type="button"
@@ -125,11 +101,7 @@ export function VersionBackupsSection({ gameId }: Props) {
                 >
                   {createMutation.isPending ? "Creating…" : "Create snapshot"}
                 </button>
-                <button
-                  type="button"
-                  className={`${GHOST_BTN} flex-1 text-sm`}
-                  onClick={() => setShowCreateForm(false)}
-                >
+                <button type="button" className={`${GHOST_BTN} flex-1 text-sm`} onClick={() => setShowCreateForm(false)}>
                   Cancel
                 </button>
               </div>
@@ -138,11 +110,7 @@ export function VersionBackupsSection({ gameId }: Props) {
 
           {/* Backup list */}
           {isLoading && <p className={`${MUTED} text-sm`}>Loading backups…</p>}
-          {isError && (
-            <p className="text-sm text-[#ff9e9e]">
-              {msg(error, "Failed to load backups.")}
-            </p>
-          )}
+          {isError && <p className="text-sm text-[#ff9e9e]">{msg(error, "Failed to load backups.")}</p>}
           {!isLoading && !isError && backups && (
             <>
               {backups.length === 0 ? (
@@ -150,19 +118,11 @@ export function VersionBackupsSection({ gameId }: Props) {
               ) : (
                 <ul className="list-none p-0 grid gap-2">
                   {backups.map((backup) => (
-                    <BackupRow
-                      key={backup.id}
-                      backup={backup}
-                      gameId={gameId}
-                    />
+                    <BackupRow key={backup.id} backup={backup} gameId={gameId} />
                   ))}
                 </ul>
               )}
-              <button
-                type="button"
-                className={`${SECONDARY_BTN} self-start text-sm`}
-                onClick={() => refetch()}
-              >
+              <button type="button" className={`${SECONDARY_BTN} self-start text-sm`} onClick={() => refetch()}>
                 Refresh
               </button>
             </>
@@ -224,28 +184,16 @@ function BackupRow({ backup, gameId }: BackupRowProps) {
 
         <div className="flex-1 min-w-0">
           {/* Timestamp */}
-          <p className="m-0 text-sm font-medium text-[#eef4ff] truncate">
-            {new Date(backup.createdTime).toLocaleString()}
-          </p>
+          <p className="m-0 text-sm font-medium text-[#eef4ff] truncate">{new Date(backup.createdTime).toLocaleString()}</p>
           {/* Label */}
-          {labelPart && (
-            <p className="m-0 mt-0.5 text-xs text-[#9aa8c7] truncate italic">
-              {labelPart.description}
-            </p>
-          )}
+          {labelPart && <p className="m-0 mt-0.5 text-xs text-[#9aa8c7] truncate italic">{labelPart.description}</p>}
           {/* Stats */}
           <p className="m-0 mt-1 text-xs text-[#7a8baa]">
-            {backup.totalFiles} {backup.totalFiles === 1 ? "file" : "files"} ·{" "}
-            {formatBytes(backup.totalSize)}
+            {backup.totalFiles} {backup.totalFiles === 1 ? "file" : "files"} · {formatBytes(backup.totalSize)}
           </p>
 
           {(restoreMutation.isError || deleteMutation.isError) && (
-            <p className="m-0 mt-1 text-xs text-[#ff9e9e]">
-              {msg(
-                restoreMutation.error ?? deleteMutation.error,
-                "Operation failed.",
-              )}
-            </p>
+            <p className="m-0 mt-1 text-xs text-[#ff9e9e]">{msg(restoreMutation.error ?? deleteMutation.error, "Operation failed.")}</p>
           )}
         </div>
 
@@ -305,9 +253,6 @@ function BackupRow({ backup, gameId }: BackupRowProps) {
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
-  const i = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1,
-  );
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }

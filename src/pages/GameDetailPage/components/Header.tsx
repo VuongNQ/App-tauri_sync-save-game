@@ -47,12 +47,7 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
     flow.forceLaunch(game!.id);
   }
 
-  const playLabel =
-    flow.phase === "syncing"
-      ? "Syncing saves…"
-      : flow.phase === "launching"
-        ? "Launching…"
-        : "▶ Play";
+  const playLabel = flow.phase === "syncing" ? "Syncing saves…" : flow.phase === "launching" ? "Launching…" : "▶ Play";
 
   return (
     <div className={CARD}>
@@ -60,15 +55,9 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
         {/* Thumbnail */}
         <div className="w-24 h-24 shrink-0 rounded-2xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
           {game.thumbnail ? (
-            <img
-              src={toImgSrc(game.thumbnail)}
-              alt={game.name}
-              className="w-full h-full object-cover"
-            />
+            <img src={toImgSrc(game.thumbnail)} alt={game.name} className="w-full h-full object-cover" />
           ) : (
-            <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-3xl">
-              🎮
-            </div>
+            <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-3xl">🎮</div>
           )}
         </div>
 
@@ -76,11 +65,7 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
           <p className={EYEBROW}>Game details</p>
           <h2 className="m-0">{game.name}</h2>
           <span className={sourceBadge}>{game.source}</span>
-          {game.description && (
-            <p className="m-0 text-sm text-[#9aa8c7] max-w-120 whitespace-pre-wrap">
-              {game.description}
-            </p>
-          )}
+          {game.description && <p className="m-0 text-sm text-[#9aa8c7] max-w-120 whitespace-pre-wrap">{game.description}</p>}
         </div>
 
         {/* Play button */}
@@ -100,27 +85,15 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
           >
             {playLabel}
           </button>
-          {!game.exePath && (
-            <span className="text-xs text-[#9aa8c7] text-right max-w-[140px]">
-              Set an exe path in Settings
-            </span>
-          )}
+          {!game.exePath && <span className="text-xs text-[#9aa8c7] text-right max-w-[140px]">Set an exe path in Settings</span>}
           {game.exePath && exePathValid === false && (
-            <span className="text-xs text-[#ff9e9e] text-right max-w-[160px]">
-              ⚠ Exe not found on this device
-            </span>
+            <span className="text-xs text-[#ff9e9e] text-right max-w-[160px]">⚠ Exe not found on this device</span>
           )}
           {launchError && (
             <div className="flex flex-col items-end gap-1.5 max-w-[220px]">
-              <span className="text-xs text-[#ff9e9e] text-right">
-                {launchError}
-              </span>
+              <span className="text-xs text-[#ff9e9e] text-right">{launchError}</span>
               {canForceAfterError && (
-                <button
-                  type="button"
-                  className={`${GHOST_BTN} text-xs min-h-8 px-3`}
-                  onClick={handleForceLaunch}
-                >
+                <button type="button" className={`${GHOST_BTN} text-xs min-h-8 px-3`} onClick={handleForceLaunch}>
                   Launch anyway
                 </button>
               )}
@@ -143,16 +116,10 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
           },
           {
             label: "Drive storage used",
-            value:
-              game.cloudStorageBytes != null
-                ? formatBytes(game.cloudStorageBytes)
-                : "Never synced",
+            value: game.cloudStorageBytes != null ? formatBytes(game.cloudStorageBytes) : "Never synced",
           },
         ].map(({ label, value }) => (
-          <div
-            key={label}
-            className="p-4.5 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]"
-          >
+          <div key={label} className="p-4.5 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]">
             <dt className="mb-2 text-[#c7d3f7] text-[0.92rem]">{label}</dt>
             <dd className="m-0 wrap-break-word text-[#9aa8c7]">{value}</dd>
           </div>
@@ -164,8 +131,7 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
         <div className="mt-4 px-4 py-3 rounded-2xl border border-[rgba(255,200,80,0.3)] bg-[rgba(62,45,12,0.55)] text-[#ffd5a0] text-sm flex items-center gap-2">
           <span>⚠</span>
           <span>
-            <strong>Process tracking is on but no executable is set.</strong>{" "}
-            Switch to the{" "}
+            <strong>Process tracking is on but no executable is set.</strong> Switch to the{" "}
             <button
               type="button"
               className="underline text-[#ffd5a0] bg-transparent border-0 p-0 cursor-pointer"

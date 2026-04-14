@@ -113,47 +113,34 @@ export const devDebug: GoogleDebugNamespace = {
 
   // ── Auth ────────────────────────────────────────────────
 
-  auth: () =>
-    call("checkAuthStatus()", checkAuthStatus),
+  auth: () => call("checkAuthStatus()", checkAuthStatus),
 
-  userInfo: () =>
-    call("getGoogleUserInfo()", getGoogleUserInfo),
+  userInfo: () => call("getGoogleUserInfo()", getGoogleUserInfo),
 
-  oauthCreds: () =>
-    call("getOAuthCredentials()", getOAuthCredentials),
+  oauthCreds: () => call("getOAuthCredentials()", getOAuthCredentials),
 
   // ── Dashboard ───────────────────────────────────────────
 
-  dashboard: () =>
-    call("loadDashboard()", loadDashboard),
+  dashboard: () => call("loadDashboard()", loadDashboard),
 
-  settings: () =>
-    call("getSettings()", getSettings),
+  settings: () => call("getSettings()", getSettings),
 
-  validatePaths: () =>
-    call("validateSavePaths()", validateSavePaths),
+  validatePaths: () => call("validateSavePaths()", validateSavePaths),
 
   // ── Per-game ────────────────────────────────────────────
 
-  saveInfo: (gameId) =>
-    call(`getSaveInfo("${gameId}")`, () => getSaveInfo(gameId)),
+  saveInfo: (gameId) => call(`getSaveInfo("${gameId}")`, () => getSaveInfo(gameId)),
 
-  syncDiff: (gameId) =>
-    call(`checkSyncStructureDiff("${gameId}")`, () => checkSyncStructureDiff(gameId)),
+  syncDiff: (gameId) => call(`checkSyncStructureDiff("${gameId}")`, () => checkSyncStructureDiff(gameId)),
 
   driveFiles: (gameId, folderId) =>
-    call(`listGameDriveFiles("${gameId}"${folderId ? `, "${folderId}"` : ""})`, () =>
-      listGameDriveFiles(gameId, folderId),
-    ),
+    call(`listGameDriveFiles("${gameId}"${folderId ? `, "${folderId}"` : ""})`, () => listGameDriveFiles(gameId, folderId)),
 
-  backups: (gameId) =>
-    call(`listVersionBackups("${gameId}")`, () => listVersionBackups(gameId)),
+  backups: (gameId) => call(`listVersionBackups("${gameId}")`, () => listVersionBackups(gameId)),
 
   // ── Sync triggers ────────────────────────────────────────
 
-  sync: (gameId) =>
-    call(`syncGame("${gameId}")`, () => syncGame(gameId)),
+  sync: (gameId) => call(`syncGame("${gameId}")`, () => syncGame(gameId)),
 
-  syncAll: () =>
-    call("syncAllGames()", syncAllGames),
+  syncAll: () => call("syncAllGames()", syncAllGames),
 };

@@ -13,23 +13,17 @@ function LazyThumbnail({ src }: { src: string }) {
   const [errored, setErrored] = useState(false);
 
   if (errored) {
-    return (
-      <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-lg">🎮</div>
-    );
+    return <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-lg">🎮</div>;
   }
 
   return (
     <div className="relative w-full h-full">
-      {!loaded && (
-        <div className="absolute inset-0 animate-pulse bg-[rgba(165,185,255,0.08)]" />
-      )}
+      {!loaded && <div className="absolute inset-0 animate-pulse bg-[rgba(165,185,255,0.08)]" />}
       <img
         src={toImgSrc(src)}
         alt=""
         loading="lazy"
-        className={`w-full h-full object-cover transition-opacity duration-300 ${
-          loaded ? "opacity-100" : "opacity-0"
-        }`}
+        className={`w-full h-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
         onLoad={() => setLoaded(true)}
         onError={() => setErrored(true)}
       />
@@ -86,18 +80,13 @@ export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
                     : "border-[rgba(154,177,255,0.08)] hover:border-[rgba(111,171,255,0.4)]"
                 }`}
               >
-                <Link
-                  to={`/game/${g.id}`}
-                  className="flex items-center gap-4 flex-1 min-w-0 text-inherit no-underline"
-                >
+                <Link to={`/game/${g.id}`} className="flex items-center gap-4 flex-1 min-w-0 text-inherit no-underline">
                   {/* Thumbnail */}
                   <div className="w-12 h-12 shrink-0 rounded-xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
                     {g.thumbnail ? (
                       <LazyThumbnail src={g.thumbnail} />
                     ) : (
-                      <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-lg">
-                        🎮
-                      </div>
+                      <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-lg">🎮</div>
                     )}
                   </div>
 
@@ -105,9 +94,7 @@ export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
                     <strong className="truncate">{g.name}</strong>
                     <div className="flex items-center gap-2">
                       <span className={badge}>{g.source}</span>
-                      {g.savePath && (
-                        <span className={`${MUTED} text-xs truncate`}>{g.savePath}</span>
-                      )}
+                      {g.savePath && <span className={`${MUTED} text-xs truncate`}>{g.savePath}</span>}
                     </div>
                     {isInvalid && (
                       <p className="m-0 text-xs text-[#ff9e9e] flex items-center gap-1">
@@ -124,13 +111,13 @@ export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
                         <span>⚠</span> No executable set — process tracking inactive
                       </p>
                     )}
-                    {g.description && (
-                      <p className={`${MUTED} m-0 text-xs truncate`}>{g.description}</p>
-                    )}                    {g.cloudStorageBytes != null && (
+                    {g.description && <p className={`${MUTED} m-0 text-xs truncate`}>{g.description}</p>}{" "}
+                    {g.cloudStorageBytes != null && (
                       <p className="m-0 text-xs text-[#7dc9ff] flex items-center gap-1">
                         <span>☁</span> {formatBytes(g.cloudStorageBytes)} on Drive
                       </p>
-                    )}                  </div>
+                    )}{" "}
+                  </div>
                 </Link>
 
                 {/* Play button */}
@@ -180,12 +167,7 @@ function GamePlayButton({ game, exeMissing }: { game: GameEntry; exeMissing: boo
 
   const isDisabled = flow.isPending || exeMissing;
 
-  const label =
-    flow.phase === "syncing"
-      ? "⏳"
-      : flow.phase === "launching"
-        ? "▶"
-        : "▶";
+  const label = flow.phase === "syncing" ? "⏳" : flow.phase === "launching" ? "▶" : "▶";
 
   const title = exeMissing
     ? "Executable not found on this device — update path in Settings"

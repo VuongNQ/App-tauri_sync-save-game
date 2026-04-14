@@ -55,18 +55,10 @@ export function DashboardPage() {
   const refreshMutation = useSyncLibraryFromCloudMutation();
   const games = dashboardQuery.data?.games ?? [];
 
-  const invalidGameIds = new Set(
-    (validateQuery.data ?? [])
-      .filter((v) => !v.valid)
-      .map((v) => v.gameId),
-  );
+  const invalidGameIds = new Set((validateQuery.data ?? []).filter((v) => !v.valid).map((v) => v.gameId));
 
   // exePathValid === false means exe_path is set but the file doesn't exist on this machine.
-  const missingExeIds = new Set(
-    (validateQuery.data ?? [])
-      .filter((v) => v.exePathValid === false)
-      .map((v) => v.gameId),
-  );
+  const missingExeIds = new Set((validateQuery.data ?? []).filter((v) => v.exePathValid === false).map((v) => v.gameId));
 
   if (dashboardQuery.isLoading) {
     return <DashboardSkeleton />;

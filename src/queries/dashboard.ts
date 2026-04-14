@@ -1,12 +1,6 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import {
-  addManualGame,
-  loadDashboard,
-  removeGame,
-  updateGame,
-  validateSavePaths,
-} from "../services/tauri";
+import { addManualGame, loadDashboard, removeGame, updateGame, validateSavePaths } from "../services/tauri";
 import type { AddGamePayload, DashboardData, GameEntry } from "../types/dashboard";
 import { DASHBOARD_KEY, VALIDATE_PATHS_KEY } from "./keys";
 
@@ -27,7 +21,7 @@ export const DashboardQuery = queryOptions({
 });
 
 export function useDashboardQuery() {
-    return useQuery(DashboardQuery);
+  return useQuery(DashboardQuery);
 }
 
 // ─── Mutations ───────────────────────────────────────────────────────────────

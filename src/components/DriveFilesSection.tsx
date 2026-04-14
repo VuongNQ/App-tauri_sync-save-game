@@ -1,23 +1,10 @@
 import { useMemo, useState } from "react";
 
-import {
-  useDeleteDriveFileMutation,
-  useDriveFilesFlatQuery,
-  useMoveDriveFileMutation,
-  useRenameDriveFileMutation,
-} from "../queries";
+import { useDeleteDriveFileMutation, useDriveFilesFlatQuery, useMoveDriveFileMutation, useRenameDriveFileMutation } from "../queries";
 import type { DriveFileFlatItem } from "../types/dashboard";
 import { msg } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
-import {
-  CARD,
-  EYEBROW,
-  GHOST_BTN,
-  INPUT_CLS,
-  MUTED,
-  PRIMARY_BTN,
-  SECONDARY_BTN,
-} from "./styles";
+import { CARD, EYEBROW, GHOST_BTN, INPUT_CLS, MUTED, PRIMARY_BTN, SECONDARY_BTN } from "./styles";
 
 interface Props {
   gameId: string;
@@ -34,23 +21,14 @@ function isProtected(relativePath: string): boolean {
 export function DriveFilesSection({ gameId, gameFolderId }: Props) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const { data: flatItems, isLoading, isError, error, refetch } = useDriveFilesFlatQuery(
-    gameId,
-    isOpen,
-  );
+  const { data: flatItems, isLoading, isError, error, refetch } = useDriveFilesFlatQuery(gameId, isOpen);
 
   const tree = useMemo(() => (flatItems ? buildDriveTree(flatItems) : null), [flatItems]);
 
   // Top-level subfolders available for file move operations.
   const topSubfolders = useMemo(
-    () =>
-      flatItems?.filter(
-        (item) =>
-          item.isFolder &&
-          !item.relativePath.includes("/") &&
-          !PROTECTED_PATHS.has(item.relativePath),
-      ) ?? [],
-    [flatItems],
+    () => flatItems?.filter((item) => item.isFolder && !item.relativePath.includes("/") && !PROTECTED_PATHS.has(item.relativePath)) ?? [],
+    [flatItems]
   );
 
   return (
@@ -71,11 +49,7 @@ export function DriveFilesSection({ gameId, gameFolderId }: Props) {
       {isOpen && (
         <div className="mt-5">
           {isLoading && <p className={`${MUTED} text-sm`}>Loading Drive files…</p>}
-          {isError && (
-            <p className="text-sm text-[#ff9e9e]">
-              {msg(error, "Failed to load Drive files.")}
-            </p>
-          )}
+          {isError && <p className="text-sm text-[#ff9e9e]">{msg(error, "Failed to load Drive files.")}</p>}
           {!isLoading && !isError && tree && (
             <>
               {tree.length === 0 ? (
@@ -94,11 +68,7 @@ export function DriveFilesSection({ gameId, gameFolderId }: Props) {
                   ))}
                 </ul>
               )}
-              <button
-                type="button"
-                className={`${SECONDARY_BTN} mt-3 text-sm`}
-                onClick={() => refetch()}
-              >
+              <button type="button" className={`${SECONDARY_BTN} mt-3 text-sm`} onClick={() => refetch()}>
                 Refresh
               </button>
             </>
@@ -144,12 +114,7 @@ function buildDriveTree(items: DriveFileFlatItem[]): DriveTreeItem[] {
     if (item.isFolder) folderIdMap.set(item.relativePath, item);
   }
 
-  function insertFile(
-    nodes: DriveTreeItem[],
-    parts: string[],
-    item: DriveFileFlatItem,
-    pathPrefix: string,
-  ): void {
+  function insertFile(nodes: DriveTreeItem[], parts: string[], item: DriveFileFlatItem, pathPrefix: string): void {
     if (parts.length === 1) {
       nodes.push({
         kind: "file",
@@ -258,8 +223,14 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
 
   function commitRename() {
     const trimmed = renameValue.trim();
-    if (trimmed === node.name) { setIsRenaming(false); return; }
-    if (!trimmed) { setRenameError("Name cannot be empty"); return; }
+    if (trimmed === node.name) {
+      setIsRenaming(false);
+      return;
+    }
+    if (!trimmed) {
+      setRenameError("Name cannot be empty");
+      return;
+    }
     const fileId = node.kind === "folder" ? (node.id ?? "") : node.id;
     if (!fileId) return;
     setRenameError(null);
@@ -268,7 +239,7 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
       {
         onSuccess: () => setIsRenaming(false),
         onError: (err) => setRenameError(msg(err, "Rename failed.")),
-      },
+      }
     );
   }
 
@@ -284,29 +255,17 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
     });
   }
 
-  const rowBase =
-    "flex items-center gap-2 text-xs py-1.5 pr-3 border-b border-[rgba(165,185,255,0.04)] last:border-b-0";
+  const rowBase = "flex items-center gap-2 text-xs py-1.5 pr-3 border-b border-[rgba(165,185,255,0.04)] last:border-b-0";
 
   if (node.kind === "folder") {
     return (
       <>
-        <li
-          className={`${rowBase} select-none`}
-          style={{ paddingLeft: `${8 + indent}px` }}
-        >
+        <li className={`${rowBase} select-none`} style={{ paddingLeft: `${8 + indent}px` }}>
           {/* Expand toggle + name */}
-          <div
-            className="flex items-center gap-1.5 min-w-0 flex-1 cursor-pointer"
-            onClick={() => setIsExpanded((v) => !v)}
-          >
-            <span className="shrink-0 w-3 text-center text-[0.56rem] text-[#9aa8c7]">
-              {isExpanded ? "▼" : "►"}
-            </span>
+          <div className="flex items-center gap-1.5 min-w-0 flex-1 cursor-pointer" onClick={() => setIsExpanded((v) => !v)}>
+            <span className="shrink-0 w-3 text-center text-[0.56rem] text-[#9aa8c7]">{isExpanded ? "▼" : "►"}</span>
             {isRenaming ? (
-              <div
-                className="flex items-center gap-1.5 flex-1"
-                onClick={(e) => e.stopPropagation()}
-              >
+              <div className="flex items-center gap-1.5 flex-1" onClick={(e) => e.stopPropagation()}>
                 <input
                   className={`${INPUT_CLS} text-xs py-0.5 min-h-0 h-7`}
                   value={renameValue}
@@ -325,11 +284,7 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
                 >
                   {renameMutation.isPending ? "…" : "Save"}
                 </button>
-                <button
-                  type="button"
-                  className={`${GHOST_BTN} text-xs px-2 min-h-0 h-7`}
-                  onClick={() => setIsRenaming(false)}
-                >
+                <button type="button" className={`${GHOST_BTN} text-xs px-2 min-h-0 h-7`} onClick={() => setIsRenaming(false)}>
                   Cancel
                 </button>
               </div>
@@ -346,30 +301,36 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
               </span>
             )}
             {protected_ ? (
-              <span className="text-[0.68rem] px-2 py-0.5 rounded-xl bg-[rgba(255,196,91,0.14)] text-[#ffd98a]">
-                protected
-              </span>
-            ) : !isRenaming && (
-              <div className="flex items-center">
-                <button
-                  type="button"
-                  title="Rename"
-                  disabled={isBusy}
-                  className="p-1 rounded-lg text-[#7dc9ff] hover:bg-[rgba(125,201,255,0.1)] transition-colors disabled:opacity-40"
-                  onClick={(e) => { e.stopPropagation(); startRename(); }}
-                >
-                  ✏️
-                </button>
-                <button
-                  type="button"
-                  title="Delete from Drive"
-                  disabled={isBusy}
-                  className="p-1 rounded-lg text-[#ff9e9e] hover:bg-[rgba(255,100,100,0.1)] transition-colors disabled:opacity-40"
-                  onClick={(e) => { e.stopPropagation(); setShowDeleteModal(true); }}
-                >
-                  🗑️
-                </button>
-              </div>
+              <span className="text-[0.68rem] px-2 py-0.5 rounded-xl bg-[rgba(255,196,91,0.14)] text-[#ffd98a]">protected</span>
+            ) : (
+              !isRenaming && (
+                <div className="flex items-center">
+                  <button
+                    type="button"
+                    title="Rename"
+                    disabled={isBusy}
+                    className="p-1 rounded-lg text-[#7dc9ff] hover:bg-[rgba(125,201,255,0.1)] transition-colors disabled:opacity-40"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startRename();
+                    }}
+                  >
+                    ✏️
+                  </button>
+                  <button
+                    type="button"
+                    title="Delete from Drive"
+                    disabled={isBusy}
+                    className="p-1 rounded-lg text-[#ff9e9e] hover:bg-[rgba(255,100,100,0.1)] transition-colors disabled:opacity-40"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowDeleteModal(true);
+                    }}
+                  >
+                    🗑️
+                  </button>
+                </div>
+              )
             )}
           </div>
 
@@ -390,9 +351,7 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
         )}
         {(moveMutation.isError || deleteMutation.isError) && (
           <li style={{ paddingLeft: `${8 + indent + 20}px` }} className="pb-1">
-            <p className="m-0 text-xs text-[#ff9e9e]">
-              {msg(moveMutation.error ?? deleteMutation.error, "Operation failed.")}
-            </p>
+            <p className="m-0 text-xs text-[#ff9e9e]">{msg(moveMutation.error ?? deleteMutation.error, "Operation failed.")}</p>
           </li>
         )}
 
@@ -415,10 +374,7 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
 
   return (
     <>
-      <li
-        className={`${rowBase} hover:bg-white/2`}
-        style={{ paddingLeft: `${8 + indent}px` }}
-      >
+      <li className={`${rowBase} hover:bg-white/2`} style={{ paddingLeft: `${8 + indent}px` }}>
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
           <span className="text-[#9aa8c7] shrink-0 select-none">↳</span>
           {isRenaming ? (
@@ -441,11 +397,7 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
               >
                 {renameMutation.isPending ? "…" : "Save"}
               </button>
-              <button
-                type="button"
-                className={`${GHOST_BTN} text-xs px-2 min-h-0 h-7`}
-                onClick={() => setIsRenaming(false)}
-              >
+              <button type="button" className={`${GHOST_BTN} text-xs px-2 min-h-0 h-7`} onClick={() => setIsRenaming(false)}>
                 Cancel
               </button>
             </div>
@@ -453,10 +405,7 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
             <span className="min-w-0">
               <span className="text-[#c7d3f7] truncate block">{node.name}</span>
               {(node.syncPath ?? node.relativePath) !== node.name && (
-                <span
-                  className="text-[0.65rem] text-[#9aa8c7]/60 truncate block"
-                  title={node.syncPath ?? node.relativePath}
-                >
+                <span className="text-[0.65rem] text-[#9aa8c7]/60 truncate block" title={node.syncPath ?? node.relativePath}>
                   {node.syncPath ?? node.relativePath}
                 </span>
               )}
@@ -465,50 +414,46 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {node.size != null && (
-            <span className="text-[0.68rem] text-[#9aa8c7]">{formatDriveBytes(node.size)}</span>
-          )}
+          {node.size != null && <span className="text-[0.68rem] text-[#9aa8c7]">{formatDriveBytes(node.size)}</span>}
           {node.modifiedTime && (
-            <span className="hidden sm:block text-[0.66rem] text-[#9aa8c7]">
-              {new Date(node.modifiedTime).toLocaleString()}
-            </span>
+            <span className="hidden sm:block text-[0.66rem] text-[#9aa8c7]">{new Date(node.modifiedTime).toLocaleString()}</span>
           )}
           {protected_ ? (
-            <span className="text-[0.68rem] px-2 py-0.5 rounded-xl bg-[rgba(255,196,91,0.14)] text-[#ffd98a]">
-              protected
-            </span>
-          ) : !isRenaming && (
-            <div className="flex items-center">
-              <button
-                type="button"
-                title="Rename"
-                disabled={isBusy}
-                className="p-1 rounded-lg text-[#7dc9ff] hover:bg-[rgba(125,201,255,0.1)] transition-colors disabled:opacity-40"
-                onClick={startRename}
-              >
-                ✏️
-              </button>
-              {isAtRoot && (
+            <span className="text-[0.68rem] px-2 py-0.5 rounded-xl bg-[rgba(255,196,91,0.14)] text-[#ffd98a]">protected</span>
+          ) : (
+            !isRenaming && (
+              <div className="flex items-center">
                 <button
                   type="button"
-                  title="Move to subfolder"
+                  title="Rename"
                   disabled={isBusy}
                   className="p-1 rounded-lg text-[#7dc9ff] hover:bg-[rgba(125,201,255,0.1)] transition-colors disabled:opacity-40"
-                  onClick={() => setShowMoveModal(true)}
+                  onClick={startRename}
                 >
-                  📂
+                  ✏️
                 </button>
-              )}
-              <button
-                type="button"
-                title="Delete from Drive"
-                disabled={isBusy}
-                className="p-1 rounded-lg text-[#ff9e9e] hover:bg-[rgba(255,100,100,0.1)] transition-colors disabled:opacity-40"
-                onClick={() => setShowDeleteModal(true)}
-              >
-                🗑️
-              </button>
-            </div>
+                {isAtRoot && (
+                  <button
+                    type="button"
+                    title="Move to subfolder"
+                    disabled={isBusy}
+                    className="p-1 rounded-lg text-[#7dc9ff] hover:bg-[rgba(125,201,255,0.1)] transition-colors disabled:opacity-40"
+                    onClick={() => setShowMoveModal(true)}
+                  >
+                    📂
+                  </button>
+                )}
+                <button
+                  type="button"
+                  title="Delete from Drive"
+                  disabled={isBusy}
+                  className="p-1 rounded-lg text-[#ff9e9e] hover:bg-[rgba(255,100,100,0.1)] transition-colors disabled:opacity-40"
+                  onClick={() => setShowDeleteModal(true)}
+                >
+                  🗑️
+                </button>
+              </div>
+            )
           )}
         </div>
 
@@ -549,9 +494,7 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
       )}
       {(moveMutation.isError || deleteMutation.isError) && (
         <li style={{ paddingLeft: `${8 + indent + 20}px` }} className="pb-1">
-          <p className="m-0 text-xs text-[#ff9e9e]">
-            {msg(moveMutation.error ?? deleteMutation.error, "Operation failed.")}
-          </p>
+          <p className="m-0 text-xs text-[#ff9e9e]">{msg(moveMutation.error ?? deleteMutation.error, "Operation failed.")}</p>
         </li>
       )}
     </>
@@ -578,9 +521,7 @@ function MoveFileModal({ fileName, gameFolderId, subfolders, onMove, onCancel }:
       className="m-auto max-w-105 w-full rounded-3xl border border-[rgba(165,185,255,0.12)] bg-[rgba(14,22,40,0.97)] p-6 text-[#eef4ff] shadow-[0_32px_80px_rgba(0,0,0,0.5)] backdrop:bg-[rgba(0,0,0,0.55)]"
     >
       <h3 className="m-0 mb-2 text-lg font-semibold">Move "{fileName}"</h3>
-      <p className="m-0 mb-4 text-sm text-[#9aa8c7]">
-        Choose a destination folder within this game's Drive folder.
-      </p>
+      <p className="m-0 mb-4 text-sm text-[#9aa8c7]">Choose a destination folder within this game's Drive folder.</p>
       <ul className="list-none p-0 grid gap-2 mb-5">
         <li>
           <label className="flex items-center gap-3 p-3 rounded-xl cursor-pointer hover:bg-white/5">
@@ -612,18 +553,13 @@ function MoveFileModal({ fileName, gameFolderId, subfolders, onMove, onCancel }:
         ))}
       </ul>
       <p className="m-0 mb-5 text-xs text-[#9aa8c7]">
-        ⚠️ Files moved out of the game root are removed from sync metadata and will be
-        re-uploaded on next sync.
+        ⚠️ Files moved out of the game root are removed from sync metadata and will be re-uploaded on next sync.
       </p>
       <div className="flex gap-3 justify-end">
         <button type="button" className={`${SECONDARY_BTN} text-sm`} onClick={onCancel}>
           Cancel
         </button>
-        <button
-          type="button"
-          className={`${PRIMARY_BTN} text-sm`}
-          onClick={() => onMove(selected)}
-        >
+        <button type="button" className={`${PRIMARY_BTN} text-sm`} onClick={() => onMove(selected)}>
           Move here
         </button>
       </div>

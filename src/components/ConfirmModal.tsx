@@ -11,14 +11,7 @@ interface Props {
   onCancel: () => void;
 }
 
-export function ConfirmModal({
-  open,
-  title,
-  message,
-  confirmLabel = "Remove",
-  onConfirm,
-  onCancel,
-}: Props) {
+export function ConfirmModal({ open, title, message, confirmLabel = "Remove", onConfirm, onCancel }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {

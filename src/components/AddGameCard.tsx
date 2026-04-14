@@ -9,18 +9,7 @@ import { useAddGameMutation } from "../queries";
 import type { AddGamePayload } from "../types/dashboard";
 import { norm, msg } from "../utils";
 import { uploadGameLogo } from "../services/tauri";
-import {
-  CARD,
-  FIELD_ERROR,
-  FORM_GRID,
-  FORM_LABEL,
-  INPUT_CLS,
-  INPUT_ROW,
-  LABEL_SPAN,
-  PRIMARY_BTN,
-  SEC_HDR,
-  SECONDARY_BTN,
-} from "./styles";
+import { CARD, FIELD_ERROR, FORM_GRID, FORM_LABEL, INPUT_CLS, INPUT_ROW, LABEL_SPAN, PRIMARY_BTN, SEC_HDR, SECONDARY_BTN } from "./styles";
 
 const addGameSchema = z.object({
   name: z.string().min(1, "Game name is required."),
@@ -39,11 +28,17 @@ const DEFAULT_VALUES: AddGamePayload = {
 };
 
 export function AddGameCard() {
-  const { register, handleSubmit, setValue, reset, watch, formState: { errors } } =
-    useForm<AddGamePayload>({
-      defaultValues: DEFAULT_VALUES,
-      resolver: zodResolver(addGameSchema),
-    });
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    reset,
+    watch,
+    formState: { errors },
+  } = useForm<AddGamePayload>({
+    defaultValues: DEFAULT_VALUES,
+    resolver: zodResolver(addGameSchema),
+  });
   const addMutation = useAddGameMutation();
   const navigate = useNavigate();
   const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
@@ -75,9 +70,7 @@ export function AddGameCard() {
       savePath: norm(values.savePath),
     };
     const data = await addMutation.mutateAsync(payload);
-    const added = data.games.find(
-      (g) => g.name.toLowerCase() === payload.name.toLowerCase(),
-    );
+    const added = data.games.find((g) => g.name.toLowerCase() === payload.name.toLowerCase());
 
     if (added && payload.thumbnail) {
       try {
@@ -103,11 +96,7 @@ export function AddGameCard() {
       <form className={FORM_GRID} onSubmit={handleSubmit(onSubmit)}>
         <label className={FORM_LABEL}>
           <span className={LABEL_SPAN}>Game name</span>
-          <input
-            className={INPUT_CLS}
-            {...register("name")}
-            placeholder="Example: Elden Ring"
-          />
+          <input className={INPUT_CLS} {...register("name")} placeholder="Example: Elden Ring" />
           {errors.name && <span className={FIELD_ERROR}>{errors.name.message}</span>}
         </label>
 
@@ -125,10 +114,7 @@ export function AddGameCard() {
 
         <label className={FORM_LABEL}>
           <span className={LABEL_SPAN}>Source</span>
-          <select
-            className={INPUT_CLS}
-            {...register("source")}
-          >
+          <select className={INPUT_CLS} {...register("source")}>
             <option value="manual">Manual</option>
             <option value="emulator">Emulator</option>
           </select>
@@ -152,12 +138,7 @@ export function AddGameCard() {
         <label className={FORM_LABEL}>
           <span className={LABEL_SPAN}>Save game folder</span>
           <div className={INPUT_ROW}>
-            <input
-              className={INPUT_CLS}
-              {...register("savePath")}
-              value={savePath ?? ""}
-              placeholder="Choose the save game folder"
-            />
+            <input className={INPUT_CLS} {...register("savePath")} value={savePath ?? ""} placeholder="Choose the save game folder" />
             <button type="button" className={SECONDARY_BTN} onClick={handleBrowseSave}>
               Browse
             </button>
@@ -168,14 +149,8 @@ export function AddGameCard() {
           {addMutation.isPending ? "Saving…" : "Add game"}
         </button>
 
-        {addMutation.isError && (
-          <p className="m-0 text-sm text-[#ffd5d5]">
-            {msg(addMutation.error, "Unable to add the game.")}
-          </p>
-        )}
-        {logoUploadError && (
-          <p className="m-0 text-sm text-[#ffd5d5]">{logoUploadError}</p>
-        )}
+        {addMutation.isError && <p className="m-0 text-sm text-[#ffd5d5]">{msg(addMutation.error, "Unable to add the game.")}</p>}
+        {logoUploadError && <p className="m-0 text-sm text-[#ffd5d5]">{logoUploadError}</p>}
       </form>
     </section>
   );

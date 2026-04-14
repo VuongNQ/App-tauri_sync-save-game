@@ -81,9 +81,7 @@ export function SaveInfoPanel({
         </div>
         <div>
           <dt className="text-[#c7d3f7] text-sm">Last modified</dt>
-          <dd className={`${MUTED} m-0`}>
-            {formatLocalTime(info.lastModified)}
-          </dd>
+          <dd className={`${MUTED} m-0`}>{formatLocalTime(info.lastModified)}</dd>
         </div>
       </dl>
       {info.files.length > 0 && <SaveFileTree info={info} />}

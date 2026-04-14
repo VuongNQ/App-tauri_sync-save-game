@@ -1,13 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { signIn, signOut } from "@choochmeque/tauri-plugin-google-auth-api";
 
-import {
-  checkAuthStatus,
-  getGoogleUserInfo,
-  getOAuthCredentials,
-  logout,
-  saveAuthTokens,
-} from "../services/tauri";
+import { checkAuthStatus, getGoogleUserInfo, getOAuthCredentials, logout, saveAuthTokens } from "../services/tauri";
 import type { AuthStatus } from "../types/dashboard";
 import { AUTH_STATUS_KEY, GOOGLE_USER_INFO_KEY } from "./keys";
 
@@ -97,8 +91,7 @@ export function useLoginMutation() {
         expiresAt: tokenResponse.expiresAt ?? null,
       });
     },
-    onSuccess: (data: AuthStatus) =>
-      queryClient.setQueryData<AuthStatus>(AUTH_STATUS_KEY, data),
+    onSuccess: (data: AuthStatus) => queryClient.setQueryData<AuthStatus>(AUTH_STATUS_KEY, data),
   });
 }
 

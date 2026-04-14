@@ -54,12 +54,9 @@ function useAuthStatusCallbacks() {
     });
 
     // Track game playing state for TrackingSyncCard status banner.
-    const unlistenGameStatusPromise = listen<{ gameId: string; status: "playing" | "idle" }>(
-      "game-status-changed",
-      ({ payload }) => {
-        queryClient.setQueryData(gamePlayingKey(payload.gameId), payload.status === "playing");
-      },
-    );
+    const unlistenGameStatusPromise = listen<{ gameId: string; status: "playing" | "idle" }>("game-status-changed", ({ payload }) => {
+      queryClient.setQueryData(gamePlayingKey(payload.gameId), payload.status === "playing");
+    });
 
     // Tracking detected a local file change — re-scan to update Last local save time.
     const unlistenSyncPendingPromise = listen("game-sync-pending", () => {

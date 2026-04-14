@@ -12,12 +12,7 @@ interface SyncConflictModalProps {
   onCancel: () => void;
 }
 
-function SyncConflictModal({
-  open,
-  diff,
-  onConfirm,
-  onCancel,
-}: SyncConflictModalProps) {
+function SyncConflictModal({ open, diff, onConfirm, onCancel }: SyncConflictModalProps) {
   const [selected, setSelected] = useState<SyncMethod>("auto");
 
   if (!open) return null;
@@ -48,20 +43,17 @@ function SyncConflictModal({
     {
       value: "auto",
       label: "Auto-sync (newest wins)",
-      description:
-        "Each file keeps whichever version was modified most recently.",
+      description: "Each file keeps whichever version was modified most recently.",
     },
     {
       value: "restore",
       label: "Restore from Drive",
-      description:
-        "Overwrite local files with the Drive version — even if local is newer.",
+      description: "Overwrite local files with the Drive version — even if local is newer.",
     },
     {
       value: "push",
       label: "Push local to Drive",
-      description:
-        "Overwrite Drive files with local versions — even if Drive is newer.",
+      description: "Overwrite Drive files with local versions — even if Drive is newer.",
     },
   ];
 
@@ -93,9 +85,7 @@ function SyncConflictModal({
 
         {/* Method picker */}
         <div className="grid gap-2">
-          <p className={`${MUTED} text-xs uppercase tracking-wider`}>
-            Choose sync method
-          </p>
+          <p className={`${MUTED} text-xs uppercase tracking-wider`}>Choose sync method</p>
           {methods.map((m) => (
             <button
               key={m.value}
@@ -107,9 +97,7 @@ function SyncConflictModal({
                   : "border-[rgba(165,185,255,0.08)] bg-[rgba(255,255,255,0.02)] hover:border-[rgba(165,185,255,0.2)]"
               }`}
             >
-              <p className="m-0 font-medium text-[#c7d3f7] text-sm">
-                {m.label}
-              </p>
+              <p className="m-0 font-medium text-[#c7d3f7] text-sm">{m.label}</p>
               <p className={`${MUTED} m-0 text-xs mt-0.5`}>{m.description}</p>
             </button>
           ))}
@@ -120,11 +108,7 @@ function SyncConflictModal({
           <button type="button" className={GHOST_BTN} onClick={onCancel}>
             Cancel
           </button>
-          <button
-            type="button"
-            className={PRIMARY_BTN}
-            onClick={() => onConfirm(selected)}
-          >
+          <button type="button" className={PRIMARY_BTN} onClick={() => onConfirm(selected)}>
             Confirm
           </button>
         </div>

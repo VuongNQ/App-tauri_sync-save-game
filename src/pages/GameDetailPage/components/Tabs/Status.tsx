@@ -2,11 +2,7 @@ import { DriveFilesSection } from "@/components/DriveFilesSection";
 import { CARD, PRIMARY_BTN, SECONDARY_BTN } from "@/components/styles";
 import { Toast } from "@/components/Toast";
 import { VersionBackupsSection } from "@/components/VersionBackupsSection";
-import {
-  useGetSaveInfoQuery,
-  useSyncGameMutation,
-  useSyncLibraryFromCloudMutation,
-} from "@/queries";
+import { useGetSaveInfoQuery, useSyncGameMutation, useSyncLibraryFromCloudMutation } from "@/queries";
 import { DashboardQuery } from "@/queries/dashboard";
 import { useGamePlaying } from "@/queries/detail";
 import { expandSavePath } from "@/services/tauri";
@@ -29,9 +25,7 @@ const TabStatus = () => {
 
   const queryClient = useQueryClient();
 
-  const game = queryClient
-    .getQueryData(DashboardQuery.queryKey)
-    ?.games.find((g) => g.id === id);
+  const game = queryClient.getQueryData(DashboardQuery.queryKey)?.games.find((g) => g.id === id);
 
   const saveInfoQuery = useGetSaveInfoQuery(id ?? "", !!game?.savePath);
 
@@ -74,9 +68,7 @@ const TabStatus = () => {
               })
             }
           >
-            {syncLibraryMutation.isPending
-              ? "Syncing…"
-              : "Download settings from Drive"}
+            {syncLibraryMutation.isPending ? "Syncing…" : "Download settings from Drive"}
           </button>
           <button
             className={SECONDARY_BTN}
@@ -121,19 +113,8 @@ const TabStatus = () => {
                   viewBox="0 0 24 24"
                   aria-hidden="true"
                 >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                  />
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
                 Syncing…
               </>
@@ -155,19 +136,11 @@ const TabStatus = () => {
             }}
           />
         )}
-        {saveInfoQuery.isError && (
-          <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
-            {msg(saveInfoQuery.error, "Unable to get save info.")}
-          </p>
-        )}
+        {saveInfoQuery.isError && <p className="m-0 mt-3 text-sm text-[#ffd5d5]">{msg(saveInfoQuery.error, "Unable to get save info.")}</p>}
 
         {/* Sync Result */}
         {syncMutation.data && <SyncResultPanel result={syncMutation.data} />}
-        {syncMutation.isError && (
-          <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
-            {msg(syncMutation.error, "Sync failed.")}
-          </p>
-        )}
+        {syncMutation.isError && <p className="m-0 mt-3 text-sm text-[#ffd5d5]">{msg(syncMutation.error, "Sync failed.")}</p>}
       </div>
 
       {/* Tracking & Sync status */}
@@ -183,23 +156,12 @@ const TabStatus = () => {
       />
 
       {/* Drive file manager */}
-      {game.gdriveFolderId && (
-        <DriveFilesSection
-          gameId={game.id}
-          gameFolderId={game.gdriveFolderId}
-        />
-      )}
+      {game.gdriveFolderId && <DriveFilesSection gameId={game.id} gameFolderId={game.gdriveFolderId} />}
 
       {/* Version backups */}
       {game.gdriveFolderId && <VersionBackupsSection gameId={game.id} />}
 
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onDismiss={() => setToast(null)}
-        />
-      )}
+      {toast && <Toast message={toast.message} type={toast.type} onDismiss={() => setToast(null)} />}
 
       {restoreFlow.syncDiff && (
         <SyncConflictModal

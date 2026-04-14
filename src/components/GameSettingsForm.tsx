@@ -3,22 +3,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
-import {
-  Controller,
-  FormProvider,
-  useForm,
-  useFormContext,
-  useWatch,
-} from "react-hook-form";
+import { Controller, FormProvider, useForm, useFormContext, useWatch } from "react-hook-form";
 import { z } from "zod";
 import { DASHBOARD_KEY, useUpdateGameMutation } from "../queries";
-import {
-  contractPath,
-  expandSavePath,
-  getBrowseDefaultPath,
-  getSaveInfo,
-  uploadGameLogo,
-} from "../services/tauri";
+import { contractPath, expandSavePath, getBrowseDefaultPath, getSaveInfo, uploadGameLogo } from "../services/tauri";
 import type { DashboardData, GameEntry, SaveInfo } from "../types/dashboard";
 import { msg, norm, toImgSrc } from "../utils";
 import { SaveFileTree } from "./SaveFileTree";
@@ -42,20 +30,12 @@ const gameSettingsSchema = z.object({
   thumbnail: z
     .string()
     .refine(
-      (v) =>
-        !v ||
-        v.startsWith("https://") ||
-        v.startsWith("http://") ||
-        /^[A-Za-z]:[\\/]/.test(v),
-      "Enter a valid image URL (https://…) or browse a local file.",
+      (v) => !v || v.startsWith("https://") || v.startsWith("http://") || /^[A-Za-z]:[\\/]/.test(v),
+      "Enter a valid image URL (https://…) or browse a local file."
     ),
-  description: z
-    .string()
-    .max(1000, "Description must be 1000 characters or fewer."),
+  description: z.string().max(1000, "Description must be 1000 characters or fewer."),
   savePath: z.string(),
-  exeName: z
-    .string()
-    .max(260, "Executable name must be 260 characters or fewer."),
+  exeName: z.string().max(260, "Executable name must be 260 characters or fewer."),
   exePath: z.string().optional().nullable(),
   trackChanges: z.boolean(),
   autoSync: z.boolean(),
@@ -72,11 +52,7 @@ interface GameSettingsFormProps {
   id?: string;
 }
 
-export function GameSettingsForm({
-  isOpen,
-  isSyncing,
-  id,
-}: GameSettingsFormProps) {
+export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProps) {
   const updateMutation = useUpdateGameMutation();
 
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
@@ -87,17 +63,12 @@ export function GameSettingsForm({
 
   const validateQuery = queryClient.getQueryData(ValidatePathsQuery.queryKey);
 
-  const gameSettings = queryClient
-    .getQueryData<DashboardData>(DASHBOARD_KEY)
-    ?.games.find((g) => g.id === id);
+  const gameSettings = queryClient.getQueryData<DashboardData>(DASHBOARD_KEY)?.games.find((g) => g.id === id);
 
-  const isPathInvalid =
-    gameSettings != null &&
-    (validateQuery ?? []).some((v) => v.gameId === gameSettings.id && !v.valid);
+  const isPathInvalid = gameSettings != null && (validateQuery ?? []).some((v) => v.gameId === gameSettings.id && !v.valid);
 
   // exePathValid: null = not set, true = ok, false = set but file not found on this machine.
-  const exePathValid =
-    (validateQuery ?? []).find((v) => v.gameId === gameSettings?.id)?.exePathValid ?? null;
+  const exePathValid = (validateQuery ?? []).find((v) => v.gameId === gameSettings?.id)?.exePathValid ?? null;
 
   const methods = useForm<GameSettingsFormValues>({
     defaultValues: {
@@ -165,11 +136,7 @@ export function GameSettingsForm({
   }
 
   const isSaving = isUploadingLogo || updateMutation.isPending;
-  const saveError =
-    logoUploadError ??
-    (updateMutation.isError
-      ? msg(updateMutation.error, "Unable to save.")
-      : null);
+  const saveError = logoUploadError ?? (updateMutation.isError ? msg(updateMutation.error, "Unable to save.") : null);
 
   return (
     <FormProvider {...methods}>
@@ -189,11 +156,7 @@ export function GameSettingsForm({
                 >
                   Discard
                 </button>
-                <button
-                  type="submit"
-                  className={PRIMARY_BTN}
-                  disabled={isSaving}
-                >
+                <button type="submit" className={PRIMARY_BTN} disabled={isSaving}>
                   {isSaving ? "Saving…" : "Save"}
                 </button>
               </>
@@ -205,19 +168,11 @@ export function GameSettingsForm({
           <div className="flex flex-col gap-5 pt-4">
             <ThumbnailSection isSyncing={isSyncing} />
             <DescriptionSection />
-            <SaveFolderSection
-              game={gameSettings}
-              isSyncing={isSyncing}
-              isPathInvalid={isPathInvalid}
-            />
+            <SaveFolderSection game={gameSettings} isSyncing={isSyncing} isPathInvalid={isPathInvalid} />
             <GameExecutableSection game={gameSettings} exePathValid={exePathValid} />
             <SyncExclusionsSection game={gameSettings} />
             <div className="flex items-center gap-3 justify-end">
-              {saveError && (
-                <span className="text-sm text-[#ffd5d5] mr-auto">
-                  {saveError}
-                </span>
-              )}
+              {saveError && <span className="text-sm text-[#ffd5d5] mr-auto">{saveError}</span>}
             </div>
           </div>
         )}
@@ -245,9 +200,7 @@ function ThumbnailSection({ isSyncing }: ThumbnailSectionProps) {
     const p = await open({
       multiple: false,
       title: "Choose a thumbnail image",
-      filters: [
-        { name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] },
-      ],
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
     });
     if (typeof p === "string") {
       setValue("thumbnail", p, { shouldValidate: true, shouldDirty: true });
@@ -279,23 +232,12 @@ function ThumbnailSection({ isSyncing }: ThumbnailSectionProps) {
             <label className={FORM_LABEL}>
               <span className={LABEL_SPAN}>URL or local file path</span>
               <div className={INPUT_ROW}>
-                <input
-                  className={INPUT_CLS}
-                  {...field}
-                  placeholder="https://… or browse a local file"
-                />
-                <button
-                  type="button"
-                  className={SECONDARY_BTN}
-                  onClick={handleBrowse}
-                  disabled={isSyncing}
-                >
+                <input className={INPUT_CLS} {...field} placeholder="https://… or browse a local file" />
+                <button type="button" className={SECONDARY_BTN} onClick={handleBrowse} disabled={isSyncing}>
                   Browse
                 </button>
               </div>
-              {errors.thumbnail && (
-                <span className={FIELD_ERROR}>{errors.thumbnail.message}</span>
-              )}
+              {errors.thumbnail && <span className={FIELD_ERROR}>{errors.thumbnail.message}</span>}
             </label>
           )}
         />
@@ -321,9 +263,7 @@ function DescriptionSection() {
           control={control}
           render={({ field }) => (
             <label className={FORM_LABEL}>
-              <span className={LABEL_SPAN}>
-                Game description (max 1000 characters)
-              </span>
+              <span className={LABEL_SPAN}>Game description (max 1000 characters)</span>
               <textarea
                 className={`${INPUT_CLS} resize-y min-h-[60px]`}
                 {...field}
@@ -331,14 +271,8 @@ function DescriptionSection() {
                 rows={4}
                 placeholder="Brief description of the game…"
               />
-              <span className={MUTED + " text-xs mt-1"}>
-                {field.value.length}/1000
-              </span>
-              {errors.description && (
-                <span className={FIELD_ERROR}>
-                  {errors.description.message}
-                </span>
-              )}
+              <span className={MUTED + " text-xs mt-1"}>{field.value.length}/1000</span>
+              {errors.description && <span className={FIELD_ERROR}>{errors.description.message}</span>}
             </label>
           )}
         />
@@ -355,19 +289,13 @@ interface SaveFolderSectionProps {
   isPathInvalid: boolean;
 }
 
-function SaveFolderSection({
-  game,
-  isSyncing,
-  isPathInvalid,
-}: SaveFolderSectionProps) {
+function SaveFolderSection({ game, isSyncing, isPathInvalid }: SaveFolderSectionProps) {
   const { control, setValue } = useFormContext<GameSettingsFormValues>();
 
   async function handleBrowse() {
     let defaultPath: string | undefined;
     if (game.savePath) {
-      const resolved = game.savePath.includes("%")
-        ? await expandSavePath(game.savePath)
-        : game.savePath;
+      const resolved = game.savePath.includes("%") ? await expandSavePath(game.savePath) : game.savePath;
       const sep = resolved.lastIndexOf("\\");
       if (sep > 0) defaultPath = resolved.slice(0, sep);
     }
@@ -390,8 +318,7 @@ function SaveFolderSection({
 
       {isPathInvalid && (
         <div className="mb-4 p-3 rounded-2xl border border-[rgba(255,100,100,0.3)] bg-[rgba(62,18,22,0.5)] text-[#ff9e9e] text-sm flex items-center gap-2">
-          <span>⚠</span> The configured save path does not exist on this
-          machine.
+          <span>⚠</span> The configured save path does not exist on this machine.
         </div>
       )}
 
@@ -403,17 +330,8 @@ function SaveFolderSection({
             <label className={FORM_LABEL}>
               <span className={LABEL_SPAN}>Save folder path</span>
               <div className={INPUT_ROW}>
-                <input
-                  className={INPUT_CLS}
-                  {...field}
-                  placeholder="Choose or enter the save folder path"
-                />
-                <button
-                  type="button"
-                  className={SECONDARY_BTN}
-                  onClick={handleBrowse}
-                  disabled={isSyncing}
-                >
+                <input className={INPUT_CLS} {...field} placeholder="Choose or enter the save folder path" />
+                <button type="button" className={SECONDARY_BTN} onClick={handleBrowse} disabled={isSyncing}>
                   Browse
                 </button>
               </div>
@@ -445,9 +363,7 @@ function GameExecutableSection({ game, exePathValid }: GameExecutableSectionProp
   async function handleBrowse() {
     let defaultPath: string | undefined;
     if (game.exePath) {
-      const resolved = game.exePath.includes("%")
-        ? await expandSavePath(game.exePath)
-        : game.exePath;
+      const resolved = game.exePath.includes("%") ? await expandSavePath(game.exePath) : game.exePath;
       const sep = resolved.lastIndexOf("\\");
       if (sep > 0) defaultPath = resolved.slice(0, sep);
     }
@@ -482,47 +398,32 @@ function GameExecutableSection({ game, exePathValid }: GameExecutableSectionProp
         <label className={FORM_LABEL}>
           <span className={LABEL_SPAN}>Executable path</span>
           <div className={INPUT_ROW}>
-            <input
-              className={INPUT_CLS}
-              {...register("exePath")}
-              placeholder="e.g. %PROGRAMFILES%\Steam\steamapps\common\Game\Game.exe"
-            />
-            <button
-              type="button"
-              className={SECONDARY_BTN}
-              onClick={handleBrowse}
-            >
+            <input className={INPUT_CLS} {...register("exePath")} placeholder="e.g. %PROGRAMFILES%\Steam\steamapps\common\Game\Game.exe" />
+            <button type="button" className={SECONDARY_BTN} onClick={handleBrowse}>
               Browse
             </button>
           </div>
           <span className={MUTED + " text-xs mt-1"}>
-            Full path to the .exe used to launch the game. Enables the ▶ Play
-            button. Stored with env-var tokens (e.g.{" "}
-            <code>%PROGRAMFILES%</code>) for portability.{" "}
-            <strong className="text-amber-400/80">Saved locally only</strong>{" "}
-            — not synced to the cloud, since paths differ between devices.
+            Full path to the .exe used to launch the game. Enables the ▶ Play button. Stored with env-var tokens (e.g.{" "}
+            <code>%PROGRAMFILES%</code>) for portability. <strong className="text-amber-400/80">Saved locally only</strong> — not synced to
+            the cloud, since paths differ between devices.
           </span>
         </label>
 
         {/* Row 2 — process name (auto-filled, user-editable) */}
         <label className={FORM_LABEL}>
           <span className={LABEL_SPAN}>Process name</span>
-          <input
-            className={INPUT_CLS}
-            {...register("exeName")}
-            placeholder="e.g. Game.exe"
-          />
+          <input className={INPUT_CLS} {...register("exeName")} placeholder="e.g. Game.exe" />
           <span className={MUTED + " text-xs mt-1"}>
-            {watchedExeName
-              ? <>
-                  Watcher will track:{" "}
-                  <strong className="text-white/80">{watchedExeName}</strong>
-                </>
-              : "Auto-filled from the path above. Edit if the launcher differs from the main process. Leave empty to disable tracking."}
+            {watchedExeName ? (
+              <>
+                Watcher will track: <strong className="text-white/80">{watchedExeName}</strong>
+              </>
+            ) : (
+              "Auto-filled from the path above. Edit if the launcher differs from the main process. Leave empty to disable tracking."
+            )}
           </span>
-          {errors.exeName && (
-            <span className={FIELD_ERROR}>{errors.exeName.message}</span>
-          )}
+          {errors.exeName && <span className={FIELD_ERROR}>{errors.exeName.message}</span>}
         </label>
       </div>
     </div>
@@ -558,9 +459,7 @@ function SyncExclusionsSection({ game }: SyncExclusionsSectionProps) {
   }
 
   function handleToggle(path: string, _isFolder: boolean) {
-    const next = excluded.includes(path)
-      ? excluded.filter((e) => e !== path)
-      : [...excluded, path];
+    const next = excluded.includes(path) ? excluded.filter((e) => e !== path) : [...excluded, path];
     setValue("syncExcludes", next, { shouldDirty: true });
   }
 
@@ -568,7 +467,7 @@ function SyncExclusionsSection({ game }: SyncExclusionsSectionProps) {
     setValue(
       "syncExcludes",
       excluded.filter((e) => e !== path),
-      { shouldDirty: true },
+      { shouldDirty: true }
     );
   }
 
@@ -586,8 +485,7 @@ function SyncExclusionsSection({ game }: SyncExclusionsSectionProps) {
     <div className={CARD}>
       <h3 className="m-0 mb-1 font-semibold">Sync exclusions</h3>
       <p className="m-0 mb-4 text-sm text-[#9aa8c7]">
-        Files and folders listed here are skipped during Google Drive sync.
-        Existing Drive copies are deleted when you save.
+        Files and folders listed here are skipped during Google Drive sync. Existing Drive copies are deleted when you save.
       </p>
 
       {/* Current exclusions list */}
@@ -620,17 +518,10 @@ function SyncExclusionsSection({ game }: SyncExclusionsSectionProps) {
           className={INPUT_CLS}
           value={manualInput}
           onChange={(e) => setManualInput(e.target.value)}
-          onKeyDown={(e) =>
-            e.key === "Enter" && (e.preventDefault(), handleManualAdd())
-          }
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleManualAdd())}
           placeholder="e.g. UserMetaData.sav  or  backup/"
         />
-        <button
-          type="button"
-          className={SECONDARY_BTN}
-          onClick={handleManualAdd}
-          disabled={!manualInput.trim()}
-        >
+        <button type="button" className={SECONDARY_BTN} onClick={handleManualAdd} disabled={!manualInput.trim()}>
           Add
         </button>
       </div>
@@ -653,23 +544,12 @@ function SyncExclusionsSection({ game }: SyncExclusionsSectionProps) {
       {saveInfo && (
         <>
           <div className="flex items-center justify-between mb-1">
-            <p className="m-0 text-xs text-[#9aa8c7]">
-              Check files or folders to exclude from sync.
-            </p>
-            <button
-              type="button"
-              className="text-xs text-[#7dc9ff] hover:underline"
-              onClick={() => setSaveInfo(null)}
-            >
+            <p className="m-0 text-xs text-[#9aa8c7]">Check files or folders to exclude from sync.</p>
+            <button type="button" className="text-xs text-[#7dc9ff] hover:underline" onClick={() => setSaveInfo(null)}>
               Hide
             </button>
           </div>
-          <SaveFileTree
-            info={saveInfo}
-            checkable
-            excluded={excluded}
-            onToggle={handleToggle}
-          />
+          <SaveFileTree info={saveInfo} checkable excluded={excluded} onToggle={handleToggle} />
         </>
       )}
     </div>

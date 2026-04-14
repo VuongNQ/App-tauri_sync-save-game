@@ -18,7 +18,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <QueryClientProvider client={queryClient}>
       <App />
     </QueryClientProvider>
-  </React.StrictMode>,
+  </React.StrictMode>
 );
 
 // ── Dev-only: expose Google API debug util on window.__googleDebug ─────────────
@@ -26,9 +26,8 @@ if (import.meta.env.DEV) {
   import("./utils/devDebug").then(({ devDebug }) => {
     window.__googleDebug = devDebug;
     console.info(
-      "%c[__googleDebug] Google API debug util loaded.\n" +
-        "Run window.__googleDebug.help() to see all available commands.",
-      "color: #4ade80; font-weight: bold;",
+      "%c[__googleDebug] Google API debug util loaded.\n" + "Run window.__googleDebug.help() to see all available commands.",
+      "color: #4ade80; font-weight: bold;"
     );
   });
 }

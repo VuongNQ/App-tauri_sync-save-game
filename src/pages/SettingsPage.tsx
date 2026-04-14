@@ -60,22 +60,11 @@ export function SettingsPage() {
         ) : userInfo ? (
           <div className="flex items-center gap-4">
             {userInfo.picture && (
-              <img
-                src={userInfo.picture}
-                alt=""
-                className="h-12 w-12 rounded-full object-cover"
-                referrerPolicy="no-referrer"
-              />
+              <img src={userInfo.picture} alt="" className="h-12 w-12 rounded-full object-cover" referrerPolicy="no-referrer" />
             )}
             <div className="flex-1 min-w-0">
-              {userInfo.name && (
-                <p className="m-0 font-medium text-[#eef4ff] truncate">
-                  {userInfo.name}
-                </p>
-              )}
-              <p className={`m-0 text-sm truncate ${MUTED}`}>
-                {userInfo.email}
-              </p>
+              {userInfo.name && <p className="m-0 font-medium text-[#eef4ff] truncate">{userInfo.name}</p>}
+              <p className={`m-0 text-sm truncate ${MUTED}`}>{userInfo.email}</p>
             </div>
             <button
               type="button"
@@ -88,12 +77,8 @@ export function SettingsPage() {
           </div>
         ) : (
           <div>
-            <p className={MUTED}>
-              Unable to load account info.{error ? ` (${error.message})` : ""}
-            </p>
-            <p className={`mt-2 text-xs ${MUTED}`}>
-              You may need to sign out and sign back in to grant profile permissions.
-            </p>
+            <p className={MUTED}>Unable to load account info.{error ? ` (${error.message})` : ""}</p>
+            <p className={`mt-2 text-xs ${MUTED}`}>You may need to sign out and sign back in to grant profile permissions.</p>
             <div className="mt-3 flex gap-2">
               <button
                 type="button"
@@ -122,9 +107,7 @@ export function SettingsPage() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="m-0 text-[0.92rem] text-[#c7d3f7]">Sync interval (minutes)</p>
-                <p className={`m-0 mt-0.5 text-xs ${MUTED}`}>
-                  Periodic sync interval. 0 = only sync on file change.
-                </p>
+                <p className={`m-0 mt-0.5 text-xs ${MUTED}`}>Periodic sync interval. 0 = only sync on file change.</p>
               </div>
               <input
                 type="number"
@@ -155,9 +138,7 @@ export function SettingsPage() {
                   The app hides to the system tray instead of quitting. Use the tray icon to reopen or right-click → Quit to exit.
                 </p>
               </div>
-              <span className="shrink-0 rounded-lg bg-[rgba(109,125,255,0.14)] px-3 py-1 text-xs text-[#a3b0ff]">
-                Always on
-              </span>
+              <span className="shrink-0 rounded-lg bg-[rgba(109,125,255,0.14)] px-3 py-1 text-xs text-[#a3b0ff]">Always on</span>
             </div>
             <ToggleRow
               label="Start minimized"
@@ -184,34 +165,24 @@ export function SettingsPage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="m-0 text-[0.92rem] text-[#c7d3f7]">Current version</p>
-              {currentVersion && (
-                <p className={`m-0 mt-0.5 font-mono text-xs ${MUTED}`}>
-                  v{currentVersion}
-                </p>
-              )}
+              {currentVersion && <p className={`m-0 mt-0.5 font-mono text-xs ${MUTED}`}>v{currentVersion}</p>}
             </div>
             <button
               type="button"
               className={`${BTN} rounded-xl bg-white/10 px-4 py-2 text-sm font-medium text-[#eef4ff] hover:bg-white/15 disabled:opacity-50`}
-              disabled={status === 'checking' || status === 'downloading'}
+              disabled={status === "checking" || status === "downloading"}
               onClick={handleCheck}
             >
-              {status === 'checking' ? "Checking…" : "Check for Updates"}
+              {status === "checking" ? "Checking…" : "Check for Updates"}
             </button>
           </div>
 
-          {status === 'available' && (
+          {status === "available" && (
             <div className="rounded-xl border border-[rgba(140,165,241,0.2)] bg-[rgba(99,125,255,0.08)] p-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="m-0 text-sm font-semibold text-[#9effc3]">
-                    v{update?.version} is available
-                  </p>
-                  {update?.body && (
-                    <p className={`m-0 mt-1 whitespace-pre-wrap text-xs ${MUTED}`}>
-                      {update.body}
-                    </p>
-                  )}
+                  <p className="m-0 text-sm font-semibold text-[#9effc3]">v{update?.version} is available</p>
+                  {update?.body && <p className={`m-0 mt-1 whitespace-pre-wrap text-xs ${MUTED}`}>{update.body}</p>}
                 </div>
                 <button
                   type="button"
@@ -224,39 +195,28 @@ export function SettingsPage() {
             </div>
           )}
 
-          {status === 'downloading' && (
+          {status === "downloading" && (
             <div>
               <p className={`m-0 mb-1 text-sm ${MUTED}`}>
                 Downloading update…
-                {progress && progress.total > 0
-                  ? ` ${Math.round((progress.downloaded / progress.total) * 100)}%`
-                  : ""}
+                {progress && progress.total > 0 ? ` ${Math.round((progress.downloaded / progress.total) * 100)}%` : ""}
               </p>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
                 <div
                   className="h-full rounded-full bg-indigo-400 transition-all duration-300"
                   style={{
-                    width:
-                      progress && progress.total > 0
-                        ? `${Math.round((progress.downloaded / progress.total) * 100)}%`
-                        : "10%",
+                    width: progress && progress.total > 0 ? `${Math.round((progress.downloaded / progress.total) * 100)}%` : "10%",
                   }}
                 />
               </div>
             </div>
           )}
 
-          {status === 'installed' && (
-            <p className="m-0 text-sm text-[#9effc3]">Restarting to apply update…</p>
-          )}
+          {status === "installed" && <p className="m-0 text-sm text-[#9effc3]">Restarting to apply update…</p>}
 
-          {status === 'up-to-date' && (
-            <p className={`m-0 text-sm ${MUTED}`}>You&apos;re up to date.</p>
-          )}
+          {status === "up-to-date" && <p className={`m-0 text-sm ${MUTED}`}>You&apos;re up to date.</p>}
 
-          {updateError && (
-            <p className="m-0 text-sm text-[#ffd5d5]">{updateError}</p>
-          )}
+          {updateError && <p className="m-0 text-sm text-[#ffd5d5]">{updateError}</p>}
         </div>
       </div>
 
@@ -264,28 +224,18 @@ export function SettingsPage() {
       <div className={CARD}>
         <h3 className="m-0 mb-1 font-semibold text-[#ff9e9e]">Danger zone</h3>
         <p className={`m-0 mb-4 text-sm ${MUTED}`}>
-          Permanently delete all synced save files, game folders, and configuration stored on Google Drive for this account. Your local game library is not affected.
+          Permanently delete all synced save files, game folders, and configuration stored on Google Drive for this account. Your local game
+          library is not affected.
         </p>
-        <button
-          type="button"
-          className={DANGER_BTN}
-          disabled={clearAllDrive.isPending}
-          onClick={() => setShowClearModal(true)}
-        >
+        <button type="button" className={DANGER_BTN} disabled={clearAllDrive.isPending} onClick={() => setShowClearModal(true)}>
           {clearAllDrive.isPending ? "Clearing…" : "Clear all Drive data"}
         </button>
         {clearAllDrive.isError && (
           <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
-            {clearAllDrive.error instanceof Error
-              ? clearAllDrive.error.message
-              : "Failed to clear Drive data."}
+            {clearAllDrive.error instanceof Error ? clearAllDrive.error.message : "Failed to clear Drive data."}
           </p>
         )}
-        {clearAllDrive.isSuccess && (
-          <p className="m-0 mt-3 text-sm text-[#9effc3]">
-            All Drive data has been cleared.
-          </p>
-        )}
+        {clearAllDrive.isSuccess && <p className="m-0 mt-3 text-sm text-[#9effc3]">All Drive data has been cleared.</p>}
       </div>
 
       <ConfirmModal
@@ -352,7 +302,7 @@ function ToggleRow({ label, description, checked, onChange }: ToggleRowProps) {
 
 // ── useAppUpdater (same-file hook) ────────────────────────
 
-type UpdateStatus = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'installed' | 'error';
+type UpdateStatus = "idle" | "checking" | "up-to-date" | "available" | "downloading" | "installed" | "error";
 
 interface DownloadProgress {
   downloaded: number;
@@ -360,58 +310,60 @@ interface DownloadProgress {
 }
 
 function useAppUpdater() {
-  const [status, setStatus] = useState<UpdateStatus>('idle');
+  const [status, setStatus] = useState<UpdateStatus>("idle");
   const [currentVersion, setCurrentVersion] = useState<string | null>(null);
   const [update, setUpdate] = useState<Update | null>(null);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getVersion().then(setCurrentVersion).catch(() => {});
+    getVersion()
+      .then(setCurrentVersion)
+      .catch(() => {});
   }, []);
 
   const handleCheck = async () => {
-    setStatus('checking');
+    setStatus("checking");
     setError(null);
     setUpdate(null);
     try {
       const result = await check();
       if (result) {
         setUpdate(result);
-        setStatus('available');
+        setStatus("available");
       } else {
-        setStatus('up-to-date');
+        setStatus("up-to-date");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setStatus('error');
+      setStatus("error");
     }
   };
 
   const handleInstall = async () => {
     if (!update) return;
-    setStatus('downloading');
+    setStatus("downloading");
     setProgress(null);
     let totalSize = 0;
     let downloaded = 0;
     try {
       await update.downloadAndInstall((event) => {
         switch (event.event) {
-          case 'Started':
+          case "Started":
             totalSize = event.data.contentLength ?? 0;
             break;
-          case 'Progress':
+          case "Progress":
             downloaded += event.data.chunkLength;
             setProgress({ downloaded, total: totalSize });
             break;
-          case 'Finished':
-            setStatus('installed');
+          case "Finished":
+            setStatus("installed");
             break;
         }
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setStatus('error');
+      setStatus("error");
     }
   };
 

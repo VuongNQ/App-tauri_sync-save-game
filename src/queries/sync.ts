@@ -1,9 +1,4 @@
-import {
-  mutationOptions,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { mutationOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   checkSyncStructureDiff,
@@ -38,8 +33,7 @@ import {
 
 function useSetDashboardCache() {
   const queryClient = useQueryClient();
-  return (data: DashboardData) =>
-    queryClient.setQueryData<DashboardData>(DASHBOARD_KEY, data);
+  return (data: DashboardData) => queryClient.setQueryData<DashboardData>(DASHBOARD_KEY, data);
 }
 
 export const SyncGameMutation = (id: string) =>
@@ -78,8 +72,7 @@ export function useSyncLibraryFromCloudMutation() {
 export function useToggleTrackChangesMutation() {
   const setCache = useSetDashboardCache();
   return useMutation({
-    mutationFn: ({ gameId, enabled }: { gameId: string; enabled: boolean }) =>
-      toggleTrackChanges(gameId, enabled),
+    mutationFn: ({ gameId, enabled }: { gameId: string; enabled: boolean }) => toggleTrackChanges(gameId, enabled),
     onSuccess: setCache,
   });
 }
@@ -87,8 +80,7 @@ export function useToggleTrackChangesMutation() {
 export function useToggleAutoSyncMutation() {
   const setCache = useSetDashboardCache();
   return useMutation({
-    mutationFn: ({ gameId, enabled }: { gameId: string; enabled: boolean }) =>
-      toggleAutoSync(gameId, enabled),
+    mutationFn: ({ gameId, enabled }: { gameId: string; enabled: boolean }) => toggleAutoSync(gameId, enabled),
     onSuccess: setCache,
   });
 }
@@ -129,11 +121,7 @@ export function usePushToCloudMutation() {
 // ── Drive file management hooks ────────────────────────────────────────────────
 
 /** Lazily fetch the list of Drive items for a game folder or subfolder. Pass `enabled: false` to skip. */
-export function useDriveFilesQuery(
-  gameId: string,
-  folderId: string,
-  enabled = true,
-) {
+export function useDriveFilesQuery(gameId: string, folderId: string, enabled = true) {
   return useQuery({
     queryKey: driveFilesFolderKey(gameId, folderId),
     queryFn: () => listGameDriveFiles(gameId, folderId),
@@ -201,17 +189,8 @@ export function useMoveDriveFileMutation() {
 export function useDeleteDriveFileMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      gameId,
-      fileId,
-      fileName,
-      isFolder,
-    }: {
-      gameId: string;
-      fileId: string;
-      fileName: string;
-      isFolder: boolean;
-    }) => deleteGameDriveFile(gameId, fileId, fileName, isFolder),
+    mutationFn: ({ gameId, fileId, fileName, isFolder }: { gameId: string; fileId: string; fileName: string; isFolder: boolean }) =>
+      deleteGameDriveFile(gameId, fileId, fileName, isFolder),
     onSuccess: (_data, { gameId }) => {
       queryClient.invalidateQueries({ queryKey: driveFilesKey(gameId) });
       queryClient.invalidateQueries({ queryKey: driveFilesFlatKey(gameId) });
@@ -234,23 +213,15 @@ export function useVersionBackupsQuery(gameId: string, enabled = true) {
 export function useCreateVersionBackupMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ gameId, label }: { gameId: string; label?: string }) =>
-      createVersionBackup(gameId, label),
-    onSuccess: (_data, { gameId }) =>
-      queryClient.invalidateQueries({ queryKey: versionBackupsKey(gameId) }),
+    mutationFn: ({ gameId, label }: { gameId: string; label?: string }) => createVersionBackup(gameId, label),
+    onSuccess: (_data, { gameId }) => queryClient.invalidateQueries({ queryKey: versionBackupsKey(gameId) }),
   });
 }
 
 export function useRestoreVersionBackupMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      gameId,
-      backupFolderId,
-    }: {
-      gameId: string;
-      backupFolderId: string;
-    }) => restoreVersionBackup(gameId, backupFolderId),
+    mutationFn: ({ gameId, backupFolderId }: { gameId: string; backupFolderId: string }) => restoreVersionBackup(gameId, backupFolderId),
     onSuccess: (_data, { gameId }) => {
       queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
       queryClient.invalidateQueries({ queryKey: driveFilesKey(gameId) });
@@ -262,14 +233,7 @@ export function useRestoreVersionBackupMutation() {
 export function useDeleteVersionBackupMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      gameId,
-      backupFolderId,
-    }: {
-      gameId: string;
-      backupFolderId: string;
-    }) => deleteVersionBackup(gameId, backupFolderId),
-    onSuccess: (_data, { gameId }) =>
-      queryClient.invalidateQueries({ queryKey: versionBackupsKey(gameId) }),
+    mutationFn: ({ gameId, backupFolderId }: { gameId: string; backupFolderId: string }) => deleteVersionBackup(gameId, backupFolderId),
+    onSuccess: (_data, { gameId }) => queryClient.invalidateQueries({ queryKey: versionBackupsKey(gameId) }),
   });
 }

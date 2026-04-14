@@ -1,16 +1,7 @@
 // ── TrackingSyncCard ──────────────────────────────────────────────────────────
 
-import {
-  CARD,
-  TOGGLE_THUMB_OFF,
-  TOGGLE_THUMB_ON,
-  TOGGLE_TRACK_OFF,
-  TOGGLE_TRACK_ON,
-} from "@/components/styles";
-import {
-  useToggleAutoSyncMutation,
-  useToggleTrackChangesMutation,
-} from "@/queries";
+import { CARD, TOGGLE_THUMB_OFF, TOGGLE_THUMB_ON, TOGGLE_TRACK_OFF, TOGGLE_TRACK_ON } from "@/components/styles";
+import { useToggleAutoSyncMutation, useToggleTrackChangesMutation } from "@/queries";
 import { msg } from "@/utils";
 
 interface TrackingSyncCardProps {
@@ -24,38 +15,21 @@ interface TrackingSyncCardProps {
   onError: (message: string) => void;
 }
 
-function TrackingSyncCard({
-  gameId,
-  savePath,
-  trackChanges,
-  autoSync,
-  isSyncing,
-  exeName,
-  isGamePlaying,
-  onError,
-}: TrackingSyncCardProps) {
+function TrackingSyncCard({ gameId, savePath, trackChanges, autoSync, isSyncing, exeName, isGamePlaying, onError }: TrackingSyncCardProps) {
   const toggleTrack = useToggleTrackChangesMutation();
 
   const toggleAuto = useToggleAutoSyncMutation();
 
   function handleTrackChanges(enabled: boolean) {
-    toggleTrack.mutate(
-      { gameId, enabled },
-      { onError: (err) => onError(msg(err, "Failed to toggle tracking.")) },
-    );
+    toggleTrack.mutate({ gameId, enabled }, { onError: (err) => onError(msg(err, "Failed to toggle tracking.")) });
   }
 
   function handleAutoSync(enabled: boolean) {
-    toggleAuto.mutate(
-      { gameId, enabled },
-      { onError: (err) => onError(msg(err, "Failed to toggle auto-sync.")) },
-    );
+    toggleAuto.mutate({ gameId, enabled }, { onError: (err) => onError(msg(err, "Failed to toggle auto-sync.")) });
   }
 
-  const trackDisabled =
-    isSyncing || toggleTrack.isPending || toggleAuto.isPending;
-  const autoDisabled =
-    isSyncing || toggleTrack.isPending || toggleAuto.isPending;
+  const trackDisabled = isSyncing || toggleTrack.isPending || toggleAuto.isPending;
+  const autoDisabled = isSyncing || toggleTrack.isPending || toggleAuto.isPending;
 
   return (
     <div className={CARD}>
@@ -71,32 +45,21 @@ function TrackingSyncCard({
           }`}
         >
           <span>🎮</span>
-          {autoSync
-            ? "Game is running — will sync on close"
-            : "Game is running — Sync pending..."}
+          {autoSync ? "Game is running — will sync on close" : "Game is running — Sync pending..."}
         </div>
       )}
 
-      {!savePath && (
-        <p className="m-0 mb-4 text-sm text-[#ffd5a0]">
-          Set a save folder path so synced files have a destination.
-        </p>
-      )}
+      {!savePath && <p className="m-0 mb-4 text-sm text-[#ffd5a0]">Set a save folder path so synced files have a destination.</p>}
 
       <div className="grid gap-4">
         {/* Track process */}
         <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-2xl border border-[rgba(165,185,255,0.08)] bg-[rgba(9,14,28,0.55)]">
           <div className="grid gap-0.5">
-            <span className="font-semibold text-sm text-[#c7d3f7]">
-              Track process
-            </span>
-            <span className="text-xs text-[#9aa8c7]">
-              Detect when the game process exits and trigger sync
-            </span>
+            <span className="font-semibold text-sm text-[#c7d3f7]">Track process</span>
+            <span className="text-xs text-[#9aa8c7]">Detect when the game process exits and trigger sync</span>
             {trackChanges && !exeName && (
               <span className="text-xs text-[#ffd5a0] mt-1">
-                Open settings and enter the game’s .exe name to activate process
-                tracking.
+                Open settings and enter the game’s .exe name to activate process tracking.
               </span>
             )}
           </div>
@@ -121,12 +84,8 @@ function TrackingSyncCard({
         {/* Auto-sync */}
         <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-2xl border border-[rgba(165,185,255,0.08)] bg-[rgba(9,14,28,0.55)]">
           <div className="grid gap-0.5">
-            <span className="font-semibold text-sm text-[#c7d3f7]">
-              Auto-sync to Google Drive
-            </span>
-            <span className="text-xs text-[#9aa8c7]">
-              Automatically back up saves when the game process exits
-            </span>
+            <span className="font-semibold text-sm text-[#c7d3f7]">Auto-sync to Google Drive</span>
+            <span className="text-xs text-[#9aa8c7]">Automatically back up saves when the game process exits</span>
           </div>
           <button
             type="button"

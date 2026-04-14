@@ -15,8 +15,7 @@ export function useUpdateSettingsMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (settings: AppSettings) => updateSettings(settings),
-    onSuccess: (data: AppSettings) =>
-      queryClient.setQueryData<AppSettings>(SETTINGS_KEY, data),
+    onSuccess: (data: AppSettings) => queryClient.setQueryData<AppSettings>(SETTINGS_KEY, data),
   });
 }
 
@@ -24,7 +23,6 @@ export function useClearAllDriveMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: clearAllDriveData,
-    onSuccess: (data: DashboardData) =>
-      queryClient.setQueryData<DashboardData>(DASHBOARD_KEY, data),
+    onSuccess: (data: DashboardData) => queryClient.setQueryData<DashboardData>(DASHBOARD_KEY, data),
   });
 }
