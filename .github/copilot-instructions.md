@@ -136,54 +136,58 @@ tauri::generate_handler![
 
 ---
 
-## Google Drive as File-based Database
+## Cloud Database — Firestore (Primary) + Google Drive (Save Files)
 
-The `drive.appdata` hidden folder acts as a **zero-cost, user-owned database**. There is no external server or SQL engine — all structured data is stored as versioned JSON files in `appDataFolder`.
+**Firestore is the live database** for game library and settings. Google Drive `appDataFolder` stores only save-game files and per-game sync metadata. The old `library.json` / `config.json` Drive files are **legacy — kept solely for one-time migration** of data from older installs.
 
-### Folder Structure on Drive
+### Folder Structure on Drive (`appDataFolder`)
 
 ```
 appDataFolder/
   game-processing-sync/
-    config.json          # AppSettings (global configuration)
-    library.json         # Vec<GameEntry> (replaces a "Games" table)
+    config.json          # LEGACY — AppSettings backup; read once for migration to Firestore only
+    library.json         # LEGACY — Vec<GameEntry> backup; read once for migration to Firestore only
     games/
       {game_id}/
         <save files...>
         .sync-meta.json  # timestamps + file hashes for conflict detection
 ```
 
-### Why this approach
+### Firestore Collection Structure
 
-- **$0 cost** — data lives on the user's own Google Drive quota.
-- **Secure** — `drive.appdata` is invisible in Drive UI; users cannot accidentally delete it.
-- **Cross-device restore** — on a new machine, `fetch_library_from_cloud()` re-hydrates the entire game list without the user re-entering anything.
-- **Minimal new code** — the existing `ureq`-based HTTP client and OAuth token flow already handle upload/download.
+```
+users/{user_id}/games/{game_id}     # GameEntry documents (primary game library)
+users/{user_id}/settings/default    # AppSettings document
+users/{user_id}/syncMeta/{game_id}  # SyncMeta documents (per-game sync state)
+```
 
-### Cloud Library Sync Functions (`gdrive.rs`)
+### Why Firestore
+
+- **Primary source of truth** for game library and settings — syncs across devices in real-time.
+- **Drive** is used only for actual save-game binary/data files and `.sync-meta.json`.
+- `firestore.rs` uses the Firestore REST API with the same OAuth token as Drive.
+
+### Firestore Sync Functions (`firestore.rs` + `settings.rs`)
 
 | Function | Direction | Trigger |
 |----------|-----------|---------|
-| `sync_library_to_cloud(app)` | Local → Cloud | After every `add_game`, `update_game`, `remove_game`. Runs in a background thread — local save completes first. |
-| `fetch_library_from_cloud(app)` | Cloud → Local | On first login or when local `games-library.json` is missing. |
-| `sync_settings_to_cloud(app)` | Local → Cloud | After every `update_settings` call. |
-| `fetch_settings_from_cloud(app)` | Cloud → Local | On first login alongside library fetch. |
+| `firestore::save_game(app, user_id, game)` | Local → Cloud | After every `add_game`, `update_game`. Spawned in a background thread via `spawn_firestore_game_upsert`. |
+| `firestore::delete_game(app, user_id, game_id)` | Local → Cloud | After `remove_game`. Spawned in a background thread via `spawn_firestore_game_delete`. |
+| `firestore::save_settings(app, user_id, settings)` | Local → Cloud | After every `update_settings` call. |
+| `firestore::load_all_games(app, user_id)` | Cloud → Local | On first login via `fetch_all_from_firestore`. |
+| `firestore::load_settings(app, user_id)` | Cloud → Local | On first login via `fetch_all_from_firestore`. |
+| `settings::fetch_all_from_firestore(app)` | Cloud → Local | On first login; called from `save_auth_tokens` and `restore_from_cloud`. |
 
-### Conflict Resolution for library.json / config.json
+### Legacy Drive JSON Files (Migration Only)
 
-Use **Drive's native `modifiedTime`** on the file object (returned by `GET /drive/v3/files/{id}?fields=modifiedTime`) as the version timestamp. Algorithm:
-
-1. Before writing cloud, fetch the Drive file's `modifiedTime`.
-2. Compare with `last_cloud_library_modified` stored locally.
-3. If Drive version is **newer** → merge/prefer cloud, update local first.
-4. Then write the new version to Drive.
+`sync_library_to_cloud()` and `sync_settings_to_cloud()` in `gdrive.rs` are **dead code** (`#[allow(dead_code)]`) — they are **never called** in the current app. `fetch_library_from_cloud()` and `fetch_settings_from_cloud()` are only called inside `settings::fetch_all_from_firestore()` on the **one-time migration path**: when Firestore returns 0 games, the app checks Drive for a legacy `library.json` and migrates it into Firestore once. After that, Drive JSON files are never touched again.
 
 ### Local-First Strategy (Performance)
 
-Because `ureq` is **blocking**, cloud library sync must never block the UI:
+Because `ureq` is **blocking**, Firestore sync must never block the UI:
 
 - UI data always reads from `games-library-{user_id}.json` on disk (fast). Falls back to `games-library.json` when unauthenticated or on old token files without `user_id`.
-- After `settings::save_state()` completes, spawn a background thread to call `gdrive::sync_library_to_cloud()`.
+- After `settings::save_state()` completes, `spawn_firestore_game_upsert` / `spawn_firestore_game_delete` fire in background threads.
 - Mirror the `WatcherManager` background-thread pattern: use a dedicated thread, not the main Tauri thread.
 
 ### Stored State Shape (extended)
@@ -193,7 +197,7 @@ pub struct StoredState {
     pub version: u32,
     pub games: Vec<GameEntry>,
     pub settings: AppSettings,
-    pub last_cloud_library_modified: Option<String>, // ISO 8601 of last Drive write
+    pub last_cloud_library_modified: Option<String>, // ISO 8601 — legacy field, used only during migration
 }
 ```
 
