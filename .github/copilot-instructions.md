@@ -64,7 +64,9 @@ src-tauri/src/
 
 ### Google OAuth Scopes
 
-`openid`, `email`, `profile`, `drive.file`, `drive.appdata`
+`openid`, `email`, `profile`, `drive.file`, `drive.appdata`, `datastore`
+
+> `datastore` is required for Firestore REST API access (game library, settings, SyncMeta). Re-login is required when adding this scope to an existing install.
 
 ---
 
@@ -88,6 +90,7 @@ src-tauri/src/
 | `last_cloud_modified` | `Option<String>` | `string \| null` | ISO 8601 timestamp of last Google Drive save version |
 | `gdrive_folder_id` | `Option<String>` | `string \| null` | Google Drive folder ID where saves are stored |
 | `cloud_storage_bytes` | `Option<u64>` | `number \| null` | Total bytes stored in Drive for this game's saves; `None` = never synced |
+| `sync_excludes` | `Vec<String>` | `string[]` | Relative paths excluded from Drive sync; trailing `/` means folder prefix |
 
 ### Serialisation Convention
 
@@ -117,6 +120,8 @@ tauri::generate_handler![
     get_settings, update_settings,
     // Sync — auto
     get_save_info, sync_game, sync_all_games,
+    // Sync — library restore from cloud
+    sync_library_from_cloud,
     // Sync — forced direction + diff check
     check_sync_structure_diff, restore_from_cloud, push_to_cloud,
     toggle_track_changes, toggle_auto_sync,
@@ -129,7 +134,8 @@ tauri::generate_handler![
     // Logo
     upload_game_logo,
     // Drive file management
-    list_game_drive_files, rename_game_drive_file, move_game_drive_file, delete_game_drive_file,
+    list_game_drive_files, list_game_drive_files_flat,
+    rename_game_drive_file, move_game_drive_file, delete_game_drive_file,
     create_version_backup, list_version_backups, restore_version_backup, delete_version_backup,
 ]
 ```
@@ -157,7 +163,7 @@ appDataFolder/
 
 ```
 users/{user_id}/games/{game_id}     # GameEntry documents (primary game library)
-users/{user_id}/settings/default    # AppSettings document
+users/{user_id}/settings/app        # AppSettings document (key is always "app")
 users/{user_id}/syncMeta/{game_id}  # SyncMeta documents (per-game sync state)
 ```
 
@@ -446,6 +452,7 @@ The Rust backend emits these events that the frontend can listen to:
 |---|---|---|
 | `"auth-status-changed"` | — | `gdrive_auth.rs` on login/logout |
 | `"library-restored"` | — | `lib.rs` when first-login cloud library restore succeeds |
+| `"post-login-sync-completed"` | — | `lib.rs` after post-login sync-all-from-Drive finishes (success or error) |
 | `"sync-started"` | `{ gameId }` | `sync.rs` before sync begins |
 | `"sync-completed"` | `SyncResult` | `sync.rs` after successful sync |
 | `"sync-error"` | `{ gameId, error }` | `sync.rs` on sync failure |

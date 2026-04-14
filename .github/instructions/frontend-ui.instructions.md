@@ -42,7 +42,7 @@ src/
   pages/               # Route-level components (one file per route)
     LoginPage.tsx
     DashboardPage.tsx
-    GameDetailPage.tsx
+    GameDetailPage/      # folder: index.tsx + hooks.ts + components/
     SettingsPage.tsx
   components/          # Reusable UI building blocks
     styles.ts          # Shared Tailwind class-string constants
@@ -123,9 +123,9 @@ function useSyncGame(gameId: string) {
 ### Route Config (`App.tsx`)
 
 ```tsx
-import { BrowserRouter, Routes, Route, Navigate } from "react-router";
+import { HashRouter, Routes, Route, Navigate } from "react-router";
 
-<BrowserRouter>
+<HashRouter>
   <Routes>
     <Route path="/login" element={<LoginPage />} />
     <Route element={<AuthGuard />}>
@@ -137,7 +137,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router";
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes>
-</BrowserRouter>
+</HashRouter>
 ```
 
 ### Auth Guard (Layout Route)
@@ -411,6 +411,7 @@ export interface GameEntry {
   lastCloudModified: string | null;
   gdriveFolderId: string | null;
   cloudStorageBytes: number | null; // total bytes synced to Drive; null = never synced
+  syncExcludes: string[];           // relative paths excluded from Drive sync; trailing '/' = folder prefix
 }
 
 export interface DashboardData {
@@ -556,6 +557,7 @@ function useAuthStatusCallbacks() {
 |---|---|---|
 | `auth-status-changed` | `AuthStatus` | `setQueryData(AUTH_STATUS_KEY, payload)` |
 | `library-restored` | — | `invalidateQueries(DASHBOARD_KEY)` — fires after first-login cloud restore |
+| `post-login-sync-completed` | — | `invalidateQueries(DASHBOARD_KEY)` — fires after post-login sync-all-from-Drive |
 | `sync-completed` | `SyncResult` | `invalidateQueries(DASHBOARD_KEY)` |
 | `sync-error` | `{ gameId, error }` | display error toast |
 | `game-sync-pending` | `{ gameId }` | show pending indicator |
