@@ -488,8 +488,9 @@ fn toggle_track_changes(app: tauri::AppHandle, game_id: String, enabled: bool) -
 | `"sync-started"` | `game_id: &str` | `sync.rs` — before sync begins |
 | `"sync-completed"` | `SyncResult` | `sync.rs` — on success |
 | `"sync-error"` | `SyncResult` (with `error` field) | `sync.rs` — on failure |
-| `"game-sync-pending"` | `{ gameId }` | `watcher.rs` — process exited but auto-sync disabled |
-| `"game-status-changed"` | `{ gameId, status: "playing" \| "idle" }` | `watcher.rs` — emitted each time game process starts or stops || `"library-restored"` | — | `lib.rs` — first-login cloud library restore succeeded |
+| `"game-sync-pending"` | `game_id: &str` (raw string) | `watcher.rs` — process exited but auto-sync disabled |
+| `"game-status-changed"` | `{ gameId, status: "playing" \| "idle" }` | `watcher.rs` — emitted each time game process starts or stops |
+| `"library-restored"` | — | `lib.rs` — first-login cloud library restore succeeded |
 Frontend listens via `listen()` from `@tauri-apps/api/event` and updates React Query cache.
 
 ## Frontend Integration
@@ -553,7 +554,7 @@ export async function deleteVersionBackup(gameId: string, backupFolderId: string
 
 - `useSyncGameMutation()` — calls `syncGame()`, invalidates `DASHBOARD_KEY` on success.
 - `useSyncAllMutation()` — calls `syncAllGames()`, invalidates `DASHBOARD_KEY`.
-- `useGetSaveInfoMutation()` — calls `getSaveInfo(gameId)` as a mutation (no cache side-effect); used on demand in the UI.
+- `useGetSaveInfoQuery(gameId, enabled?)` — lazy query (not a mutation); fetches save folder metadata. Key: `saveInfoKey(gameId)`.
 - `useCheckSyncDiffMutation()` — calls `checkSyncStructureDiff()`, returns `SyncStructureDiff` (no cache side-effect).
 - `useRestoreFromCloudMutation()` — calls `restoreFromCloud()`, invalidates `DASHBOARD_KEY` **and `VALIDATE_PATHS_KEY`** on success.
 - `usePushToCloudMutation()` — calls `pushToCloud()`, invalidates `DASHBOARD_KEY` on success.
@@ -676,9 +677,9 @@ Calls `gdrive::list_drive_items_recursive(app, &folder_id, "")` to walk the enti
 7. Return `DriveVersionBackup { id: backup_folder_id, name: folder_name, created_time, total_files, total_size }`.
 
 #### `list_version_backups`
-1. Find or create `backups/` subfolder via `ensure_subfolder`.
-2. List items inside; keep only folders.
-3. For each, try downloading `.backup-meta.json`. Parse `BackupMeta`; fall back to folder metadata if missing.
+1. List items in the game folder; look for a folder named `backups`.
+2. If no `backups` folder exists → return empty list immediately (does **not** create it).
+3. For each snapshot subfolder inside `backups/`: try downloading `.backup-meta.json`. Parse `BackupMeta`; skip entry if metadata is missing or unparseable.
 4. Return sorted newest-first by `created_time`.
 
 #### `restore_version_backup`
@@ -761,6 +762,9 @@ pub struct DriveFileFlatItem {
     pub modified_time: Option<String>, // ISO 8601
     pub is_folder: bool,
     pub parent_folder_id: String,  // Drive folder ID of immediate parent
+    /// The `path_file` from SyncMeta matched by this file's Drive ID.
+    /// `None` when the file is not tracked in SyncMeta.
+    pub sync_path: Option<String>,
 }
 ```
 
@@ -774,6 +778,8 @@ export interface DriveFileFlatItem {
   modifiedTime: string | null;
   isFolder: boolean;
   parentFolderId: string;
+  /** The `pathFile` from SyncMeta matched by this file's Drive ID. `null` when not tracked. */
+  syncPath: string | null;
 }
 ```
 
@@ -812,14 +818,14 @@ export interface DriveVersionBackup {
 
 ```rust
 pub struct SyncMeta {
-    pub last_synced: Option<String>,                // ISO 8601
-    pub files: HashMap<String, SyncFileMeta>,       // key: relative path (forward slashes)
+    pub last_synced: Option<String>,           // ISO 8601
+    pub files: Vec<SyncFileEntry>,             // list of tracked files
 }
 
-pub struct SyncFileMeta {
-    pub modified_time: String,           // ISO 8601
+pub struct SyncFileEntry {
+    pub path_file: String,              // relative path (forward slashes) — key for sync matching
     pub size: u64,
-    pub drive_file_id: Option<String>,   // Google Drive file ID
+    pub drive_file_id: Option<String>,  // Google Drive file ID
 }
 ```
 
