@@ -135,7 +135,7 @@ const PROJECT_ID: &str = match option_env!("GOOGLE_CLOUD_PROJECT_ID") {
 | `load_sync_meta(app, user_id, game_id)` | GET | `users/{uid}/syncMeta/{game_id}` → `Option<SyncMeta>` |
 
 > `load_sync_meta` is marked `#[allow(dead_code)]` — retained for future cross-device read path. Drive `.sync-meta.json` remains the exclusive read source today.
-
+> **`save_settings` strips `pathOverrides`**: When serialising `AppSettings` to Firestore, the `pathOverrides` field is **always filtered out** before the write. It is a local-only device-specific value and must never be stored in Firestore.
 ### 401 Retry Pattern (same as gdrive.rs)
 
 Every Firestore call wraps the request: on HTTP 401, force a token refresh via `gdrive_auth::get_access_token()` and retry once.
@@ -193,7 +193,8 @@ Called from `lib.rs` → `save_auth_tokens` command after login. Algorithm:
 2. If Firestore has zero games → fall back to `gdrive::fetch_library_from_cloud()` for one-time migration.
 3. Try `firestore::load_settings()` → if `Some`, use Firestore settings.
 4. If `None` → fall back to `gdrive::fetch_settings_from_cloud()` for one-time migration.
-5. Call `settings::save_state()` with merged data.
+5. **Preserve local `path_overrides`**: before overwriting settings with the cloud version, copy the current `state.settings.path_overrides` into `cloud_settings.path_overrides` so device-specific paths are never lost during a cloud restore.
+6. Call `settings::save_state()` with merged data.
 
 This ensures existing users (who had Drive `library.json`) are seamlessly migrated to Firestore on first login after upgrade.
 
@@ -264,13 +265,32 @@ Both `save_path` **and** `exe_path` fields on `GameEntry` are stored with tokens
 
 Public wrapper over `contract_env_vars` (normalises backslashes then tokenises). Exposed as the `contract_path` Tauri command. The frontend calls this immediately after a file-picker returns an absolute path so the portable token form is stored and displayed.
 
+### Two-Tier Save Path Storage
+
+Save paths use a two-tier strategy to support both portable and device-specific locations:
+
+| Path type | Storage location | Synced to Firestore? |
+|-----------|-----------------|---------------------|
+| Contains `%` token (portable) | `GameEntry.save_path` | Yes |
+| No `%` token (device-specific, e.g. `D:\Games\PCSX2\memcards`) | `AppSettings.path_overrides[game_id]`, `GameEntry.save_path = None` | No (local-only) |
+
+**Routing function**: `route_save_path(save_path, game_id, settings)` in `settings.rs` — called on every `add_manual_game` / `upsert_game`. Routes the normalised path to either `GameEntry.save_path` or `path_overrides` depending on token presence.
+
+**Read function**: `effective_save_path(game, settings)` — returns the active path for a game (`path_overrides` wins over `save_path`). Use this **everywhere** a path is needed at runtime (sync, validate, browse default, watcher).
+
+**Merge function**: `apply_path_overrides(games, settings)` — merges `path_overrides` back into `GameEntry.save_path` in-place. **Must be called before every `DashboardData` return** in `lib.rs`. Forgetting this causes `savePath: null` in the UI for device-specific games after any mutation.
+
+**One-time migration**: `migrate_absolute_save_paths()` runs automatically on every `load_state()`. Moves any existing `GameEntry.save_path` without `%` tokens into `path_overrides`, saves state, and spawns background Firestore upserts to null out the cloud docs.
+
+**`sync_all_games` filter**: Must check both `game.save_path.is_some()` **or** `state.settings.path_overrides.contains_key(&game.id)` to include device-specific games.
+
 ---
 
-## Sync Algorithm (sync.rs)
+### Sync Algorithm (sync.rs)
 
 ### Pipeline
 
-1. Load `GameEntry` from state; validate `save_path` is set.
+1. Load `GameEntry` from state; obtain the effective save path via `settings::effective_save_path(game, settings)` (checks `path_overrides` first, falls back to `game.save_path`). Error if neither is set.
 2. `gdrive::ensure_root_folder()` → `gdrive::ensure_game_folder()`.
 3. `gdrive::download_sync_meta()` → `Option<SyncMeta>` + optional file ID.
 4. `gdrive::list_files()` in game folder (for Drive file ID lookup).
@@ -450,12 +470,14 @@ async fn sync_game(app: tauri::AppHandle, game_id: String) -> Result<SyncResult,
 ```rust
 #[tauri::command]
 fn toggle_track_changes(app: tauri::AppHandle, game_id: String, enabled: bool) -> Result<DashboardData, String> {
-    settings::update_game_field(&app, &game_id, |g| { g.track_changes = enabled; })?;
+    let mut state = settings::update_game_field(&app, &game_id, |g| { g.track_changes = enabled; })?;
     watcher::handle_track_changes_toggle(&app, &game_id, enabled)?;
-    let state = settings::load_state(&app)?;
+    settings::apply_path_overrides(&mut state.games, &state.settings);
     Ok(DashboardData { games: state.games })
 }
 ```
+
+> **Critical**: Every command that returns `DashboardData` must call `settings::apply_path_overrides(&mut state.games, &state.settings)` before the return. This ensures device-specific paths (stored in `path_overrides`) are visible in the UI after any mutation.
 
 ### Return Types
 
