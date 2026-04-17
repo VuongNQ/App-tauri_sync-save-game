@@ -314,15 +314,23 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir.join(SETTINGS_FILE_NAME))
 }
 
+/// Windows env-var tokens used for path portability, ordered most-specific first.
+/// (`%TEMP%` ≈ `%LOCALAPPDATA%\Temp`, so TEMP must precede LOCALAPPDATA.)
+#[cfg(target_os = "windows")]
+const ENV_VAR_TOKENS: &[&str] = &[
+    "TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA", "PROGRAMFILES",
+];
+
 /// Expand Windows environment-variable tokens (e.g. `%LOCALAPPDATA%`) to
 /// their current runtime values.  Safe to call with plain absolute paths —
 /// they are returned unchanged.
 pub fn expand_env_vars(path: &str) -> String {
-    // Order: most-specific first so that overlapping prefixes resolve correctly
-    // (e.g. %TEMP% is a subdirectory of %LOCALAPPDATA%, so try TEMP first).
-    const VARS: &[&str] = &["TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA", "PROGRAMFILES"];
+    #[cfg(not(target_os = "windows"))]
+    const ENV_VAR_TOKENS: &[&str] = &[
+        "TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA", "PROGRAMFILES",
+    ];
     let mut result = path.to_string();
-    for var in VARS {
+    for var in ENV_VAR_TOKENS {
         let token = format!("%{}%", var.to_uppercase());
         if let Ok(val) = std::env::var(var) {
             // Case-insensitive token match on Windows path strings
@@ -344,11 +352,12 @@ pub fn contract_path(path: &str) -> String {
 /// Replace a known Windows user-folder prefix with its environment-variable
 /// token so that paths are portable across accounts and machines.
 fn contract_env_vars(path: &str) -> String {
-    // Most-specific first: TEMP ≈ %LOCALAPPDATA%\Temp, so replace it before
-    // we would replace the longer LOCALAPPDATA prefix.
-    const VARS: &[&str] = &["TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA", "PROGRAMFILES"];
+    #[cfg(not(target_os = "windows"))]
+    const ENV_VAR_TOKENS: &[&str] = &[
+        "TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA", "PROGRAMFILES",
+    ];
     let path_upper = path.to_uppercase();
-    for var in VARS {
+    for var in ENV_VAR_TOKENS {
         if let Ok(val) = std::env::var(var) {
             let val_upper = val.to_uppercase();
             if path_upper.starts_with(&val_upper) {
