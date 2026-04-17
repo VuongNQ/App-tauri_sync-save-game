@@ -67,6 +67,8 @@ export interface AppSettings {
   syncIntervalMinutes: number;
   startMinimised: boolean;
   runOnStartup: boolean;
+  /** Device-specific save-path overrides keyed by game id. Local-only — never synced to Firestore. */
+  pathOverrides: Record<string, string>;
 }
 
 // ── Save Info ─────────────────────────────────────────────

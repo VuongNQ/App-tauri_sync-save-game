@@ -22,8 +22,13 @@ use models::{
 #[tauri::command]
 fn load_dashboard(app: tauri::AppHandle) -> Result<DashboardData, String> {
     let mut state = settings::load_state(&app)?;
+    // Merge device-specific path_overrides into save_path (transient — not persisted).
     // Populate last_local_modified dynamically by scanning local save folders.
     for game in state.games.iter_mut() {
+        // Apply device-specific override so the frontend always sees the effective path.
+        if let Some(override_path) = state.settings.path_overrides.get(&game.id).cloned() {
+            game.save_path = Some(override_path);
+        }
         if let Some(ref save_path) = game.save_path.clone() {
             let expanded = settings::expand_env_vars(save_path);
             game.last_local_modified =

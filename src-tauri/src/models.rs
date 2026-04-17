@@ -111,6 +111,12 @@ pub struct AppSettings {
     pub sync_interval_minutes: u32,
     pub start_minimised: bool,
     pub run_on_startup: bool,
+    /// Device-specific save-path overrides keyed by `game_id`.
+    /// Populated when a user sets a path that cannot be represented as a
+    /// portable `%VAR%` token (e.g. `D:\Games\halo`).
+    /// **Local-only — never written to Firestore.**
+    #[serde(default)]
+    pub path_overrides: HashMap<String, String>,
 }
 
 impl Default for AppSettings {
@@ -119,6 +125,7 @@ impl Default for AppSettings {
             sync_interval_minutes: 0,
             start_minimised: false,
             run_on_startup: false,
+            path_overrides: HashMap::new(),
         }
     }
 }

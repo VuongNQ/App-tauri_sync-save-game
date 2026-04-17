@@ -7,6 +7,49 @@ use crate::{
     models::{AddGamePayload, AppSettings, GameEntry, PathValidation, StoredState},
 };
 
+// ── Path override helpers ─────────────────────────────────
+
+/// Return the effective save path for a game at runtime.
+/// `path_overrides` (device-specific) takes priority over `GameEntry.save_path` (portable/null).
+/// Returns the raw unexpanded path — call `expand_env_vars` before filesystem use.
+pub fn effective_save_path(game: &GameEntry, settings: &AppSettings) -> Option<String> {
+    settings
+        .path_overrides
+        .get(&game.id)
+        .cloned()
+        .or_else(|| game.save_path.clone())
+}
+
+/// Route a normalized `save_path` to the correct storage bucket:
+/// - Portable (`%VAR%` present): stays in `GameEntry.save_path`; stale override removed.
+/// - Device-specific (no `%`): moved to `AppSettings.path_overrides`; `GameEntry.save_path` → `None`.
+/// - `None` (cleared): override removed; `GameEntry.save_path` stays `None`.
+///
+/// Returns the value to store in `GameEntry.save_path`.
+fn route_save_path(
+    save_path: Option<String>,
+    game_id: &str,
+    settings: &mut AppSettings,
+) -> Option<String> {
+    match save_path {
+        Some(ref path) if path.contains('%') => {
+            // Portable path — keep in GameEntry, remove any stale device-specific override.
+            settings.path_overrides.remove(game_id);
+            save_path
+        }
+        Some(path) => {
+            // Device-specific path — store in path_overrides, null out GameEntry.save_path.
+            settings.path_overrides.insert(game_id.to_string(), path);
+            None
+        }
+        None => {
+            // Path cleared — remove override for a clean slate.
+            settings.path_overrides.remove(game_id);
+            None
+        }
+    }
+}
+
 const SETTINGS_FILE_NAME: &str = "games-library.json";
 
 pub fn load_state(app: &AppHandle) -> Result<StoredState, String> {
@@ -23,7 +66,28 @@ pub fn load_state(app: &AppHandle) -> Result<StoredState, String> {
         return Ok(StoredState::default());
     }
 
-    serde_json::from_str(&content).map_err(|e| format!("Invalid settings data: {e}"))
+    let mut state: StoredState =
+        serde_json::from_str(&content).map_err(|e| format!("Invalid settings data: {e}"))?;
+
+    // One-time migration: move any absolute save_path (no %VAR% tokens) into path_overrides
+    // so device-specific paths are never written to Firestore.
+    if migrate_absolute_save_paths(&mut state) {
+        println!("[settings] Migrated absolute save paths to path_overrides");
+        if let Err(e) = save_state(app, &state) {
+            eprintln!("[settings] Migration save failed: {e}");
+        } else {
+            // Inform Firestore that these games now have save_path = null.
+            for game in state
+                .games
+                .iter()
+                .filter(|g| state.settings.path_overrides.contains_key(&g.id))
+            {
+                spawn_firestore_game_upsert(app, game.clone());
+            }
+        }
+    }
+
+    Ok(state)
 }
 
 pub fn save_state(app: &AppHandle, state: &StoredState) -> Result<(), String> {
@@ -56,13 +120,16 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
         .map(|d| d.chars().take(1000).collect::<String>())
         .filter(|d| !d.trim().is_empty());
 
+    let normalized_save_path = normalize_optional_path(payload.save_path);
+    let routed_save_path = route_save_path(normalized_save_path, &id, &mut state.settings);
+
     let game = GameEntry {
         id,
         name: name.to_string(),
         description,
         thumbnail: payload.thumbnail,
         source: payload.source,
-        save_path: normalize_optional_path(payload.save_path),
+        save_path: routed_save_path,
         exe_name: None,
         exe_path: None,
         track_changes: false,
@@ -95,9 +162,14 @@ pub fn remove_game(app: &AppHandle, game_id: &str) -> Result<(), String> {
 
 pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
     let mut state = load_state(app)?;
+    let game_id = game.id.clone();
+    let normalized_save_path = normalize_optional_path(game.save_path);
+    let normalized_exe_path = normalize_optional_path(game.exe_path);
+    let routed_save_path = route_save_path(normalized_save_path, &game_id, &mut state.settings);
+
     let normalized = GameEntry {
-        save_path: normalize_optional_path(game.save_path),
-        exe_path: normalize_optional_path(game.exe_path),
+        save_path: routed_save_path,
+        exe_path: normalized_exe_path,
         ..game
     };
 
@@ -241,7 +313,10 @@ pub fn fetch_all_from_firestore(app: &AppHandle) -> Result<bool, String> {
         }
     }
 
-    if let Ok(Some(cloud_settings)) = firestore::load_settings(app, &user_id) {
+    if let Ok(Some(mut cloud_settings)) = firestore::load_settings(app, &user_id) {
+        // path_overrides is local-only (device-specific paths) — never synced to Firestore.
+        // Preserve the local machine's overrides when applying cloud settings.
+        cloud_settings.path_overrides = state.settings.path_overrides.clone();
         state.settings = cloud_settings;
     }
 
@@ -422,14 +497,35 @@ fn ensure_unique_id(existing: &[GameEntry], base_id: String) -> String {
 
 // ── Path validation ───────────────────────────────────────
 
+/// One-time migration: move any `save_path` without a `%VAR%` token into
+/// `AppSettings.path_overrides` so device-specific paths are never synced to Firestore.
+/// Returns `true` when at least one game was migrated (caller should persist state).
+fn migrate_absolute_save_paths(state: &mut StoredState) -> bool {
+    let mut migrated = false;
+    for game in &mut state.games {
+        if let Some(ref path) = game.save_path.clone() {
+            if !path.contains('%') {
+                state
+                    .settings
+                    .path_overrides
+                    .insert(game.id.clone(), path.clone());
+                game.save_path = None;
+                migrated = true;
+            }
+        }
+    }
+    migrated
+}
+
 pub fn validate_save_paths(app: &AppHandle) -> Result<Vec<PathValidation>, String> {
     let state = load_state(app)?;
     let results = state
         .games
         .iter()
         .map(|g| {
-            let valid = match &g.save_path {
-                Some(p) => {
+            let effective = effective_save_path(g, &state.settings);
+            let valid = match effective {
+                Some(ref p) => {
                     let expanded = expand_env_vars(p);
                     let path = std::path::Path::new(&expanded);
                     if path.exists() {
@@ -465,8 +561,8 @@ pub fn get_browse_default_path(app: &AppHandle) -> Result<Option<String>, String
         .games
         .iter()
         .filter_map(|g| {
-            let path = g.save_path.as_deref()?;
-            let expanded = expand_env_vars(path);
+            let path = effective_save_path(g, &state.settings)?;
+            let expanded = expand_env_vars(&path);
             let dir = std::path::Path::new(&expanded);
             if !dir.exists() {
                 return None;
@@ -486,8 +582,8 @@ pub fn get_browse_default_path(app: &AppHandle) -> Result<Option<String>, String
         None => {
             // Fallback: first game with any existing save_path
             let fallback = state.games.iter().find_map(|g| {
-                let path = g.save_path.as_deref()?;
-                let expanded = expand_env_vars(path);
+                let path = effective_save_path(g, &state.settings)?;
+                let expanded = expand_env_vars(&path);
                 if std::path::Path::new(&expanded).exists() {
                     std::path::Path::new(&expanded)
                         .parent()

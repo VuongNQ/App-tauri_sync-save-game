@@ -128,8 +128,8 @@ pub fn get_save_info(app: &AppHandle, game_id: &str) -> Result<SaveInfo, String>
     let state = settings::load_state(app)?;
     let game = settings::find_game(&state, game_id)?;
 
-    let save_path = game
-        .save_path
+    let effective = settings::effective_save_path(game, &state.settings);
+    let save_path = effective
         .as_deref()
         .ok_or("Save path is not set for this game")?;
     let expanded_path = settings::expand_env_vars(save_path);
@@ -244,8 +244,8 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
     let state = settings::load_state(app)?;
     let game = settings::find_game(&state, game_id)?.clone();
 
-    let save_path = game
-        .save_path
+    let effective = settings::effective_save_path(&game, &state.settings);
+    let save_path = effective
         .as_deref()
         .ok_or("Save path is not set for this game")?;
     let expanded_path = settings::expand_env_vars(save_path);
@@ -430,7 +430,9 @@ pub fn sync_all_games(app: &AppHandle) -> Result<Vec<SyncResult>, String> {
     let game_ids: Vec<String> = state
         .games
         .iter()
-        .filter(|g| g.save_path.is_some())
+        .filter(|g| {
+            g.save_path.is_some() || state.settings.path_overrides.contains_key(&g.id)
+        })
         .map(|g| g.id.clone())
         .collect();
 
@@ -466,8 +468,8 @@ pub fn check_sync_structure_diff(
     let state = settings::load_state(app)?;
     let game = settings::find_game(&state, game_id)?.clone();
 
-    let save_path = game
-        .save_path
+    let effective = settings::effective_save_path(&game, &state.settings);
+    let save_path = effective
         .as_deref()
         .ok_or("Save path is not set for this game")?;
     let expanded_path = settings::expand_env_vars(save_path);
@@ -585,8 +587,8 @@ fn restore_from_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult
     let state = settings::load_state(app)?;
     let game = settings::find_game(&state, game_id)?.clone();
 
-    let save_path = game
-        .save_path
+    let effective = settings::effective_save_path(&game, &state.settings);
+    let save_path = effective
         .as_deref()
         .ok_or("Save path is not set for this game")?;
     let expanded_path = settings::expand_env_vars(save_path);
@@ -682,8 +684,8 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
     let state = settings::load_state(app)?;
     let game = settings::find_game(&state, game_id)?.clone();
 
-    let save_path = game
-        .save_path
+    let effective = settings::effective_save_path(&game, &state.settings);
+    let save_path = effective
         .as_deref()
         .ok_or("Save path is not set for this game")?;
     let expanded_path = settings::expand_env_vars(save_path);

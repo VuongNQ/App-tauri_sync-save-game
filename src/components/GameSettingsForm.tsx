@@ -265,7 +265,7 @@ function DescriptionSection() {
             <label className={FORM_LABEL}>
               <span className={LABEL_SPAN}>Game description (max 1000 characters)</span>
               <textarea
-                className={`${INPUT_CLS} resize-y min-h-[60px]`}
+                className={`${INPUT_CLS} resize-y min-h-15`}
                 {...field}
                 maxLength={1000}
                 rows={4}
@@ -496,7 +496,7 @@ function SyncExclusionsSection({ game }: SyncExclusionsSectionProps) {
               key={ex}
               className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-[rgba(255,180,80,0.12)] border border-[rgba(255,180,80,0.25)] text-[#ffd5a0]"
             >
-              <span className="font-mono truncate max-w-[260px]" title={ex}>
+              <span className="font-mono truncate max-w-65" title={ex}>
                 {ex}
               </span>
               <button

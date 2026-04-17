@@ -190,6 +190,7 @@ pub fn save_settings(app: &AppHandle, user_id: &str, settings: &AppSettings) -> 
     let fields = match settings_val {
         Value::Object(map) => map
             .into_iter()
+            .filter(|(k, _)| k != "pathOverrides") // local-only, never synced to Firestore
             .map(|(k, v)| (k, json_to_firestore(&v)))
             .collect::<serde_json::Map<_, _>>(),
         _ => return Err("AppSettings did not serialize to object".into()),
