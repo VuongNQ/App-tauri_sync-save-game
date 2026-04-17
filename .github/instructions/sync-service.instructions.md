@@ -60,22 +60,28 @@ fn drive_get(app: &AppHandle, url: &str) -> Result<(u16, String), String> {
 ```
 appDataFolder/
   game-processing-sync/          ← root folder (ensure_root_folder)
-    config.json                  ← AppSettings JSON (global configuration)
-    library.json                 ← Vec<GameEntry> JSON (game library table)
+    config.json                  ← AppSettings JSON (LEGACY — migration only)
+    library.json                 ← Vec<GameEntry> JSON (LEGACY — migration only)
     {game_id}/                   ← per-game folder (ensure_game_folder)
-      <save files...>            ← flat list; SyncMeta keys are relative paths (forward slashes)
-      .sync-meta.json            ← sync metadata (timestamps + Drive file IDs)
+      <save files...>            ← save_paths[0] files — stored flat in root
+      .sync-meta.json            ← sync metadata for save_paths[0]
+      path-1/                    ← save_paths[1] files (created by ensure_subfolder)
+        <save files...>
+        .sync-meta.json          ← separate sync metadata per sub-path
+      path-2/                    ← save_paths[2] files, etc.
+        ...
       backups/                   ← created on first backup; managed by drive_mgmt.rs
-        {ISO-ts} — {label}/  ← one subfolder per snapshot (ensure_subfolder)
-          <copied save files>    ← server-side copies of non-meta save files
-          .backup-meta.json      ← BackupMeta JSON (created_time, label, stats)
+        {ISO-ts} — {label}/  ← one subfolder per snapshot
+          <copied save files>
+          .backup-meta.json
 ```
 
 - Root folder name: `"game-processing-sync"`, parent: `"appDataFolder"`.
 - Per-game folder name: matches `GameEntry.id` exactly.
-- Cache `gdrive_folder_id` in `GameEntry` — never search Drive for the same folder twice.
-- `library.json` and `config.json` are flat files directly under the root folder.
-- **Save files are stored flat** in the game root — no recursive subfolders except `backups/`.
+- Cache `gdrive_folder_id` in `GameEntry` for save_paths[0]; cache in `save_paths[i].gdrive_folder_id` for i≥1 — never search Drive for the same folder twice.
+- `save_paths[0]` uses the game root folder (zero migration for existing installs).
+- `save_paths[i≥1]` use `path-{i}/` subfolders created on first sync via `gdrive::ensure_subfolder(app, root_folder_id, "path-{i}")`.
+- Each path maintains its own `.sync-meta.json` in its own Drive folder.
 - `backups/` is treated as a protected name: shown in the file manager but rename/delete/move are disabled.
 - `.sync-meta.json` is treated as a protected name: shown but actions disabled.
 
@@ -135,7 +141,7 @@ const PROJECT_ID: &str = match option_env!("GOOGLE_CLOUD_PROJECT_ID") {
 | `load_sync_meta(app, user_id, game_id)` | GET | `users/{uid}/syncMeta/{game_id}` → `Option<SyncMeta>` |
 
 > `load_sync_meta` is marked `#[allow(dead_code)]` — retained for future cross-device read path. Drive `.sync-meta.json` remains the exclusive read source today.
-> **`save_settings` strips `pathOverrides`**: When serialising `AppSettings` to Firestore, the `pathOverrides` field is **always filtered out** before the write. It is a local-only device-specific value and must never be stored in Firestore.
+> **`save_settings` strips local-only fields**: When serialising `AppSettings` to Firestore, **both `pathOverrides` and `pathOverridesIndexed`** fields are **always filtered out** before the write. They are local-only device-specific values and must never be stored in Firestore.
 ### 401 Retry Pattern (same as gdrive.rs)
 
 Every Firestore call wraps the request: on HTTP 401, force a token refresh via `gdrive_auth::get_access_token()` and retry once.
@@ -193,7 +199,7 @@ Called from `lib.rs` → `save_auth_tokens` command after login. Algorithm:
 2. If Firestore has zero games → fall back to `gdrive::fetch_library_from_cloud()` for one-time migration.
 3. Try `firestore::load_settings()` → if `Some`, use Firestore settings.
 4. If `None` → fall back to `gdrive::fetch_settings_from_cloud()` for one-time migration.
-5. **Preserve local `path_overrides`**: before overwriting settings with the cloud version, copy the current `state.settings.path_overrides` into `cloud_settings.path_overrides` so device-specific paths are never lost during a cloud restore.
+5. **Preserve local overrides**: before overwriting settings with the cloud version, copy the current `state.settings.path_overrides` **and `path_overrides_indexed`** into the cloud settings before merging, so device-specific paths are never lost during a cloud restore.
 6. Call `settings::save_state()` with merged data.
 
 This ensures existing users (who had Drive `library.json`) are seamlessly migrated to Firestore on first login after upgrade.
@@ -265,24 +271,28 @@ Both `save_path` **and** `exe_path` fields on `GameEntry` are stored with tokens
 
 Public wrapper over `contract_env_vars` (normalises backslashes then tokenises). Exposed as the `contract_path` Tauri command. The frontend calls this immediately after a file-picker returns an absolute path so the portable token form is stored and displayed.
 
-### Two-Tier Save Path Storage
+### Two-Tier Save Path Storage (Multi-Path)
 
-Save paths use a two-tier strategy to support both portable and device-specific locations:
+Each game has **one or more** `SavePathEntry` records in `GameEntry.save_paths`. Each entry has a `label`, `path`, `gdrive_folder_id`, and `sync_excludes`.
 
-| Path type | Storage location | Synced to Firestore? |
-|-----------|-----------------|---------------------|
-| Contains `%` token (portable) | `GameEntry.save_path` | Yes |
-| No `%` token (device-specific, e.g. `D:\Games\PCSX2\memcards`) | `AppSettings.path_overrides[game_id]`, `GameEntry.save_path = None` | No (local-only) |
+| Path index | Portable path storage | Device-specific path storage | Synced to Firestore? |
+|---|---|---|---|
+| `save_paths[0]` | `SavePathEntry.path` (contains `%`) | `AppSettings.path_overrides[game_id]` | Yes (portable only) |
+| `save_paths[i≥1]` | `SavePathEntry.path` (contains `%`) | `AppSettings.path_overrides_indexed["{game_id}:{i}"]` | Yes (portable only) |
 
-**Routing function**: `route_save_path(save_path, game_id, settings)` in `settings.rs` — called on every `add_manual_game` / `upsert_game`. Routes the normalised path to either `GameEntry.save_path` or `path_overrides` depending on token presence.
+Both `path_overrides` and `path_overrides_indexed` are **local-only** — never written to Firestore.
 
-**Read function**: `effective_save_path(game, settings)` — returns the active path for a game (`path_overrides` wins over `save_path`). Use this **everywhere** a path is needed at runtime (sync, validate, browse default, watcher).
+**Routing function**: `route_save_paths(save_paths, game_id, settings)` in `settings.rs` — called on every `add_manual_game` / `upsert_game`. Iterates all entries; routes each normalised path to either `SavePathEntry.path` or the appropriate override map depending on token presence.
 
-**Merge function**: `apply_path_overrides(games, settings)` — merges `path_overrides` back into `GameEntry.save_path` in-place. **Must be called before every `DashboardData` return** in `lib.rs`. Forgetting this causes `savePath: null` in the UI for device-specific games after any mutation.
+**Read function**: `effective_save_paths(game, settings) -> Vec<Option<String>>` — returns the active path for each index (override wins over `save_paths[i].path`). Use this **everywhere** paths are needed at runtime (sync, validate, browse default, watcher).
 
-**One-time migration**: `migrate_absolute_save_paths()` runs automatically on every `load_state()`. Moves any existing `GameEntry.save_path` without `%` tokens into `path_overrides`, saves state, and spawns background Firestore upserts to null out the cloud docs.
+**Merge function**: `apply_path_overrides(games, settings)` — merges all overrides back into `GameEntry.save_paths[i].path` in-place. **Must be called before every `DashboardData` return** in `lib.rs`. Forgetting this causes `path: null` in the UI for device-specific paths after any mutation.
 
-**`sync_all_games` filter**: Must check both `game.save_path.is_some()` **or** `state.settings.path_overrides.contains_key(&game.id)` to include device-specific games.
+**One-time migrations** (both run automatically on every `load_state()`):
+- `migrate_save_paths_to_vec()` — converts any `GameEntry` without `save_paths` but with legacy `save_path` + `sync_excludes` into `save_paths[0]`.
+- `migrate_absolute_save_paths()` — moves any `SavePathEntry.path` without `%` tokens into the appropriate override map.
+
+**`sync_all_games` filter**: Must check `!g.save_paths.is_empty()` to include games with configured paths.
 
 ---
 
@@ -290,18 +300,21 @@ Save paths use a two-tier strategy to support both portable and device-specific 
 
 ### Pipeline
 
-1. Load `GameEntry` from state; obtain the effective save path via `settings::effective_save_path(game, settings)` (checks `path_overrides` first, falls back to `game.save_path`). Error if neither is set.
-2. `gdrive::ensure_root_folder()` → `gdrive::ensure_game_folder()`.
-3. `gdrive::download_sync_meta()` → `Option<SyncMeta>` + optional file ID.
-4. `gdrive::list_files()` in game folder (for Drive file ID lookup).
-5. `collect_local_files(save_path)` — recursively walk directory with `walkdir`.
-6. **Per-file timestamp comparison** (ISO 8601 string comparison):
+1. Load `GameEntry` from state; obtain all effective save paths via `settings::effective_save_paths(game, settings)`. Error if all are `None`.
+2. `gdrive::ensure_root_folder()` → `gdrive::ensure_game_folder()` → game root Drive folder.
+3. For each index `i` with a configured path:
+   - `i == 0`: use `GameEntry.gdrive_folder_id` (the game root folder).
+   - `i >= 1`: call `gdrive::ensure_subfolder(app, root_folder_id, "path-{i}")` → cache ID in `save_paths[i].gdrive_folder_id`.
+4. Per path: `gdrive::download_sync_meta()` → `Option<SyncMeta>` + optional file ID.
+5. Per path: `gdrive::list_files()` in that Drive folder (for Drive file ID lookup).
+6. Per path: `collect_local_files(effective_path)` — recursively walk directory with `walkdir`.
+7. **Per-file timestamp comparison** (ISO 8601 string comparison):
    - Local newer → upload (PATCH if `drive_file_id` exists, POST if new).
    - Cloud newer → download from Drive to local path.
    - Equal → skip.
-7. Download cloud-only files (present in `SyncMeta` but not locally).
-8. Upload updated `.sync-meta.json` with new file entries.
-9. Update `GameEntry.last_local_modified`, `last_cloud_modified`, and `cloud_storage_bytes` (sum of all synced file sizes) to now / actual bytes.
+8. Per path: download cloud-only files (present in `SyncMeta` but not locally).
+9. Per path: upload updated `.sync-meta.json` with new file entries.
+10. Accumulate totals across all paths; update `GameEntry.last_local_modified`, `last_cloud_modified`, and `cloud_storage_bytes` (sum across all paths).
 
 ### Conflict Resolution
 
@@ -620,6 +633,53 @@ pub struct SyncResult {
     pub error: Option<String>, // error: string | null
 }
 ```
+
+### SaveInfo / PathSaveInfo (Rust → TypeScript)
+
+Returned by `get_save_info`. Aggregates files from **all** configured save paths.
+
+```rust
+pub struct PathSaveInfo {
+    pub label: String,           // label of this save_paths entry
+    pub save_path: String,       // effective (unexpanded) path for this index
+    pub total_size: u64,
+    pub files: Vec<SaveFileInfo>,
+}
+
+pub struct SaveInfo {
+    pub game_id: String,
+    pub save_path: String,       // primary path (save_paths[0]) — backward compat
+    pub total_files: u32,        // aggregate across all paths
+    pub total_size: u64,         // aggregate across all paths
+    pub last_modified: Option<String>,
+    pub files: Vec<SaveFileInfo>, // all files from all paths
+    pub path_infos: Vec<PathSaveInfo>, // per-path breakdown; EMPTY when only 1 path
+}
+```
+
+TypeScript mirrors in `src/types/dashboard.ts`:
+```ts
+export interface PathSaveInfo {
+  label: string;
+  savePath: string;
+  totalSize: number;
+  files: SaveFileInfo[];
+}
+export interface SaveInfo {
+  gameId: string;
+  savePath: string;
+  totalFiles: number;
+  totalSize: number;
+  lastModified: string | null;
+  files: SaveFileInfo[];
+  /** Per-path breakdown. Empty when only one path configured. */
+  pathInfos: PathSaveInfo[];
+}
+```
+
+Frontend `SaveInfoPanel` in `SupportUI.tsx`:
+- When `pathInfos.length > 1`: renders one labelled `PathInfoSection` card per path, each with its own file tree and open-folder button. Global open-folder button is hidden.
+- When `pathInfos.length <= 1`: single-path mode, same as before.
 
 ### SyncStructureDiff (Rust → TypeScript)
 

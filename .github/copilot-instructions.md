@@ -81,16 +81,28 @@ src-tauri/src/
 | `description` | `Option<String>` | `string \| null` | User-provided description |
 | `thumbnail` | `Option<String>` | `string \| null` | Local file path **or** remote URL for logo/thumbnail |
 | `source` | `String` | `string` | One of: `"manual"`, `"emulator"` |
-| `save_path` | `Option<String>` | `string \| null` | Save-game folder path. If tokenisable (contains `%`), stored as a portable `%VAR%` token path (e.g. `%LOCALAPPDATA%\Game\Saves`). If device-specific (e.g. `D:\Games\PCSX2\memcards`), this field is `None` and the path lives in `AppSettings.path_overrides[game_id]` instead. |
+| `save_paths` | `Vec<SavePathEntry>` | `SavePathEntry[]` | Ordered list of save-game folder entries. Primary path is index 0. Users can add multiple paths (e.g. memcards + save states). See `SavePathEntry` below. |
 | `exe_name` | `Option<String>` | `string \| null` | Game executable filename (e.g. `"MyGame.exe"`); used by the process monitor to detect when the game is running |
 | `exe_path` | `Option<String>` | `string \| null` | Full path to the game executable (e.g. `%PROGRAMFILES%\Steam\game.exe`); used by the `launch_game` command. **LOCAL-ONLY — never synced to Firestore or Drive; stripped to `None` before any cloud write; restored from local state after any cloud-to-local overwrite.** |
 | `track_changes` | `bool` | `boolean` | Monitor game process and sync on exit (default `false`) |
 | `auto_sync` | `bool` | `boolean` | Automatically sync on change detection (default `false`) |
-| `last_local_modified` | `Option<String>` | `string \| null` | ISO 8601 timestamp of last known local save modification |
+| `last_local_modified` | `Option<String>` | `string \| null` | ISO 8601 timestamp of last known local save modification (max across all paths) |
 | `last_cloud_modified` | `Option<String>` | `string \| null` | ISO 8601 timestamp of last Google Drive save version |
-| `gdrive_folder_id` | `Option<String>` | `string \| null` | Google Drive folder ID where saves are stored |
-| `cloud_storage_bytes` | `Option<u64>` | `number \| null` | Total bytes stored in Drive for this game's saves; `None` = never synced |
-| `sync_excludes` | `Vec<String>` | `string[]` | Relative paths excluded from Drive sync; trailing `/` means folder prefix |
+| `gdrive_folder_id` | `Option<String>` | `string \| null` | Google Drive root folder ID for this game's saves |
+| `cloud_storage_bytes` | `Option<u64>` | `number \| null` | Total bytes stored in Drive across **all** paths; `None` = never synced |
+
+### SavePathEntry
+
+Each entry in `GameEntry.save_paths`:
+
+| Field | Rust type | TS type | Description |
+|---|---|---|---|
+| `label` | `String` | `string` | User-defined label (e.g. `"Memcard"`, `"Save States"`) |
+| `path` | `Option<String>` | `string \| null` | Portable `%VAR%` path, or `None` if device-specific (stored in `path_overrides` / `path_overrides_indexed`) |
+| `gdrive_folder_id` | `Option<String>` | `string \| null` | Drive folder ID for this path. Index 0 uses `GameEntry.gdrive_folder_id` (root); index i≥1 uses `save_paths[i].gdrive_folder_id` (subfolder `path-{i}/`) |
+| `sync_excludes` | `Vec<String>` | `string[]` | Relative paths excluded from Drive sync for this specific path; trailing `/` means folder prefix |
+
+> **Legacy fields** (`save_path: Option<String>`, `sync_excludes: Vec<String>` on `GameEntry`) are kept on the Rust struct with `#[serde(default, skip_serializing_if)]` for migration deserialization only. They are never written by current code.
 
 ### Serialisation Convention
 
@@ -108,7 +120,7 @@ Rust command → Result<DashboardData, String> → invoke<DashboardData>() → a
 
 For sync-specific commands, a `SyncResult` type may be returned alongside or instead of `DashboardData`.
 
-> **`apply_path_overrides` rule**: Before returning any `DashboardData`, every command in `lib.rs` **must** call `settings::apply_path_overrides(&mut state.games, &state.settings)`. This merges device-specific paths from `AppSettings.path_overrides` back into `GameEntry.save_path` so the frontend always receives a non-null path. Forgetting this causes the path to appear as `null` in the UI after any mutation.
+> **`apply_path_overrides` rule**: Before returning any `DashboardData`, every command in `lib.rs` **must** call `settings::apply_path_overrides(&mut state.games, &state.settings)`. This merges device-specific paths from `AppSettings.path_overrides` (index 0) and `path_overrides_indexed` (index i≥1) back into each `GameEntry.save_paths[i].path` so the frontend always receives non-null paths. Forgetting this causes paths to appear as `null` in the UI after any mutation.
 
 ### All Tauri Commands
 
@@ -157,8 +169,13 @@ appDataFolder/
     library.json         # LEGACY — Vec<GameEntry> backup; read once for migration to Firestore only
     games/
       {game_id}/
-        <save files...>
-        .sync-meta.json  # timestamps + file hashes for conflict detection
+        <save files...>  # save_paths[0] files — stored flat in root
+        .sync-meta.json  # timestamps + file hashes for save_paths[0]
+        path-1/          # save_paths[1] files (created by ensure_subfolder)
+          <save files...>
+          .sync-meta.json
+        path-2/          # save_paths[2] files, etc.
+          ...
 ```
 
 ### Firestore Collection Structure
@@ -209,16 +226,19 @@ pub struct StoredState {
 }
 ```
 
-`AppSettings` includes a `path_overrides` field that is **local-only** and never synced to Firestore:
+`AppSettings` includes **two** local-only path-override fields that are **never synced to Firestore**:
 
 ```rust
 pub struct AppSettings {
     pub sync_interval_minutes: u32,
     pub start_minimised: bool,
     pub run_on_startup: bool,
-    /// Device-specific save-path overrides keyed by game_id. Local-only — never written to Firestore.
+    /// Device-specific path for save_paths[0], keyed by game_id. Local-only.
     #[serde(default)]
     pub path_overrides: HashMap<String, String>,
+    /// Device-specific paths for save_paths[i≥1], keyed by "{game_id}:{i}". Local-only.
+    #[serde(default)]
+    pub path_overrides_indexed: HashMap<String, String>,
 }
 ```
 
@@ -229,8 +249,10 @@ export interface AppSettings {
   syncIntervalMinutes: number;
   startMinimised: boolean;
   runOnStartup: boolean;
-  /** Device-specific save-path overrides keyed by game id. Local-only — never synced to Firestore. */
+  /** Device-specific save-path overrides for save_paths[0] keyed by game id. Local-only — never synced to Firestore. */
   pathOverrides: Record<string, string>;
+  /** Device-specific save-path overrides for save_paths[i≥1] keyed by "{gameId}:{i}". Local-only. */
+  pathOverridesIndexed: Record<string, string>;
 }
 ```
 
@@ -240,11 +262,14 @@ export interface AppSettings {
 
 ### Sync Algorithm (per game)
 
-1. Read local save folder → collect file paths + `last_modified` timestamps.
-2. Fetch `.sync-meta.json` from the game's Drive folder → get `last_cloud_modified`.
-3. **Storage quota check** (pre-upload): sum projected bytes for this game + `cloud_storage_bytes` from all other games. Reject if total exceeds **200 MB per user**.
-4. **Compare**: if local is newer → upload local saves to Drive. If Drive is newer → download Drive saves to local. If equal → no-op.
-5. After sync, update `.sync-meta.json` on Drive and `last_local_modified` / `last_cloud_modified` / `cloud_storage_bytes` in local state.
+1. Call `settings::effective_save_paths(game, settings)` → `Vec<Option<String>>` (one entry per `save_paths` element).
+2. For each index `i` with a configured path:
+   - If `i == 0`: use `GameEntry.gdrive_folder_id` as the Drive folder (existing root).
+   - If `i >= 1`: call `gdrive::ensure_subfolder(app, root_folder_id, "path-{i}")` → cache the returned ID in `save_paths[i].gdrive_folder_id`.
+3. Fetch `.sync-meta.json` from that path's Drive folder.
+4. **Storage quota check** (pre-upload): sum projected bytes for this game + `cloud_storage_bytes` from all other games. Reject if total exceeds **200 MB per user**.
+5. **Compare**: if local is newer → upload local saves to Drive. If Drive is newer → download Drive saves to local. If equal → no-op.
+6. After sync, update `.sync-meta.json` on Drive and `last_local_modified` / `last_cloud_modified` / `cloud_storage_bytes` (sum across all paths) in local state.
 
 ### Background Process Monitor
 
@@ -299,41 +324,47 @@ A route wrapper or layout component checks `isAuthenticated` (from Tauri command
 
 ## Save Path Portability (Windows Env-Var Tokens)
 
-Save paths are stored with Windows environment-variable tokens instead of hardcoded user names so they work across accounts and machines. Paths that cannot be tokenised (e.g. on a non-system drive like `D:\Games\...`) are stored as device-specific overrides in `AppSettings.path_overrides`.
+Save paths are stored with Windows environment-variable tokens instead of hardcoded user names so they work across accounts and machines. Paths that cannot be tokenised (e.g. on a non-system drive like `D:\Games\...`) are stored as device-specific overrides.
 
-### Two-tier storage
+### Multi-Path Storage Architecture
 
-| Path type | Example | Storage location |
-|-----------|---------|------------------|
-| Portable (tokenisable) | `%LOCALAPPDATA%\Game\Saves` | `GameEntry.save_path` — synced to Firestore |
-| Device-specific (non-standard drive / no matching token) | `D:\Games\PCSX2\memcards` | `AppSettings.path_overrides[game_id]` — **local-only, never synced** |
+Each game has **one or more** `SavePathEntry` records in `GameEntry.save_paths`. Each entry has a `label`, `path`, `gdrive_folder_id`, and `sync_excludes`.
 
-`route_save_path()` in `settings.rs` is the single routing function called on every add/update:
-- If the normalised path contains `%` → portable path, stays in `GameEntry.save_path`; override removed.
-- If non-empty and no `%` → device-specific, moved into `path_overrides`; `GameEntry.save_path = None`.
-- If `None` → override removed.
+| Path index | Portable path storage | Device-specific path storage |
+|---|---|---|
+| `save_paths[0]` | `SavePathEntry.path` (contains `%`) | `AppSettings.path_overrides[game_id]` |
+| `save_paths[i≥1]` | `SavePathEntry.path` (contains `%`) | `AppSettings.path_overrides_indexed["{game_id}:{i}"]` |
 
-`effective_save_path(game, settings)` returns the active path for a game (override wins over `save_path`).
+Both `path_overrides` and `path_overrides_indexed` are **local-only** — never written to Firestore.
 
-`apply_path_overrides(games, settings)` merges overrides back into `GameEntry.save_path` **in-place** before any `DashboardData` response — call this in every command that returns `DashboardData`.
+### Key Functions (`settings.rs`)
+
+`route_save_paths(save_paths, game_id, settings)` — routes each `SavePathEntry.path` to either the portable field or the appropriate override map depending on token presence. Called on every `add_manual_game` / `upsert_game`.
+
+`effective_save_paths(game, settings) -> Vec<Option<String>>` — returns the active path for each index (override wins over `save_paths[i].path`). Use **everywhere** a path is needed at runtime.
+
+`effective_save_path(game, settings)` — shim returning `effective_save_paths(...)[0]`. Kept `#[allow(dead_code)]`.
+
+`apply_path_overrides(games, settings)` — merges all overrides back into `GameEntry.save_paths[i].path` **in-place**. **Must be called before every `DashboardData` return** in `lib.rs`.
 
 ### Storage contract
 - `normalize_optional_path()` (called on every add/update) calls `contract_env_vars()` which replaces known user-folder prefixes with `%VAR%` tokens.
 - Replacement priority (most-specific first): `TEMP` → `LOCALAPPDATA` → `APPDATA` → `USERPROFILE` → `PROGRAMDATA` → `PROGRAMFILES`.
 - Example: `C:\Users\vuong\AppData\Local\Game\Saves` → `%LOCALAPPDATA%\Game\Saves`.
-- Example: `D:\Games\PCSX2\memcards` → no token match → stored in `path_overrides`, `save_path = None`.
+- Example: `D:\Games\PCSX2\memcards` → no token match → stored in `path_overrides`, `save_paths[0].path = None`.
 
 ### Expansion contract
 - `expand_env_vars(path)` in `settings.rs` is the **single** expansion function; call it everywhere a path is used as a real filesystem path.
-- Expansion sites: `validate_save_paths`, `get_browse_default_path`, `sync::get_save_info`, `sync::sync_game_inner`, `watcher::init_watchers`, `watcher::handle_track_changes_toggle`.
-- All sync functions use `effective_save_path()` rather than reading `game.save_path` directly.
+- All sync functions use `effective_save_paths()` (plural), not singular.
 - Paths are **displayed to users with tokens (or as-is for device-specific)** — this is intentional.
 
 ### One-time migration
-`migrate_absolute_save_paths()` runs automatically on every `load_state()` call. Any existing `GameEntry.save_path` that contains no `%` token is moved to `path_overrides` and a background Firestore upsert is spawned to null out the cloud doc. Safe to run repeatedly — no-ops if nothing needs migrating.
+`migrate_save_paths_to_vec()` runs automatically on every `load_state()` call. Any existing `GameEntry` with no `save_paths` but a legacy `save_path` + `sync_excludes` is converted to `save_paths[0]`. Safe to run repeatedly.
+
+`migrate_absolute_save_paths()` also runs on load. Any `SavePathEntry.path` without `%` tokens is moved to the appropriate override map.
 
 ### New-device UX
-When a game's `savePath` is `null` on the frontend (device-specific path not configured for this machine), `SaveFolderSection` in `GameSettingsForm` shows a blue info banner prompting the user to Browse. The banner auto-dismisses when the field is filled.
+When a `SavePathEntry.path` is `null` (device-specific path not configured for this machine), `SavePathCard` in `GameSettingsForm` shows a blue info banner prompting the user to Browse. The banner auto-dismisses when the field is filled.
 
 ### `expand_save_path` Tauri command
 - Lets the frontend expand a stored path to an absolute path on demand (e.g. for the folder-picker dialog `defaultPath`).
@@ -343,7 +374,7 @@ When a game's `savePath` is `null` on the frontend (device-specific path not con
 - Converts an absolute path back to a portable token path (e.g. `C:\Program Files\Steam\game.exe` → `%PROGRAMFILES%\Steam\game.exe`).
 - Called immediately after a file-picker returns a path so the tokenised form is stored and displayed.
 - Frontend wrapper: `contractPath(path: string): Promise<string>` in `src/services/tauri.ts`.
-- Used by both `GameExecutableSection` (game executable picker, inside `GameSettingsForm`) and `useSavePathForm.handleBrowse()` (save-folder picker) so stored paths are always portable.
+- Used by `GameExecutableSection` (exe picker) and `SavePathCard.handleBrowse()` (save-folder picker) so stored paths are always portable.
 - Note: save-folder paths that are device-specific are stored as-is (no token) — only `exe_path` is tokenised via `contract_path`.
 
 ### `launch_game` Tauri command
@@ -351,8 +382,8 @@ When a game's `savePath` is `null` on the frontend (device-specific path not con
 - After a successful launch, calls `watcher::arm_on_launch()` if `track_changes == true` and `exe_name` is set — arming the process watcher on-demand.
 - Requires `tauri-plugin-opener` with capability `opener:allow-open-path { path: "**" }`.
 
-### Frontend rule
-In `SaveFolderSection.handleBrowse()`: if `game.savePath` contains `%`, call `expandSavePath()` before extracting the parent directory for the folder-picker `defaultPath`. Device-specific paths (no `%`) are used directly.
+### Frontend rules
+In `SavePathCard.handleBrowse()`: if the stored path contains `%`, call `expandSavePath()` before extracting the parent directory for the folder-picker `defaultPath`. Device-specific paths (no `%`) are used directly.
 
 In `GameExecutableSection.handleBrowse()` (game settings form): after the file-picker returns an absolute `.exe` path, call `contractPath()` and store the result — never store raw absolute paths.
 
@@ -383,7 +414,8 @@ pub struct AppSettings {
     pub start_minimised: bool,       // launch to tray on Windows startup
     pub run_on_startup: bool,        // register in Windows Run key
     pub sync_interval_minutes: u32,  // periodic sync interval (0 = only on change)
-    pub path_overrides: HashMap<String, String>, // device-specific paths, local-only
+    pub path_overrides: HashMap<String, String>, // device-specific paths for save_paths[0], local-only
+    pub path_overrides_indexed: HashMap<String, String>, // device-specific paths for save_paths[i≥1] keyed by "{game_id}:{i}", local-only
 }
 ```
 

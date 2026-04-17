@@ -395,27 +395,51 @@ export function useSyncAndLaunchFlow({ onError }: { onError?: (msg: string, canF
 All interfaces live here. **Never duplicate type definitions** across files.
 
 ```ts
+export interface SavePathEntry {
+  label: string;             // user-defined label, e.g. "Memcard", "Save States"
+  path: string | null;       // portable %VAR% path, or null if device-specific
+  gdriveFolderId: string | null; // Drive folder for this path; index 0 = game root, i≥1 = path-{i}/ subfolder
+  syncExcludes: string[];    // relative paths excluded from Drive sync for this specific path
+}
+
+export interface PathSaveInfo {
+  label: string;      // matches SavePathEntry.label
+  savePath: string;   // effective path for this index (unexpanded token form)
+  totalSize: number;
+  files: SaveFileInfo[];
+}
+
 export interface GameEntry {
   id: string;
   name: string;
   description: string | null;       // null, not undefined (Rust Option<T>)
   thumbnail: string | null;         // local file path or remote URL for logo
   source: GameSource;               // "manual" | "emulator"
-  savePath: string | null;
+  savePaths: SavePathEntry[];       // ordered list; index 0 is primary. Replaces old savePath + syncExcludes.
   exeName: string | null;           // game executable filename (e.g. "MyGame.exe"); used by process monitor
   exePath: string | null;           // full exe path with %VAR% tokens (e.g. "%PROGRAMFILES%\\Steam\\game.exe"); used by launch_game
                                     // LOCAL-ONLY — stripped before any Firestore / Drive upload; never synced to cloud
   trackChanges: boolean;
   autoSync: boolean;
-  lastLocalModified: string | null; // ISO 8601
+  lastLocalModified: string | null; // ISO 8601 (max across all paths)
   lastCloudModified: string | null;
   gdriveFolderId: string | null;
-  cloudStorageBytes: number | null; // total bytes synced to Drive; null = never synced
-  syncExcludes: string[];           // relative paths excluded from Drive sync; trailing '/' = folder prefix
+  cloudStorageBytes: number | null; // total bytes synced to Drive across ALL paths; null = never synced
+}
+
+export interface AppSettings {
+  syncIntervalMinutes: number;
+  startMinimised: boolean;
+  runOnStartup: boolean;
+  /** Device-specific save-path overrides for save_paths[0] keyed by game id. Local-only. */
+  pathOverrides: Record<string, string>;
+  /** Device-specific save-path overrides for save_paths[i≥1] keyed by "{gameId}:{i}". Local-only. */
+  pathOverridesIndexed: Record<string, string>;
 }
 
 export interface DashboardData {
   games: GameEntry[];
+  settings: AppSettings;
 }
 
 export type GameSource = "manual" | "emulator"; // string union, never enum
@@ -580,11 +604,49 @@ Use `msg()` in `catch` blocks and mutation `onError` callbacks.
 
 ### Save Path Portability
 
-Save paths in `game.savePath` may contain Windows env-var tokens (`%LOCALAPPDATA%`, `%APPDATA%`, `%USERPROFILE%`, `%PROGRAMDATA%`, `%TEMP%`). These are stored intentionally — do **not** strip them.
+Save paths in each `SavePathEntry.path` may contain Windows env-var tokens (`%LOCALAPPDATA%`, `%APPDATA%`, `%USERPROFILE%`, `%PROGRAMDATA%`, `%TEMP%`). These are stored intentionally — do **not** strip them.
 
-- **Display**: show the token string as-is.
-- **Folder-picker `defaultPath`**: call `expandSavePath(game.savePath)` first if the value contains `%`, then extract the parent directory.
+- **Display**: show the token string as-is (or blank/"Not set" when `path` is `null` for device-specific paths).
+- **Primary path**: `game.savePaths[0]?.path ?? null`.
+- **Folder-picker `defaultPath`** (`SavePathCard.handleBrowse()`): call `expandSavePath(entry.path)` first if the value contains `%`, then extract the parent directory. Device-specific paths (no `%`) are used directly.
 - Never pass a token path directly to any filesystem API on the frontend; always expand first.
+
+### GameSettingsForm — Save Paths
+
+`GameSettingsForm` renders a `SavePathsSection` component that manages the ordered list of `SavePathEntry` records:
+
+- **`SavePathsSection`**: outer card with "+ Add save path" button; renders one `SavePathCard` per entry.
+- **`SavePathCard`**: label input, folder-path browse button (uses `expandSavePath` for `%` paths before showing the folder-picker), and an embedded `SavePathExclusionsSection`.
+- **`SavePathExclusionsSection`**: per-path exclusion list. The "Load files" button calls `getSaveInfo` and uses `pathInfos[index]` from the response to build a single-path `SaveInfo` object for the `SaveFileTree`. This is critical — **do not pass the full aggregate `SaveInfo`** or all paths' files will show for every path's exclusion tree.
+- When a `SavePathEntry.path` is `null` (device-specific path not configured on this machine), `SavePathCard` shows a blue info banner prompting the user to Browse.
+
+Form defaults:
+```ts
+savePaths: (gameSettings?.savePaths ?? []).map((e) => ({
+  ...e,
+  path: e.path ?? "",
+  gdriveFolderId: e.gdriveFolderId ?? null,
+}))
+```
+
+`onSaveSettings` maps the array back with `norm(entry.path)` per entry.
+
+### SaveInfoPanel — Multi-Path Display
+
+`SaveInfoPanel` in `SupportUI.tsx` accepts an optional `onOpenFolderForPath?: (rawPath: string) => void` prop:
+
+- **Multi-path** (`info.pathInfos.length > 1`): renders one labelled `PathInfoSection` card per path. Each section shows: label, path (unexpanded), size badge, per-path open-folder button, and `SaveFileTree`. The global open-folder button is hidden.
+- **Single-path** (`pathInfos.length <= 1`): unchanged single-path behavior with the global open-folder button.
+
+```tsx
+// Status.tsx — how to wire onOpenFolderForPath
+<SaveInfoPanel
+  info={saveInfo}
+  onOpenFolderForPath={(rawPath) => {
+    void expandSavePath(rawPath).then((p) => openPath(p));
+  }}
+/>
+```
 
 ---
 
