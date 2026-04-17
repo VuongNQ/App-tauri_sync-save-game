@@ -23,12 +23,9 @@ use models::{
 fn load_dashboard(app: tauri::AppHandle) -> Result<DashboardData, String> {
     let mut state = settings::load_state(&app)?;
     // Merge device-specific path_overrides into save_path (transient — not persisted).
+    settings::apply_path_overrides(&mut state.games, &state.settings);
     // Populate last_local_modified dynamically by scanning local save folders.
     for game in state.games.iter_mut() {
-        // Apply device-specific override so the frontend always sees the effective path.
-        if let Some(override_path) = state.settings.path_overrides.get(&game.id).cloned() {
-            game.save_path = Some(override_path);
-        }
         if let Some(ref save_path) = game.save_path.clone() {
             let expanded = settings::expand_env_vars(save_path);
             game.last_local_modified =
@@ -44,7 +41,8 @@ fn add_manual_game(
     payload: AddGamePayload,
 ) -> Result<DashboardData, String> {
     settings::add_manual_game(&app, payload)?;
-    let state = settings::load_state(&app)?;
+    let mut state = settings::load_state(&app)?;
+    settings::apply_path_overrides(&mut state.games, &state.settings);
     Ok(DashboardData { games: state.games })
 }
 
@@ -92,7 +90,8 @@ fn update_game(
         });
     }
 
-    let state = settings::load_state(&app)?;
+    let mut state = settings::load_state(&app)?;
+    settings::apply_path_overrides(&mut state.games, &state.settings);
     Ok(DashboardData { games: state.games })
 }
 
@@ -117,7 +116,8 @@ fn remove_game(app: tauri::AppHandle, game_id: String) -> Result<DashboardData, 
         });
     }
 
-    let state = settings::load_state(&app)?;
+    let mut state = settings::load_state(&app)?;
+    settings::apply_path_overrides(&mut state.games, &state.settings);
     Ok(DashboardData { games: state.games })
 }
 
@@ -148,6 +148,7 @@ fn clear_all_drive_data(app: tauri::AppHandle) -> Result<DashboardData, String> 
     settings::save_state(&app, &state)?;
 
     println!("[gdrive] Cleared all Drive data for current account");
+    settings::apply_path_overrides(&mut state.games, &state.settings);
     Ok(DashboardData { games: state.games })
 }
 
@@ -429,7 +430,8 @@ async fn sync_all_games(app: tauri::AppHandle) -> Result<Vec<SyncResult>, String
 async fn sync_library_from_cloud(app: tauri::AppHandle) -> Result<DashboardData, String> {
     tokio::task::spawn_blocking(move || {
         settings::fetch_all_from_firestore(&app)?;
-        let state = settings::load_state(&app)?;
+        let mut state = settings::load_state(&app)?;
+        settings::apply_path_overrides(&mut state.games, &state.settings);
         Ok(DashboardData { games: state.games })
     })
     .await
@@ -511,13 +513,14 @@ fn toggle_track_changes(
     enabled: bool,
 ) -> Result<DashboardData, String> {
     // Update the game entry first
-    let state = settings::update_game_field(&app, &game_id, |g| {
+    let mut state = settings::update_game_field(&app, &game_id, |g| {
         g.track_changes = enabled;
     })?;
 
     // Start or stop the watcher
     watcher::handle_track_changes_toggle(&app, &game_id, enabled)?;
 
+    settings::apply_path_overrides(&mut state.games, &state.settings);
     Ok(DashboardData { games: state.games })
 }
 
@@ -527,10 +530,11 @@ fn toggle_auto_sync(
     game_id: String,
     enabled: bool,
 ) -> Result<DashboardData, String> {
-    let state = settings::update_game_field(&app, &game_id, |g| {
+    let mut state = settings::update_game_field(&app, &game_id, |g| {
         g.auto_sync = enabled;
     })?;
 
+    settings::apply_path_overrides(&mut state.games, &state.settings);
     Ok(DashboardData { games: state.games })
 }
 

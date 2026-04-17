@@ -20,6 +20,17 @@ pub fn effective_save_path(game: &GameEntry, settings: &AppSettings) -> Option<S
         .or_else(|| game.save_path.clone())
 }
 
+/// Merge device-specific `path_overrides` into a list of games **in place** (transient).
+/// Must be called before every `DashboardData` response so the frontend always sees
+/// the effective save path, regardless of whether it is portable or device-specific.
+pub fn apply_path_overrides(games: &mut Vec<GameEntry>, settings: &AppSettings) {
+    for game in games.iter_mut() {
+        if let Some(override_path) = settings.path_overrides.get(&game.id).cloned() {
+            game.save_path = Some(override_path);
+        }
+    }
+}
+
 /// Route a normalized `save_path` to the correct storage bucket:
 /// - Portable (`%VAR%` present): stays in `GameEntry.save_path`; stale override removed.
 /// - Device-specific (no `%`): moved to `AppSettings.path_overrides`; `GameEntry.save_path` → `None`.

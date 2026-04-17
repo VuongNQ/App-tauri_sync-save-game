@@ -291,6 +291,8 @@ interface SaveFolderSectionProps {
 
 function SaveFolderSection({ game, isSyncing, isPathInvalid }: SaveFolderSectionProps) {
   const { control, setValue } = useFormContext<GameSettingsFormValues>();
+  const currentSavePath = useWatch({ control, name: "savePath" });
+  const isPathEmpty = !currentSavePath;
 
   async function handleBrowse() {
     let defaultPath: string | undefined;
@@ -316,7 +318,17 @@ function SaveFolderSection({ game, isSyncing, isPathInvalid }: SaveFolderSection
     <div className={CARD}>
       <h3 className="m-0 mb-4 font-semibold">Save folder mapping</h3>
 
-      {isPathInvalid && (
+      {isPathEmpty && (
+        <div className="mb-4 p-3 rounded-2xl border border-[rgba(100,180,255,0.25)] bg-[rgba(9,40,80,0.45)] text-[#7dc9ff] text-sm flex items-start gap-2">
+          <span className="mt-0.5 shrink-0">ℹ</span>
+          <span>
+            No save path configured for this device. Use <strong>Browse</strong> to select the folder where this
+            game stores its saves on this machine.
+          </span>
+        </div>
+      )}
+
+      {isPathInvalid && !isPathEmpty && (
         <div className="mb-4 p-3 rounded-2xl border border-[rgba(255,100,100,0.3)] bg-[rgba(62,18,22,0.5)] text-[#ff9e9e] text-sm flex items-center gap-2">
           <span>⚠</span> The configured save path does not exist on this machine.
         </div>
