@@ -37,8 +37,7 @@ pub fn save_state(app: &AppHandle, state: &StoredState) -> Result<(), String> {
     let serialized = serde_json::to_string_pretty(state)
         .map_err(|e| format!("Unable to serialize settings: {e}"))?;
 
-    fs::write(&settings_path, serialized)
-        .map_err(|e| format!("Unable to write settings file: {e}"))
+    fs::write(&settings_path, serialized).map_err(|e| format!("Unable to write settings file: {e}"))
 }
 
 pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameEntry, String> {
@@ -72,7 +71,7 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
         last_cloud_modified: None,
         gdrive_folder_id: None,
         cloud_storage_bytes: None,
-        sync_excludes: vec![]
+        sync_excludes: vec![],
     };
 
     state.games.push(game.clone());
@@ -187,8 +186,10 @@ pub fn fetch_all_from_firestore(app: &AppHandle) -> Result<bool, String> {
         }
     };
 
-    let firestore_games = firestore::load_all_games(app, &user_id)
-        .unwrap_or_else(|e| { eprintln!("[firestore] load_all_games failed: {e}"); vec![] });
+    let firestore_games = firestore::load_all_games(app, &user_id).unwrap_or_else(|e| {
+        eprintln!("[firestore] load_all_games failed: {e}");
+        vec![]
+    });
 
     // Migration path: if Firestore has no games, try Drive library.json once.
     if firestore_games.is_empty() {
@@ -245,7 +246,10 @@ pub fn fetch_all_from_firestore(app: &AppHandle) -> Result<bool, String> {
     }
 
     save_state(app, &state)?;
-    println!("[firestore] Restored {} games from Firestore", state.games.len());
+    println!(
+        "[firestore] Restored {} games from Firestore",
+        state.games.len()
+    );
     Ok(true)
 }
 
@@ -267,7 +271,9 @@ where
 
 /// Upsert a single game to Firestore in a background thread.
 fn spawn_firestore_game_upsert(app: &AppHandle, game: GameEntry) {
-    spawn_firestore_task(app, move |app, user_id| firestore::save_game(app, user_id, &game));
+    spawn_firestore_task(app, move |app, user_id| {
+        firestore::save_game(app, user_id, &game)
+    });
 }
 
 /// Delete a single game from Firestore in a background thread.
@@ -318,17 +324,18 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
 /// (`%TEMP%` ≈ `%LOCALAPPDATA%\Temp`, so TEMP must precede LOCALAPPDATA.)
 #[cfg(target_os = "windows")]
 const ENV_VAR_TOKENS: &[&str] = &[
-    "TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA", "PROGRAMFILES",
+    "TEMP",
+    "LOCALAPPDATA",
+    "APPDATA",
+    "USERPROFILE",
+    "PROGRAMDATA",
+    "PROGRAMFILES",
 ];
 
 /// Expand Windows environment-variable tokens (e.g. `%LOCALAPPDATA%`) to
 /// their current runtime values.  Safe to call with plain absolute paths —
 /// they are returned unchanged.
 pub fn expand_env_vars(path: &str) -> String {
-    #[cfg(not(target_os = "windows"))]
-    const ENV_VAR_TOKENS: &[&str] = &[
-        "TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA", "PROGRAMFILES",
-    ];
     let mut result = path.to_string();
     for var in ENV_VAR_TOKENS {
         let token = format!("%{}%", var.to_uppercase());
@@ -354,7 +361,12 @@ pub fn contract_path(path: &str) -> String {
 fn contract_env_vars(path: &str) -> String {
     #[cfg(not(target_os = "windows"))]
     const ENV_VAR_TOKENS: &[&str] = &[
-        "TEMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE", "PROGRAMDATA", "PROGRAMFILES",
+        "TEMP",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "USERPROFILE",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
     ];
     let path_upper = path.to_uppercase();
     for var in ENV_VAR_TOKENS {
@@ -498,8 +510,7 @@ fn register_startup() -> Result<(), String> {
     use winreg::enums::*;
     use winreg::RegKey;
 
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("Cannot resolve exe path: {e}"))?;
+    let exe_path = std::env::current_exe().map_err(|e| format!("Cannot resolve exe path: {e}"))?;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let (run_key, _) = hkcu
@@ -519,10 +530,9 @@ fn unregister_startup() -> Result<(), String> {
     use winreg::RegKey;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    if let Ok(run_key) = hkcu.open_subkey_with_flags(
-        r"Software\Microsoft\Windows\CurrentVersion\Run",
-        KEY_WRITE,
-    ) {
+    if let Ok(run_key) =
+        hkcu.open_subkey_with_flags(r"Software\Microsoft\Windows\CurrentVersion\Run", KEY_WRITE)
+    {
         let _ = run_key.delete_value(STARTUP_KEY_NAME);
     }
 
