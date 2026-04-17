@@ -22,15 +22,25 @@ use models::{
 #[tauri::command]
 fn load_dashboard(app: tauri::AppHandle) -> Result<DashboardData, String> {
     let mut state = settings::load_state(&app)?;
-    // Merge device-specific path_overrides into save_path (transient — not persisted).
+    // Merge device-specific path_overrides into save_paths (transient — not persisted).
     settings::apply_path_overrides(&mut state.games, &state.settings);
-    // Populate last_local_modified dynamically by scanning local save folders.
+    // Populate last_local_modified dynamically by scanning all local save folders.
     for game in state.games.iter_mut() {
-        if let Some(ref save_path) = game.save_path.clone() {
-            let expanded = settings::expand_env_vars(save_path);
-            game.last_local_modified =
-                sync::scan_last_modified(std::path::Path::new(&expanded));
+        let effectives = settings::effective_save_paths(game, &state.settings);
+        let mut max_modified: Option<String> = None;
+        for effective in &effectives {
+            if let Some(ref save_path) = effective {
+                let expanded = settings::expand_env_vars(save_path);
+                if let Some(ts) = sync::scan_last_modified(std::path::Path::new(&expanded)) {
+                    match &max_modified {
+                        None => max_modified = Some(ts),
+                        Some(current) if ts > *current => max_modified = Some(ts),
+                        _ => {}
+                    }
+                }
+            }
         }
+        game.last_local_modified = max_modified;
     }
     Ok(DashboardData { games: state.games })
 }
@@ -56,15 +66,16 @@ fn update_game(
         .ok()
         .and_then(|s| s.games.into_iter().find(|g| g.id == payload.game.id));
 
-    let old_excludes: Vec<String> = old_game.as_ref()
-        .map(|g| g.sync_excludes.clone())
+    let old_path_excludes: Vec<Vec<String>> = old_game
+        .as_ref()
+        .map(|g| g.save_paths.iter().map(|e| e.sync_excludes.clone()).collect())
         .unwrap_or_default();
     let old_track_changes = old_game.map(|g| g.track_changes).unwrap_or(false);
 
-    let new_excludes = payload.game.sync_excludes.clone();
+    let new_save_paths = payload.game.save_paths.clone();
     let new_track_changes = payload.game.track_changes;
     let game_id = payload.game.id.clone();
-    let gdrive_folder_id = payload.game.gdrive_folder_id.clone();
+    let root_drive_folder_id = payload.game.gdrive_folder_id.clone();
 
     settings::upsert_game(&app, payload.game)?;
 
@@ -75,17 +86,46 @@ fn update_game(
         }
     }
 
-    // If any paths were newly excluded, delete them from Drive in the background.
-    let newly_excluded: Vec<String> = new_excludes
-        .into_iter()
-        .filter(|e| !old_excludes.contains(e))
-        .collect();
+    // Build cleanup tasks: (drive_folder_id, newly_excluded) per path
+    let mut cleanup_tasks: Vec<(String, Vec<String>)> = Vec::new();
+    for (i, path_entry) in new_save_paths.iter().enumerate() {
+        let old_excludes = old_path_excludes.get(i).cloned().unwrap_or_default();
+        let newly_excluded: Vec<String> = path_entry
+            .sync_excludes
+            .iter()
+            .filter(|e| !old_excludes.contains(e))
+            .cloned()
+            .collect();
+        if newly_excluded.is_empty() {
+            continue;
+        }
+        let folder_id = if i == 0 {
+            match root_drive_folder_id.clone() {
+                Some(id) => id,
+                None => continue, // Not synced to Drive yet
+            }
+        } else {
+            match path_entry.gdrive_folder_id.clone() {
+                Some(id) => id,
+                None => continue, // Path folder not yet created on Drive
+            }
+        };
+        cleanup_tasks.push((folder_id, newly_excluded));
+    }
 
-    if !newly_excluded.is_empty() && gdrive_folder_id.is_some() {
+    if !cleanup_tasks.is_empty() {
         let app_clone = app.clone();
+        let game_id_clone = game_id.clone();
         std::thread::spawn(move || {
-            if let Err(e) = sync::cleanup_excluded_from_cloud(&app_clone, &game_id, newly_excluded) {
-                eprintln!("[sync] cleanup excluded from cloud failed: {e}");
+            for (folder_id, excluded) in cleanup_tasks {
+                if let Err(e) = sync::cleanup_excluded_from_cloud(
+                    &app_clone,
+                    &game_id_clone,
+                    &folder_id,
+                    excluded,
+                ) {
+                    eprintln!("[sync] cleanup excluded from cloud failed: {e}");
+                }
             }
         });
     }

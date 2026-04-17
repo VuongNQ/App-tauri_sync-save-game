@@ -3,7 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
-import { Controller, FormProvider, useForm, useFormContext, useWatch } from "react-hook-form";
+import { Controller, FormProvider, useFieldArray, useForm, useFormContext, useWatch } from "react-hook-form";
 import { z } from "zod";
 import { DASHBOARD_KEY, useUpdateGameMutation } from "../queries";
 import { contractPath, expandSavePath, getBrowseDefaultPath, getSaveInfo, uploadGameLogo } from "../services/tauri";
@@ -26,6 +26,13 @@ import {
 
 // ── Unified settings schema ───────────────────────────────────────────────────
 
+const savePathEntrySchema = z.object({
+  label: z.string().min(1, "Label is required"),
+  path: z.string(),
+  gdriveFolderId: z.string().nullable().optional(),
+  syncExcludes: z.array(z.string()),
+});
+
 const gameSettingsSchema = z.object({
   thumbnail: z
     .string()
@@ -34,12 +41,11 @@ const gameSettingsSchema = z.object({
       "Enter a valid image URL (https://…) or browse a local file."
     ),
   description: z.string().max(1000, "Description must be 1000 characters or fewer."),
-  savePath: z.string(),
+  savePaths: z.array(savePathEntrySchema),
   exeName: z.string().max(260, "Executable name must be 260 characters or fewer."),
   exePath: z.string().optional().nullable(),
   trackChanges: z.boolean(),
   autoSync: z.boolean(),
-  syncExcludes: z.array(z.string()),
 });
 
 type GameSettingsFormValues = z.infer<typeof gameSettingsSchema>;
@@ -74,12 +80,11 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
     defaultValues: {
       thumbnail: gameSettings?.thumbnail ?? "",
       description: gameSettings?.description ?? "",
-      savePath: gameSettings?.savePath ?? "",
+      savePaths: (gameSettings?.savePaths ?? []).map((e) => ({ ...e, path: e.path ?? "", gdriveFolderId: e.gdriveFolderId ?? null })),
       exeName: gameSettings?.exeName ?? "",
       exePath: gameSettings?.exePath ?? "",
       trackChanges: gameSettings?.trackChanges ?? false,
       autoSync: gameSettings?.autoSync ?? false,
-      syncExcludes: gameSettings?.syncExcludes ?? [],
     },
     resolver: zodResolver(gameSettingsSchema),
   });
@@ -91,12 +96,11 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
     reset({
       thumbnail: gameSettings?.thumbnail ?? "",
       description: gameSettings?.description ?? "",
-      savePath: gameSettings?.savePath ?? "",
+      savePaths: (gameSettings?.savePaths ?? []).map((e) => ({ ...e, path: e.path ?? "", gdriveFolderId: e.gdriveFolderId ?? null })),
       exeName: gameSettings?.exeName ?? "",
       exePath: gameSettings?.exePath ?? "",
       trackChanges: gameSettings?.trackChanges ?? false,
       autoSync: gameSettings?.autoSync ?? false,
-      syncExcludes: gameSettings?.syncExcludes ?? [],
     });
   }, [gameSettings, reset]);
 
@@ -126,12 +130,16 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
       ...gameSettings,
       thumbnail: src || null,
       description: trimmed || null,
-      savePath: norm(values.savePath),
+      savePaths: values.savePaths.map((entry) => ({
+        label: entry.label,
+        path: norm(entry.path),
+        gdriveFolderId: entry.gdriveFolderId ?? null,
+        syncExcludes: entry.syncExcludes,
+      })),
       exeName: values.exeName.trim() || null,
       exePath: norm(values.exePath ?? ""),
       trackChanges: values.trackChanges,
       autoSync: values.autoSync,
-      syncExcludes: values.syncExcludes,
     });
   }
 
@@ -168,9 +176,8 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
           <div className="flex flex-col gap-5 pt-4">
             <ThumbnailSection isSyncing={isSyncing} />
             <DescriptionSection />
-            <SaveFolderSection game={gameSettings} isSyncing={isSyncing} isPathInvalid={isPathInvalid} />
+            <SavePathsSection game={gameSettings} isSyncing={isSyncing} isPathInvalid={isPathInvalid} />
             <GameExecutableSection game={gameSettings} exePathValid={exePathValid} />
-            <SyncExclusionsSection game={gameSettings} />
             <div className="flex items-center gap-3 justify-end">
               {saveError && <span className="text-sm text-[#ffd5d5] mr-auto">{saveError}</span>}
             </div>
@@ -281,23 +288,82 @@ function DescriptionSection() {
   );
 }
 
-// ── Save folder section ───────────────────────────────────────────────────────
+// ── Save paths section (multiple) ─────────────────────────────────────────────
 
-interface SaveFolderSectionProps {
+interface SavePathsSectionProps {
   game: GameEntry;
   isSyncing: boolean;
   isPathInvalid: boolean;
 }
 
-function SaveFolderSection({ game, isSyncing, isPathInvalid }: SaveFolderSectionProps) {
+function SavePathsSection({ game, isSyncing, isPathInvalid }: SavePathsSectionProps) {
+  const { control } = useFormContext<GameSettingsFormValues>();
+  const { fields, append, remove } = useFieldArray({ control, name: "savePaths" });
+
+  function handleAdd() {
+    append({ label: `Save Folder ${fields.length + 1}`, path: "", gdriveFolderId: null, syncExcludes: [] });
+  }
+
+  return (
+    <div className={CARD}>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="m-0 font-semibold">Save folder mapping</h3>
+        <button type="button" className={SECONDARY_BTN} onClick={handleAdd} disabled={isSyncing}>
+          + Add save path
+        </button>
+      </div>
+
+      {fields.length === 0 && (
+        <div className="mb-4 p-3 rounded-2xl border border-[rgba(100,180,255,0.25)] bg-[rgba(9,40,80,0.45)] text-[#7dc9ff] text-sm flex items-start gap-2">
+          <span className="mt-0.5 shrink-0">ℹ</span>
+          <span>
+            No save paths configured. Click <strong>+ Add save path</strong> to add a folder.
+          </span>
+        </div>
+      )}
+
+      {isPathInvalid && fields.length > 0 && (
+        <div className="mb-4 p-3 rounded-2xl border border-[rgba(255,100,100,0.3)] bg-[rgba(62,18,22,0.5)] text-[#ff9e9e] text-sm flex items-center gap-2">
+          <span>⚠</span> One or more configured save paths do not exist on this machine.
+        </div>
+      )}
+
+      <div className="flex flex-col gap-4">
+        {fields.map((field, index) => (
+          <SavePathCard
+            key={field.id}
+            index={index}
+            game={game}
+            isSyncing={isSyncing}
+            onRemove={() => remove(index)}
+            canRemove={fields.length > 1}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Single save-path card ─────────────────────────────────────────────────────
+
+interface SavePathCardProps {
+  index: number;
+  game: GameEntry;
+  isSyncing: boolean;
+  onRemove: () => void;
+  canRemove: boolean;
+}
+
+function SavePathCard({ index, game, isSyncing, onRemove, canRemove }: SavePathCardProps) {
   const { control, setValue } = useFormContext<GameSettingsFormValues>();
-  const currentSavePath = useWatch({ control, name: "savePath" });
-  const isPathEmpty = !currentSavePath;
+  const currentPath = useWatch({ control, name: `savePaths.${index}.path` });
+  const isPathEmpty = !currentPath;
 
   async function handleBrowse() {
     let defaultPath: string | undefined;
-    if (game.savePath) {
-      const resolved = game.savePath.includes("%") ? await expandSavePath(game.savePath) : game.savePath;
+    const stored = game.savePaths[index]?.path;
+    if (stored) {
+      const resolved = stored.includes("%") ? await expandSavePath(stored) : stored;
       const sep = resolved.lastIndexOf("\\");
       if (sep > 0) defaultPath = resolved.slice(0, sep);
     }
@@ -311,51 +377,194 @@ function SaveFolderSection({ game, isSyncing, isPathInvalid }: SaveFolderSection
       title: "Choose the save game folder",
       defaultPath,
     });
-    if (typeof p === "string") setValue("savePath", p, { shouldDirty: true });
+    if (typeof p === "string") setValue(`savePaths.${index}.path`, p, { shouldDirty: true });
   }
 
   return (
-    <div className={CARD}>
-      <h3 className="m-0 mb-4 font-semibold">Save folder mapping</h3>
+    <div className="rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] p-4 flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-2">
+        <Controller
+          name={`savePaths.${index}.label`}
+          control={control}
+          render={({ field }) => (
+            <input
+              className={INPUT_CLS + " font-medium flex-1"}
+              {...field}
+              placeholder="Label (e.g. Save Folder, Save States…)"
+            />
+          )}
+        />
+        {canRemove && (
+          <button
+            type="button"
+            className="shrink-0 text-sm text-[#ffd5d5] hover:text-white px-2 py-1"
+            onClick={onRemove}
+            disabled={isSyncing}
+            title="Remove this save path"
+          >
+            Remove
+          </button>
+        )}
+      </div>
 
       {isPathEmpty && (
-        <div className="mb-4 p-3 rounded-2xl border border-[rgba(100,180,255,0.25)] bg-[rgba(9,40,80,0.45)] text-[#7dc9ff] text-sm flex items-start gap-2">
+        <div className="p-2 rounded-xl border border-[rgba(100,180,255,0.2)] bg-[rgba(9,40,80,0.35)] text-[#7dc9ff] text-xs flex items-start gap-2">
           <span className="mt-0.5 shrink-0">ℹ</span>
           <span>
-            No save path configured for this device. Use <strong>Browse</strong> to select the folder where this
-            game stores its saves on this machine.
+            No path configured for this device. Use <strong>Browse</strong> to select the folder.
           </span>
         </div>
       )}
 
-      {isPathInvalid && !isPathEmpty && (
-        <div className="mb-4 p-3 rounded-2xl border border-[rgba(255,100,100,0.3)] bg-[rgba(62,18,22,0.5)] text-[#ff9e9e] text-sm flex items-center gap-2">
-          <span>⚠</span> The configured save path does not exist on this machine.
-        </div>
-      )}
+      <Controller
+        name={`savePaths.${index}.path`}
+        control={control}
+        render={({ field }) => (
+          <label className={FORM_LABEL}>
+            <span className={LABEL_SPAN}>Folder path</span>
+            <div className={INPUT_ROW}>
+              <input className={INPUT_CLS} {...field} placeholder="Choose or enter the save folder path" />
+              <button type="button" className={SECONDARY_BTN} onClick={handleBrowse} disabled={isSyncing}>
+                Browse
+              </button>
+            </div>
+          </label>
+        )}
+      />
 
-      <div className={FORM_GRID}>
-        <Controller
-          name="savePath"
-          control={control}
-          render={({ field }) => (
-            <label className={FORM_LABEL}>
-              <span className={LABEL_SPAN}>Save folder path</span>
-              <div className={INPUT_ROW}>
-                <input className={INPUT_CLS} {...field} placeholder="Choose or enter the save folder path" />
-                <button type="button" className={SECONDARY_BTN} onClick={handleBrowse} disabled={isSyncing}>
-                  Browse
-                </button>
-              </div>
-            </label>
-          )}
-        />
-      </div>
+      <SavePathExclusionsSection index={index} game={game} />
     </div>
   );
 }
 
-// ── Game executable section (unified path + process name) ────────────────────
+// ── Per-path exclusions (embedded inside SavePathCard) ────────────────────────
+
+interface SavePathExclusionsSectionProps {
+  index: number;
+  game: GameEntry;
+}
+
+function SavePathExclusionsSection({ index, game }: SavePathExclusionsSectionProps) {
+  const { setValue, control } = useFormContext<GameSettingsFormValues>();
+  const excluded = useWatch({ control, name: `savePaths.${index}.syncExcludes` }) ?? [];
+  const currentPath = useWatch({ control, name: `savePaths.${index}.path` });
+
+  const [saveInfo, setSaveInfo] = useState<SaveInfo | null>(null);
+  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [manualInput, setManualInput] = useState("");
+
+  async function handleLoadFiles() {
+    setLoadError(null);
+    setIsLoadingFiles(true);
+    try {
+      const info = await getSaveInfo(game.id);
+      // When multi-path, extract only this path's files from pathInfos[index]
+      if (info.pathInfos.length > 0 && info.pathInfos[index]) {
+        const pi = info.pathInfos[index];
+        setSaveInfo({
+          gameId: info.gameId,
+          savePath: pi.savePath,
+          totalFiles: pi.files.length,
+          totalSize: pi.totalSize,
+          lastModified: null,
+          files: pi.files,
+          pathInfos: [],
+        });
+      } else {
+        setSaveInfo(info);
+      }
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsLoadingFiles(false);
+    }
+  }
+
+  function handleToggle(path: string, _isFolder: boolean) {
+    const next = excluded.includes(path) ? excluded.filter((e) => e !== path) : [...excluded, path];
+    setValue(`savePaths.${index}.syncExcludes`, next, { shouldDirty: true });
+  }
+
+  function handleRemove(path: string) {
+    setValue(`savePaths.${index}.syncExcludes`, excluded.filter((e) => e !== path), { shouldDirty: true });
+  }
+
+  function handleManualAdd() {
+    const trimmed = manualInput.trim();
+    if (!trimmed || excluded.includes(trimmed)) {
+      setManualInput("");
+      return;
+    }
+    setValue(`savePaths.${index}.syncExcludes`, [...excluded, trimmed], { shouldDirty: true });
+    setManualInput("");
+  }
+
+  return (
+    <div className="mt-1">
+      <p className="m-0 mb-2 text-xs font-medium text-[#9aa8c7]">Sync exclusions</p>
+
+      {excluded.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {excluded.map((ex) => (
+            <span
+              key={ex}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-[rgba(255,180,80,0.12)] border border-[rgba(255,180,80,0.25)] text-[#ffd5a0]"
+            >
+              <span className="font-mono truncate max-w-65" title={ex}>{ex}</span>
+              <button
+                type="button"
+                className="shrink-0 text-[#ffd5a0] hover:text-white leading-none"
+                onClick={() => handleRemove(ex)}
+                title="Remove exclusion"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className={INPUT_ROW + " mb-3"}>
+        <input
+          className={INPUT_CLS}
+          value={manualInput}
+          onChange={(e) => setManualInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleManualAdd())}
+          placeholder="e.g. UserMetaData.sav  or  backup/"
+        />
+        <button type="button" className={SECONDARY_BTN} onClick={handleManualAdd} disabled={!manualInput.trim()}>
+          Add
+        </button>
+      </div>
+
+      {!saveInfo && (
+        <button
+          type="button"
+          className={SECONDARY_BTN}
+          onClick={handleLoadFiles}
+          disabled={isLoadingFiles || !currentPath}
+          title={!currentPath ? "Set a save folder first" : undefined}
+        >
+          {isLoadingFiles ? "Loading…" : "Load save files"}
+        </button>
+      )}
+      {loadError && <p className="mt-2 text-xs text-[#ffd5d5]">{loadError}</p>}
+
+      {saveInfo && (
+        <>
+          <div className="flex items-center justify-between mb-1">
+            <p className="m-0 text-xs text-[#9aa8c7]">Check files or folders to exclude from sync.</p>
+            <button type="button" className="text-xs text-[#7dc9ff] hover:underline" onClick={() => setSaveInfo(null)}>
+              Hide
+            </button>
+          </div>
+          <SaveFileTree info={saveInfo} checkable excluded={excluded} onToggle={handleToggle} />
+        </>
+      )}
+    </div>
+  );
+}
 
 interface GameExecutableSectionProps {
   game: GameEntry;
@@ -442,128 +651,3 @@ function GameExecutableSection({ game, exePathValid }: GameExecutableSectionProp
   );
 }
 
-// ── SyncExclusionsSection ─────────────────────────────────────────────────────
-
-interface SyncExclusionsSectionProps {
-  game: GameEntry;
-}
-
-function SyncExclusionsSection({ game }: SyncExclusionsSectionProps) {
-  const { setValue, control } = useFormContext<GameSettingsFormValues>();
-  const excluded = useWatch({ control, name: "syncExcludes" });
-
-  const [saveInfo, setSaveInfo] = useState<SaveInfo | null>(null);
-  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [manualInput, setManualInput] = useState("");
-
-  async function handleLoadFiles() {
-    setLoadError(null);
-    setIsLoadingFiles(true);
-    try {
-      const info = await getSaveInfo(game.id);
-      setSaveInfo(info);
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsLoadingFiles(false);
-    }
-  }
-
-  function handleToggle(path: string, _isFolder: boolean) {
-    const next = excluded.includes(path) ? excluded.filter((e) => e !== path) : [...excluded, path];
-    setValue("syncExcludes", next, { shouldDirty: true });
-  }
-
-  function handleRemove(path: string) {
-    setValue(
-      "syncExcludes",
-      excluded.filter((e) => e !== path),
-      { shouldDirty: true }
-    );
-  }
-
-  function handleManualAdd() {
-    const trimmed = manualInput.trim();
-    if (!trimmed || excluded.includes(trimmed)) {
-      setManualInput("");
-      return;
-    }
-    setValue("syncExcludes", [...excluded, trimmed], { shouldDirty: true });
-    setManualInput("");
-  }
-
-  return (
-    <div className={CARD}>
-      <h3 className="m-0 mb-1 font-semibold">Sync exclusions</h3>
-      <p className="m-0 mb-4 text-sm text-[#9aa8c7]">
-        Files and folders listed here are skipped during Google Drive sync. Existing Drive copies are deleted when you save.
-      </p>
-
-      {/* Current exclusions list */}
-      {excluded.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-4">
-          {excluded.map((ex) => (
-            <span
-              key={ex}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-[rgba(255,180,80,0.12)] border border-[rgba(255,180,80,0.25)] text-[#ffd5a0]"
-            >
-              <span className="font-mono truncate max-w-65" title={ex}>
-                {ex}
-              </span>
-              <button
-                type="button"
-                className="shrink-0 text-[#ffd5a0] hover:text-white leading-none"
-                onClick={() => handleRemove(ex)}
-                title="Remove exclusion"
-              >
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Manual add */}
-      <div className={INPUT_ROW + " mb-4"}>
-        <input
-          className={INPUT_CLS}
-          value={manualInput}
-          onChange={(e) => setManualInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleManualAdd())}
-          placeholder="e.g. UserMetaData.sav  or  backup/"
-        />
-        <button type="button" className={SECONDARY_BTN} onClick={handleManualAdd} disabled={!manualInput.trim()}>
-          Add
-        </button>
-      </div>
-
-      {/* Load files button */}
-      {!saveInfo && (
-        <button
-          type="button"
-          className={SECONDARY_BTN}
-          onClick={handleLoadFiles}
-          disabled={isLoadingFiles || !game.savePath}
-          title={!game.savePath ? "Set a save folder first" : undefined}
-        >
-          {isLoadingFiles ? "Loading…" : "Load save files"}
-        </button>
-      )}
-      {loadError && <p className="mt-2 text-sm text-[#ffd5d5]">{loadError}</p>}
-
-      {/* Interactive file tree */}
-      {saveInfo && (
-        <>
-          <div className="flex items-center justify-between mb-1">
-            <p className="m-0 text-xs text-[#9aa8c7]">Check files or folders to exclude from sync.</p>
-            <button type="button" className="text-xs text-[#7dc9ff] hover:underline" onClick={() => setSaveInfo(null)}>
-              Hide
-            </button>
-          </div>
-          <SaveFileTree info={saveInfo} checkable excluded={excluded} onToggle={handleToggle} />
-        </>
-      )}
-    </div>
-  );
-}

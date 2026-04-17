@@ -10,7 +10,7 @@ use walkdir::WalkDir;
 
 use crate::{
     gdrive,
-    models::{SaveFileInfo, SaveInfo, SyncFileEntry, SyncMeta, SyncResult, SyncStructureDiff},
+    models::{PathSaveInfo, SaveFileInfo, SaveInfo, SyncFileEntry, SyncMeta, SyncResult, SyncStructureDiff},
     settings,
 };
 
@@ -21,6 +21,14 @@ struct LocalFileInfo {
     absolute_path: PathBuf,
     modified_iso: String,
     size: u64,
+}
+
+/// Per-path sync counters used by the multi-path loop.
+struct PathSyncResult {
+    uploaded: u32,
+    downloaded: u32,
+    skipped: u32,
+    cloud_bytes: u64,
 }
 
 /// Collect all files under `save_path` with their metadata.
@@ -128,39 +136,71 @@ pub fn get_save_info(app: &AppHandle, game_id: &str) -> Result<SaveInfo, String>
     let state = settings::load_state(app)?;
     let game = settings::find_game(&state, game_id)?;
 
-    let effective = settings::effective_save_path(game, &state.settings);
-    let save_path = effective
-        .as_deref()
-        .ok_or("Save path is not set for this game")?;
-    let expanded_path = settings::expand_env_vars(save_path);
-    let save_dir = Path::new(&expanded_path);
+    let effectives = settings::effective_save_paths(game, &state.settings);
 
-    let local_files = collect_local_files(save_dir)?;
-
-    let total_files = local_files.len() as u32;
-    let total_size: u64 = local_files.iter().map(|f| f.size).sum();
-    let last_modified = local_files
+    // Require at least one configured path.
+    let primary_path = effectives
         .iter()
-        .map(|f| f.modified_iso.as_str())
+        .find_map(|p| p.clone())
+        .ok_or("Save path is not set for this game")?;
+
+    let mut all_files: Vec<SaveFileInfo> = Vec::new();
+    let mut path_infos: Vec<PathSaveInfo> = Vec::new();
+
+    for (i, effective) in effectives.iter().enumerate() {
+        let save_path = match effective {
+            Some(p) => p,
+            None => continue,
+        };
+        let label = game
+            .save_paths
+            .get(i)
+            .map(|e| e.label.clone())
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| format!("Path {}", i + 1));
+        let expanded_path = settings::expand_env_vars(save_path);
+        let save_dir = Path::new(&expanded_path);
+        if !save_dir.exists() {
+            continue;
+        }
+        let local_files = collect_local_files(save_dir)?;
+        let path_files: Vec<SaveFileInfo> = local_files
+            .iter()
+            .map(|f| SaveFileInfo {
+                relative_path: f.relative_path.clone(),
+                size: f.size,
+                modified_time: f.modified_iso.clone(),
+            })
+            .collect();
+        let path_size: u64 = path_files.iter().map(|f| f.size).sum();
+        path_infos.push(PathSaveInfo {
+            label,
+            save_path: save_path.clone(),
+            total_size: path_size,
+            files: path_files.clone(),
+        });
+        all_files.extend(path_files);
+    }
+
+    let total_files = all_files.len() as u32;
+    let total_size: u64 = all_files.iter().map(|f| f.size).sum();
+    let last_modified = all_files
+        .iter()
+        .map(|f| f.modified_time.as_str())
         .max()
         .map(String::from);
 
-    let files: Vec<SaveFileInfo> = local_files
-        .iter()
-        .map(|f| SaveFileInfo {
-            relative_path: f.relative_path.clone(),
-            size: f.size,
-            modified_time: f.modified_iso.clone(),
-        })
-        .collect();
+    // Only populate path_infos when there are multiple paths — single-path stays flat.
+    let path_infos_out = if path_infos.len() > 1 { path_infos } else { vec![] };
 
     Ok(SaveInfo {
         game_id: game_id.to_string(),
-        save_path: save_path.to_string(),
+        save_path: primary_path,
         total_files,
         total_size,
         last_modified,
-        files,
+        files: all_files,
+        path_infos: path_infos_out,
     })
 }
 
@@ -239,44 +279,34 @@ fn download_with_fallback(
     }
 }
 
-fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String> {
-    // 1. Load game entry
-    let state = settings::load_state(app)?;
-    let game = settings::find_game(&state, game_id)?.clone();
-
-    let effective = settings::effective_save_path(&game, &state.settings);
-    let save_path = effective
-        .as_deref()
-        .ok_or("Save path is not set for this game")?;
-    let expanded_path = settings::expand_env_vars(save_path);
-    let save_dir = Path::new(&expanded_path);
-
-    // 2. Ensure Drive folders exist
-    let (_, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
-
-    // 3. Get cloud sync metadata
-    let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
+/// Sync a single save-path directory to a specific Drive folder.
+/// Returns per-path counters and the total cloud bytes after sync.
+fn sync_single_path(
+    app: &AppHandle,
+    game_id: &str,
+    save_dir: &Path,
+    drive_folder_id: &str,
+    sync_excludes: &[String],
+    other_games_bytes: u64,
+    current_game_cloud_bytes: u64,
+) -> Result<PathSyncResult, String> {
+    // 1. Get cloud sync metadata
+    let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, drive_folder_id)?;
     let cloud_meta = cloud_meta_opt.unwrap_or_default();
 
-    // 4. List existing Drive files (for looking up file IDs by name)
-    let mut drive_files = gdrive::list_files(app, &game_folder_id)?;
+    // 2. List existing Drive files (for live timestamps + file IDs)
+    let mut drive_files = gdrive::list_files(app, drive_folder_id)?;
 
-    // 5. Collect local files — excluding paths the user has opted out of syncing
+    // 3. Collect local files — excluding per-path exclusions
     let all_local_files = collect_local_files(save_dir)?;
     let local_files: Vec<LocalFileInfo> = all_local_files
         .into_iter()
-        .filter(|f| !is_excluded(&f.relative_path, &game.sync_excludes))
+        .filter(|f| !is_excluded(&f.relative_path, sync_excludes))
         .collect();
 
     // ── Storage limit guard ───────────────────────────────────────────────────
-    let projected_this_game = projected_game_cloud_bytes(&local_files, &cloud_meta);
-    let other_games_bytes: u64 = state
-        .games
-        .iter()
-        .filter(|g| g.id != game_id)
-        .map(|g| g.cloud_storage_bytes.unwrap_or(0))
-        .sum();
-    let projected_total = other_games_bytes + projected_this_game;
+    let projected_this_path = projected_game_cloud_bytes(&local_files, &cloud_meta);
+    let projected_total = other_games_bytes + current_game_cloud_bytes + projected_this_path;
     if projected_total > STORAGE_LIMIT_BYTES {
         return Err(format!(
             "Storage limit exceeded: this sync would use {:.1} MB but the 200 MB per-user limit would be reached. \
@@ -291,7 +321,6 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
     );
     // ─────────────────────────────────────────────────────────────────────────
 
-    // Build lookup from stored SyncMeta for fast path checks (cloud_meta is never mutated)
     let meta_lookup: HashMap<&str, &SyncFileEntry> =
         cloud_meta.files.iter().map(|f| (f.path_file.as_str(), f)).collect();
 
@@ -303,17 +332,14 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
         files: cloud_meta.files.clone(),
     };
 
-    // 6. Per-file comparison: local files vs cloud meta
+    // 4. Per-file comparison: local files vs cloud meta
     for local in &local_files {
         let cloud_entry = meta_lookup.get(local.relative_path.as_str()).copied();
-
-        // Derive the file name for Drive live-timestamp lookup (Drive is keyed by name)
         let file_name = Path::new(&local.relative_path)
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or(&local.relative_path);
 
-        // Use Drive's live modifiedTime for conflict resolution (more accurate than any cached value)
         let cloud_ts = drive_files
             .iter()
             .find(|df| df.name == file_name)
@@ -321,15 +347,21 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
             .unwrap_or("")
             .to_owned();
 
-        let should_upload = cloud_entry.is_none() || local.modified_iso.as_str() > cloud_ts.as_str();
+        let should_upload =
+            cloud_entry.is_none() || local.modified_iso.as_str() > cloud_ts.as_str();
 
         if should_upload {
-            // Find existing Drive file ID for update (PATCH) vs new upload (POST)
             let existing_id = cloud_entry
                 .and_then(|e| e.drive_file_id.as_deref())
-                .or_else(|| drive_files.iter().find(|f| f.name == file_name).map(|f| f.id.as_str()));
+                .or_else(|| {
+                    drive_files
+                        .iter()
+                        .find(|f| f.name == file_name)
+                        .map(|f| f.id.as_str())
+                });
 
-            let result = gdrive::upload_file(app, &game_folder_id, &local.absolute_path, existing_id)?;
+            let result =
+                gdrive::upload_file(app, drive_folder_id, &local.absolute_path, existing_id)?;
 
             new_meta.files.retain(|f| f.path_file != local.relative_path);
             new_meta.files.push(SyncFileEntry {
@@ -339,16 +371,20 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
             });
             uploaded += 1;
         } else if cloud_ts.as_str() > local.modified_iso.as_str() {
-            // Cloud is newer → download
             let drive_file_id_owned: Option<String> = cloud_entry
                 .and_then(|e| e.drive_file_id.clone())
-                .or_else(|| drive_files.iter().find(|f| f.name == file_name).map(|f| f.id.clone()));
+                .or_else(|| {
+                    drive_files
+                        .iter()
+                        .find(|f| f.name == file_name)
+                        .map(|f| f.id.clone())
+                });
 
             if let Some(ref drive_file_id) = drive_file_id_owned {
                 let dest = save_dir.join(local.relative_path.replace('/', "\\"));
                 let used_id = download_with_fallback(
                     app,
-                    &game_folder_id,
+                    drive_folder_id,
                     &mut drive_files,
                     drive_file_id,
                     &local.relative_path,
@@ -363,7 +399,6 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
                     });
                     downloaded += 1;
                 } else {
-                    // File no longer exists on Drive — treat local copy as authoritative
                     skipped += 1;
                 }
             } else {
@@ -374,18 +409,16 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
         }
     }
 
-    // 7. Download files that exist only on Drive (not locally)
+    // 5. Download files that exist only on Drive (not locally)
     for entry in cloud_meta.files.iter() {
         if local_files.iter().any(|l| l.relative_path == entry.path_file) {
-            continue; // Already handled above
+            continue;
         }
-
-        // File exists on Drive but not locally → download it
         if let Some(ref drive_file_id) = entry.drive_file_id {
             let dest = save_dir.join(entry.path_file.replace('/', "\\"));
             let used_id = download_with_fallback(
                 app,
-                &game_folder_id,
+                drive_folder_id,
                 &mut drive_files,
                 drive_file_id,
                 &entry.path_file,
@@ -403,36 +436,124 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
         }
     }
 
-    // 8. Upload updated sync metadata
-    gdrive::upload_sync_meta(app, &game_folder_id, &new_meta, meta_file_id.as_deref())?;
+    // 6. Upload updated sync metadata
+    gdrive::upload_sync_meta(app, drive_folder_id, &new_meta, meta_file_id.as_deref())?;
     spawn_sync_meta_mirror(app, game_id, new_meta.clone());
 
-    // 9. Update game entry timestamps and cloud storage size in state
+    let cloud_bytes: u64 = new_meta.files.iter().map(|f| f.size).sum();
+    Ok(PathSyncResult {
+        uploaded,
+        downloaded,
+        skipped,
+        cloud_bytes,
+    })
+}
+
+fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String> {
+    // 1. Load game entry
+    let state = settings::load_state(app)?;
+    let game = settings::find_game(&state, game_id)?.clone();
+
+    let effectives = settings::effective_save_paths(&game, &state.settings);
+
+    if effectives.iter().all(|p| p.is_none()) {
+        return Err("Save path is not set for this game".into());
+    }
+
+    // 2. Ensure root + game Drive folders exist (idempotent)
+    let (root_folder_id, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
+
+    let other_games_bytes: u64 = state
+        .games
+        .iter()
+        .filter(|g| g.id != game_id)
+        .map(|g| g.cloud_storage_bytes.unwrap_or(0))
+        .sum();
+
+    let mut total_uploaded = 0u32;
+    let mut total_downloaded = 0u32;
+    let mut total_skipped = 0u32;
+    let mut total_cloud_bytes = 0u64;
+
+    // 3. Iterate over each configured save path
+    for (i, effective) in effectives.iter().enumerate() {
+        let save_path = match effective {
+            Some(p) => p,
+            None => continue, // device-specific path not configured on this machine
+        };
+        let expanded_path = settings::expand_env_vars(save_path);
+        let save_dir_owned = expanded_path.clone();
+        let save_dir = Path::new(&save_dir_owned);
+
+        // Resolve the Drive folder for this path index
+        let drive_folder_id = if i == 0 {
+            game_folder_id.clone()
+        } else {
+            // Find or create `{game_id}/path-{i}/` subfolder on Drive,
+            // caching the ID in save_paths[i].gdrive_folder_id.
+            let cached_id = game.save_paths.get(i).and_then(|e| e.gdrive_folder_id.clone());
+            let fid = match cached_id {
+                Some(id) => id,
+                None => {
+                    let new_id =
+                        gdrive::ensure_subfolder(app, &root_folder_id, &format!("path-{i}"))?;
+                    // Persist the cached folder ID
+                    let _ = settings::update_game_field(app, game_id, |g| {
+                        if let Some(entry) = g.save_paths.get_mut(i) {
+                            entry.gdrive_folder_id = Some(new_id.clone());
+                        }
+                    });
+                    new_id
+                }
+            };
+            fid
+        };
+
+        let sync_excludes = game
+            .save_paths
+            .get(i)
+            .map(|e| e.sync_excludes.as_slice())
+            .unwrap_or(&[]);
+
+        let path_result = sync_single_path(
+            app,
+            game_id,
+            save_dir,
+            &drive_folder_id,
+            sync_excludes,
+            other_games_bytes,
+            total_cloud_bytes,
+        )?;
+
+        total_uploaded += path_result.uploaded;
+        total_downloaded += path_result.downloaded;
+        total_skipped += path_result.skipped;
+        total_cloud_bytes += path_result.cloud_bytes;
+    }
+
+    // 4. Update game entry timestamps and total cloud storage size
     let now_iso = chrono::Utc::now().to_rfc3339();
-    let new_cloud_bytes: u64 = new_meta.files.iter().map(|f| f.size).sum();
     let _ = settings::update_game_field(app, game_id, |g| {
         g.last_cloud_modified = Some(now_iso.clone());
-        g.cloud_storage_bytes = Some(new_cloud_bytes);
+        g.cloud_storage_bytes = Some(total_cloud_bytes);
     });
 
     Ok(SyncResult {
         game_id: game_id.to_string(),
-        uploaded,
-        downloaded,
-        skipped,
+        uploaded: total_uploaded,
+        downloaded: total_downloaded,
+        skipped: total_skipped,
         error: None,
     })
 }
 
-/// Sync all games that have a save_path set (regardless of track_changes).
+/// Sync all games that have at least one save path set (regardless of track_changes).
 pub fn sync_all_games(app: &AppHandle) -> Result<Vec<SyncResult>, String> {
     let state = settings::load_state(app)?;
     let game_ids: Vec<String> = state
         .games
         .iter()
-        .filter(|g| {
-            g.save_path.is_some() || state.settings.path_overrides.contains_key(&g.id)
-        })
+        .filter(|g| !g.save_paths.is_empty())
         .map(|g| g.id.clone())
         .collect();
 
@@ -468,72 +589,101 @@ pub fn check_sync_structure_diff(
     let state = settings::load_state(app)?;
     let game = settings::find_game(&state, game_id)?.clone();
 
-    let effective = settings::effective_save_path(&game, &state.settings);
-    let save_path = effective
-        .as_deref()
-        .ok_or("Save path is not set for this game")?;
-    let expanded_path = settings::expand_env_vars(save_path);
-    let save_dir = Path::new(&expanded_path);
+    let effectives = settings::effective_save_paths(&game, &state.settings);
 
     // 2. Ensure Drive folders exist (idempotent — creates only if absent)
-    let (_, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
+    let (root_folder_id, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
 
-    // 3. Download sync metadata
-    let (cloud_meta_opt, _) = gdrive::download_sync_meta(app, &game_folder_id)?;
-    let cloud_has_data = cloud_meta_opt.is_some();
-    let cloud_meta = cloud_meta_opt.unwrap_or_default();
-
-    // 4. List Drive files to get live modification timestamps for diff comparison
-    let drive_files = gdrive::list_files(app, &game_folder_id)?;
-    let drive_file_map: HashMap<&str, &str> = drive_files
-        .iter()
-        .filter_map(|f| f.modified_time.as_deref().map(|ts| (f.name.as_str(), ts)))
-        .collect();
-
-    // 5. Collect local files — excluding paths the user has opted out of syncing
-    let local_files = if save_dir.exists() {
-        collect_local_files(save_dir)?
-            .into_iter()
-            .filter(|f| !is_excluded(&f.relative_path, &game.sync_excludes))
-            .collect()
-    } else {
-        Vec::new()
-    };
-
-    let meta_lookup: HashMap<&str, &SyncFileEntry> =
-        cloud_meta.files.iter().map(|f| (f.path_file.as_str(), f)).collect();
-
-    // 6. Classify files into diff categories
+    let mut cloud_has_data = false;
     let mut local_only_files = Vec::new();
+    let mut cloud_only_files = Vec::new();
     let mut local_newer_files = Vec::new();
     let mut cloud_newer_files = Vec::new();
 
-    for local in &local_files {
-        match meta_lookup.get(local.relative_path.as_str()) {
-            None => local_only_files.push(local.relative_path.clone()),
-            Some(_) => {
-                let file_name = Path::new(&local.relative_path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(&local.relative_path);
-                let cloud_ts = drive_file_map.get(file_name).copied().unwrap_or("");
-                if local.modified_iso.as_str() > cloud_ts {
-                    local_newer_files.push(local.relative_path.clone());
-                } else if cloud_ts > local.modified_iso.as_str() {
-                    cloud_newer_files.push(local.relative_path.clone());
+    for (i, effective) in effectives.iter().enumerate() {
+        let save_path = match effective {
+            Some(p) => p,
+            None => continue,
+        };
+        let expanded_path = settings::expand_env_vars(save_path);
+        let save_dir_owned = expanded_path.clone();
+        let save_dir = Path::new(&save_dir_owned);
+
+        let drive_folder_id = if i == 0 {
+            game_folder_id.clone()
+        } else {
+            let cached = game.save_paths.get(i).and_then(|e| e.gdrive_folder_id.clone());
+            match cached {
+                Some(id) => id,
+                None => gdrive::ensure_subfolder(app, &root_folder_id, &format!("path-{i}"))?,
+            }
+        };
+
+        let sync_excludes = game
+            .save_paths
+            .get(i)
+            .map(|e| e.sync_excludes.as_slice())
+            .unwrap_or(&[]);
+
+        // 3. Download sync metadata
+        let (cloud_meta_opt, _) = gdrive::download_sync_meta(app, &drive_folder_id)?;
+        if cloud_meta_opt.is_some() {
+            cloud_has_data = true;
+        }
+        let cloud_meta = cloud_meta_opt.unwrap_or_default();
+
+        // 4. List Drive files for live modification timestamps
+        let drive_files = gdrive::list_files(app, &drive_folder_id)?;
+        let drive_file_map: HashMap<&str, &str> = drive_files
+            .iter()
+            .filter_map(|f| f.modified_time.as_deref().map(|ts| (f.name.as_str(), ts)))
+            .collect();
+
+        // 5. Collect local files (with exclusions)
+        let local_files = if save_dir.exists() {
+            collect_local_files(save_dir)?
+                .into_iter()
+                .filter(|f| !is_excluded(&f.relative_path, sync_excludes))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        let meta_lookup: HashMap<&str, &SyncFileEntry> =
+            cloud_meta.files.iter().map(|f| (f.path_file.as_str(), f)).collect();
+
+        // 6. Classify diff — prefix with path-i for non-zero paths so UI can display origin
+        let prefix = if i == 0 {
+            String::new()
+        } else {
+            format!("[path-{i}] ")
+        };
+
+        for local in &local_files {
+            let rel = format!("{}{}", prefix, local.relative_path);
+            match meta_lookup.get(local.relative_path.as_str()) {
+                None => local_only_files.push(rel),
+                Some(_) => {
+                    let file_name = Path::new(&local.relative_path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(&local.relative_path);
+                    let cloud_ts = drive_file_map.get(file_name).copied().unwrap_or("");
+                    if local.modified_iso.as_str() > cloud_ts {
+                        local_newer_files.push(rel);
+                    } else if cloud_ts > local.modified_iso.as_str() {
+                        cloud_newer_files.push(rel);
+                    }
                 }
-                // equal timestamps → no diff for this file
+            }
+        }
+
+        for f in cloud_meta.files.iter() {
+            if !local_files.iter().any(|l| l.relative_path == f.path_file) {
+                cloud_only_files.push(format!("{}{}", prefix, f.path_file));
             }
         }
     }
-
-    let cloud_only_files: Vec<String> = cloud_meta
-        .files
-        .iter()
-        .map(|f| &f.path_file)
-        .filter(|rel| !local_files.iter().any(|l| &l.relative_path == *rel))
-        .cloned()
-        .collect();
 
     let has_diff = !local_only_files.is_empty()
         || !cloud_only_files.is_empty()
@@ -587,63 +737,93 @@ fn restore_from_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult
     let state = settings::load_state(app)?;
     let game = settings::find_game(&state, game_id)?.clone();
 
-    let effective = settings::effective_save_path(&game, &state.settings);
-    let save_path = effective
-        .as_deref()
-        .ok_or("Save path is not set for this game")?;
-    let expanded_path = settings::expand_env_vars(save_path);
-    let save_dir = Path::new(&expanded_path);
-
-    // 2. Ensure Drive folders exist
-    let (_, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
-
-    // 3. Get cloud sync metadata — required for a restore
-    let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
-    let cloud_meta = cloud_meta_opt
-        .ok_or("No Drive data found for this game. Sync to Drive first.")?;
-
-    let mut downloaded = 0u32;
-    let mut skipped = 0u32;
-    let mut new_meta = SyncMeta {
-        last_synced: Some(chrono::Utc::now().to_rfc3339()),
-        files: cloud_meta.files.clone(),
-    };
-
-    // 4. Force-download ALL cloud-tracked files
-    for entry in cloud_meta.files.iter() {
-        if let Some(ref drive_file_id) = entry.drive_file_id {
-            let dest = save_dir.join(entry.path_file.replace('/', "\\"));
-            gdrive::download_file(app, drive_file_id, &dest)?;
-            new_meta.files.retain(|f| f.path_file != entry.path_file);
-            new_meta.files.push(SyncFileEntry {
-                path_file: entry.path_file.clone(),
-                size: entry.size,
-                drive_file_id: Some(drive_file_id.clone()),
-            });
-            downloaded += 1;
-        } else {
-            // Tracked in meta but no Drive file ID — cannot restore
-            skipped += 1;
-        }
+    let effectives = settings::effective_save_paths(&game, &state.settings);
+    if effectives.iter().all(|p| p.is_none()) {
+        return Err("Save path is not set for this game".into());
     }
 
-    // 5. Upload updated sync metadata
-    gdrive::upload_sync_meta(app, &game_folder_id, &new_meta, meta_file_id.as_deref())?;
-    spawn_sync_meta_mirror(app, game_id, new_meta.clone());
+    // 2. Ensure Drive folders exist
+    let (root_folder_id, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
+
+    let mut total_downloaded = 0u32;
+    let mut total_skipped = 0u32;
+    let mut total_cloud_bytes = 0u64;
+
+    for (i, effective) in effectives.iter().enumerate() {
+        let save_path = match effective {
+            Some(p) => p,
+            None => continue,
+        };
+        let expanded_path = settings::expand_env_vars(save_path);
+        let save_dir_owned = expanded_path.clone();
+        let save_dir = Path::new(&save_dir_owned);
+
+        let drive_folder_id = if i == 0 {
+            game_folder_id.clone()
+        } else {
+            let cached = game.save_paths.get(i).and_then(|e| e.gdrive_folder_id.clone());
+            match cached {
+                Some(id) => id,
+                None => gdrive::ensure_subfolder(app, &root_folder_id, &format!("path-{i}"))?,
+            }
+        };
+
+        // 3. Get cloud sync metadata — required for a restore
+        let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, &drive_folder_id)?;
+        let cloud_meta = match cloud_meta_opt {
+            Some(m) => m,
+            None => {
+                // No data for this path — skip it
+                continue;
+            }
+        };
+
+        let mut downloaded = 0u32;
+        let mut skipped = 0u32;
+        let mut new_meta = SyncMeta {
+            last_synced: Some(chrono::Utc::now().to_rfc3339()),
+            files: cloud_meta.files.clone(),
+        };
+
+        // 4. Force-download ALL cloud-tracked files
+        for entry in cloud_meta.files.iter() {
+            if let Some(ref drive_file_id) = entry.drive_file_id {
+                let dest = save_dir.join(entry.path_file.replace('/', "\\"));
+                gdrive::download_file(app, drive_file_id, &dest)?;
+                new_meta.files.retain(|f| f.path_file != entry.path_file);
+                new_meta.files.push(SyncFileEntry {
+                    path_file: entry.path_file.clone(),
+                    size: entry.size,
+                    drive_file_id: Some(drive_file_id.clone()),
+                });
+                downloaded += 1;
+            } else {
+                skipped += 1;
+            }
+        }
+
+        // 5. Upload updated sync metadata
+        gdrive::upload_sync_meta(app, &drive_folder_id, &new_meta, meta_file_id.as_deref())?;
+        spawn_sync_meta_mirror(app, game_id, new_meta.clone());
+
+        let cloud_bytes: u64 = new_meta.files.iter().map(|f| f.size).sum();
+        total_downloaded += downloaded;
+        total_skipped += skipped;
+        total_cloud_bytes += cloud_bytes;
+    }
 
     // 6. Update game entry timestamps and cloud storage size
     let now_iso = chrono::Utc::now().to_rfc3339();
-    let new_cloud_bytes: u64 = new_meta.files.iter().map(|f| f.size).sum();
     let _ = settings::update_game_field(app, game_id, |g| {
         g.last_cloud_modified = Some(now_iso.clone());
-        g.cloud_storage_bytes = Some(new_cloud_bytes);
+        g.cloud_storage_bytes = Some(total_cloud_bytes);
     });
 
     Ok(SyncResult {
         game_id: game_id.to_string(),
         uploaded: 0,
-        downloaded,
-        skipped,
+        downloaded: total_downloaded,
+        skipped: total_skipped,
         error: None,
     })
 }
@@ -684,102 +864,148 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
     let state = settings::load_state(app)?;
     let game = settings::find_game(&state, game_id)?.clone();
 
-    let effective = settings::effective_save_path(&game, &state.settings);
-    let save_path = effective
-        .as_deref()
-        .ok_or("Save path is not set for this game")?;
-    let expanded_path = settings::expand_env_vars(save_path);
-    let save_dir = Path::new(&expanded_path);
+    let effectives = settings::effective_save_paths(&game, &state.settings);
+    if effectives.iter().all(|p| p.is_none()) {
+        return Err("Save path is not set for this game".into());
+    }
 
     // 2. Ensure Drive folders exist
-    let (_, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
+    let (root_folder_id, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
 
-    // 3. Get cloud meta + existing Drive file list
-    let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
-    let cloud_meta = cloud_meta_opt.unwrap_or_default();
-    let drive_files = gdrive::list_files(app, &game_folder_id)?;
-
-    // 4. Collect local files — excluding paths the user has opted out of syncing
-    let all_local_files = collect_local_files(save_dir)?;
-    let local_files: Vec<LocalFileInfo> = all_local_files
-        .into_iter()
-        .filter(|f| !is_excluded(&f.relative_path, &game.sync_excludes))
-        .collect();
-
-    // ── Storage limit guard ───────────────────────────────────────────────────
-    let projected_this_game = projected_game_cloud_bytes(&local_files, &cloud_meta);
     let other_games_bytes: u64 = state
         .games
         .iter()
         .filter(|g| g.id != game_id)
         .map(|g| g.cloud_storage_bytes.unwrap_or(0))
         .sum();
-    let projected_total = other_games_bytes + projected_this_game;
-    if projected_total > STORAGE_LIMIT_BYTES {
-        return Err(format!(
-            "Storage limit exceeded: this push would use {:.1} MB but the 200 MB per-user limit would be reached.",
-            projected_total as f64 / 1_048_576.0
-        ));
-    }
-    // ─────────────────────────────────────────────────────────────────────────
 
-    let mut uploaded = 0u32;
-    let mut skipped = 0u32;
-    let mut new_meta = SyncMeta {
-        last_synced: Some(chrono::Utc::now().to_rfc3339()),
-        files: cloud_meta.files.clone(),
-    };
+    let mut total_uploaded = 0u32;
+    let mut total_skipped = 0u32;
+    let mut total_cloud_bytes = 0u64;
 
-    // Build lookup for fast path checking
-    let meta_lookup: HashMap<&str, &SyncFileEntry> =
-        cloud_meta.files.iter().map(|f| (f.path_file.as_str(), f)).collect();
+    for (i, effective) in effectives.iter().enumerate() {
+        let save_path = match effective {
+            Some(p) => p,
+            None => continue,
+        };
+        let expanded_path = settings::expand_env_vars(save_path);
+        let save_dir_owned = expanded_path.clone();
+        let save_dir = Path::new(&save_dir_owned);
 
-    // 5. Force-upload ALL local files
-    for local in &local_files {
-        let cloud_entry = meta_lookup.get(local.relative_path.as_str()).copied();
-        let file_name = Path::new(&local.relative_path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(&local.relative_path);
-        // Look up existing Drive file ID for PATCH vs new POST
-        let existing_id = cloud_entry
-            .and_then(|e| e.drive_file_id.as_deref())
-            .or_else(|| drive_files.iter().find(|f| f.name == file_name).map(|f| f.id.as_str()));
+        let drive_folder_id = if i == 0 {
+            game_folder_id.clone()
+        } else {
+            let cached = game.save_paths.get(i).and_then(|e| e.gdrive_folder_id.clone());
+            match cached {
+                Some(id) => id,
+                None => {
+                    let new_id =
+                        gdrive::ensure_subfolder(app, &root_folder_id, &format!("path-{i}"))?;
+                    let _ = settings::update_game_field(app, game_id, |g| {
+                        if let Some(entry) = g.save_paths.get_mut(i) {
+                            entry.gdrive_folder_id = Some(new_id.clone());
+                        }
+                    });
+                    new_id
+                }
+            }
+        };
 
-        let result = gdrive::upload_file(app, &game_folder_id, &local.absolute_path, existing_id)?;
-        new_meta.files.retain(|f| f.path_file != local.relative_path);
-        new_meta.files.push(SyncFileEntry {
-            path_file: local.relative_path.clone(),
-            size: local.size,
-            drive_file_id: Some(result.id),
-        });
-        uploaded += 1;
-    }
+        let sync_excludes = game
+            .save_paths
+            .get(i)
+            .map(|e| e.sync_excludes.as_slice())
+            .unwrap_or(&[]);
 
-    // 6. Cloud-only files are left in Drive (non-destructive) → counted as skipped
-    for entry in &cloud_meta.files {
-        if !local_files.iter().any(|l| l.relative_path == entry.path_file) {
-            skipped += 1;
+        // 3. Get cloud meta + existing Drive file list
+        let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, &drive_folder_id)?;
+        let cloud_meta = cloud_meta_opt.unwrap_or_default();
+        let drive_files = gdrive::list_files(app, &drive_folder_id)?;
+
+        // 4. Collect local files
+        let all_local_files = collect_local_files(save_dir)?;
+        let local_files: Vec<LocalFileInfo> = all_local_files
+            .into_iter()
+            .filter(|f| !is_excluded(&f.relative_path, sync_excludes))
+            .collect();
+
+        // ── Storage limit guard ────────────────────────────────────────────────
+        let projected_this_path = projected_game_cloud_bytes(&local_files, &cloud_meta);
+        let projected_total = other_games_bytes + total_cloud_bytes + projected_this_path;
+        if projected_total > STORAGE_LIMIT_BYTES {
+            return Err(format!(
+                "Storage limit exceeded: this push would use {:.1} MB but the 200 MB per-user limit would be reached.",
+                projected_total as f64 / 1_048_576.0
+            ));
         }
-    }
+        // ──────────────────────────────────────────────────────────────────────
 
-    // 7. Upload updated sync metadata
-    gdrive::upload_sync_meta(app, &game_folder_id, &new_meta, meta_file_id.as_deref())?;
-    spawn_sync_meta_mirror(app, game_id, new_meta.clone());
+        let mut uploaded = 0u32;
+        let mut skipped = 0u32;
+        let mut new_meta = SyncMeta {
+            last_synced: Some(chrono::Utc::now().to_rfc3339()),
+            files: cloud_meta.files.clone(),
+        };
+
+        let meta_lookup: HashMap<&str, &SyncFileEntry> =
+            cloud_meta.files.iter().map(|f| (f.path_file.as_str(), f)).collect();
+
+        // 5. Force-upload ALL local files
+        for local in &local_files {
+            let cloud_entry = meta_lookup.get(local.relative_path.as_str()).copied();
+            let file_name = Path::new(&local.relative_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&local.relative_path);
+            let existing_id = cloud_entry
+                .and_then(|e| e.drive_file_id.as_deref())
+                .or_else(|| {
+                    drive_files
+                        .iter()
+                        .find(|f| f.name == file_name)
+                        .map(|f| f.id.as_str())
+                });
+
+            let result =
+                gdrive::upload_file(app, &drive_folder_id, &local.absolute_path, existing_id)?;
+            new_meta.files.retain(|f| f.path_file != local.relative_path);
+            new_meta.files.push(SyncFileEntry {
+                path_file: local.relative_path.clone(),
+                size: local.size,
+                drive_file_id: Some(result.id),
+            });
+            uploaded += 1;
+        }
+
+        // 6. Cloud-only files are left in Drive (non-destructive)
+        for entry in &cloud_meta.files {
+            if !local_files.iter().any(|l| l.relative_path == entry.path_file) {
+                skipped += 1;
+            }
+        }
+
+        // 7. Upload updated sync metadata
+        gdrive::upload_sync_meta(app, &drive_folder_id, &new_meta, meta_file_id.as_deref())?;
+        spawn_sync_meta_mirror(app, game_id, new_meta.clone());
+
+        let cloud_bytes: u64 = new_meta.files.iter().map(|f| f.size).sum();
+        total_uploaded += uploaded;
+        total_skipped += skipped;
+        total_cloud_bytes += cloud_bytes;
+    }
 
     // 8. Update game entry timestamps and cloud storage size
     let now_iso = chrono::Utc::now().to_rfc3339();
-    let new_cloud_bytes: u64 = new_meta.files.iter().map(|f| f.size).sum();
     let _ = settings::update_game_field(app, game_id, |g| {
         g.last_cloud_modified = Some(now_iso.clone());
-        g.cloud_storage_bytes = Some(new_cloud_bytes);
+        g.cloud_storage_bytes = Some(total_cloud_bytes);
     });
 
     Ok(SyncResult {
         game_id: game_id.to_string(),
-        uploaded,
+        uploaded: total_uploaded,
         downloaded: 0,
-        skipped,
+        skipped: total_skipped,
         error: None,
     })
 }
@@ -789,9 +1015,11 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
 /// Delete files from Google Drive that the user has newly added to `sync_excludes`.
 /// Updates `.sync-meta.json` to remove the deleted entries.
 /// Called in a background thread from the `update_game` command handler.
+/// `drive_folder_id` is the specific Drive folder for the affected save-path entry.
 pub fn cleanup_excluded_from_cloud(
     app: &AppHandle,
     game_id: &str,
+    drive_folder_id: &str,
     newly_excluded: Vec<String>,
 ) -> Result<(), String> {
     if newly_excluded.is_empty() {
@@ -803,11 +1031,8 @@ pub fn cleanup_excluded_from_cloud(
         newly_excluded.len()
     );
 
-    // 1. Ensure Drive folder exists
-    let (_, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
-
-    // 2. Download sync metadata
-    let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
+    // 1. Download sync metadata
+    let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, drive_folder_id)?;
     let mut cloud_meta = match cloud_meta_opt {
         Some(m) => m,
         None => {
@@ -816,14 +1041,11 @@ pub fn cleanup_excluded_from_cloud(
         }
     };
 
-    // 3. For each excluded path, delete its Drive file and remove it from meta
-    let expandable_excludes: Vec<String> = newly_excluded;
-    // We need sync_excludes from GameEntry to evaluate is_excluded properly.
-    // Since newly_excluded already contains only the new entries, we use them directly.
+    // 2. For each excluded path, delete its Drive file and remove it from meta
     let keys_to_remove: Vec<String> = cloud_meta
         .files
         .iter()
-        .filter(|f| is_excluded(&f.path_file, &expandable_excludes))
+        .filter(|f| is_excluded(&f.path_file, &newly_excluded))
         .map(|f| f.path_file.clone())
         .collect();
 
@@ -832,7 +1054,6 @@ pub fn cleanup_excluded_from_cloud(
             if let Some(ref drive_file_id) = file_entry.drive_file_id {
                 println!("[sync] Deleting excluded Drive file '{rel_path}' (id={drive_file_id})");
                 if let Err(e) = gdrive::delete_drive_file(app, drive_file_id) {
-                    // Log but continue — meta cleanup still happens
                     eprintln!("[sync] Failed to delete Drive file '{rel_path}': {e}");
                 }
             }
@@ -840,11 +1061,11 @@ pub fn cleanup_excluded_from_cloud(
         cloud_meta.files.retain(|f| f.path_file != *rel_path);
     }
 
-    // 4. Re-upload updated sync metadata
-    gdrive::upload_sync_meta(app, &game_folder_id, &cloud_meta, meta_file_id.as_deref())?;
+    // 3. Re-upload updated sync metadata
+    gdrive::upload_sync_meta(app, drive_folder_id, &cloud_meta, meta_file_id.as_deref())?;
     spawn_sync_meta_mirror(app, game_id, cloud_meta.clone());
 
-    // 5. Update cloud_storage_bytes to reflect new total
+    // 4. Update cloud_storage_bytes to reflect new total
     let new_cloud_bytes: u64 = cloud_meta.files.iter().map(|f| f.size).sum();
     let _ = settings::update_game_field(app, game_id, |g| {
         g.cloud_storage_bytes = Some(new_cloud_bytes);

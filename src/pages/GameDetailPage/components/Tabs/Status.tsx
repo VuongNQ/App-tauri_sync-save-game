@@ -27,7 +27,8 @@ const TabStatus = () => {
 
   const game = queryClient.getQueryData(DashboardQuery.queryKey)?.games.find((g) => g.id === id);
 
-  const saveInfoQuery = useGetSaveInfoQuery(id ?? "", !!game?.savePath);
+  const primarySavePath = game?.savePaths[0]?.path ?? null;
+  const saveInfoQuery = useGetSaveInfoQuery(id ?? "", !!primarySavePath);
 
   const syncLibraryMutation = useSyncLibraryFromCloudMutation();
 
@@ -73,17 +74,17 @@ const TabStatus = () => {
           <button
             className={SECONDARY_BTN}
             type="button"
-            disabled={!game.savePath || isSyncing}
-            onClick={() => game.savePath && restoreFlow.start()}
+            disabled={!primarySavePath || isSyncing}
+            onClick={() => primarySavePath && restoreFlow.start()}
           >
             {restoreFlow.isChecking ? "Checking…" : "Restore from Drive"}
           </button>
           <button
             className={`${PRIMARY_BTN} col-span-full inline-flex items-center justify-center gap-2`}
             type="button"
-            disabled={!game.savePath || isSyncing}
+            disabled={!primarySavePath || isSyncing}
             onClick={() =>
-              game.savePath &&
+              primarySavePath &&
               syncMutation.mutate(undefined, {
                 onSuccess: (data) => {
                   if (data.error) {
@@ -131,8 +132,11 @@ const TabStatus = () => {
             onRefresh={() => void saveInfoQuery.refetch()}
             isRefreshing={saveInfoQuery.isFetching}
             onOpenFolder={() => {
-              if (!game?.savePath) return;
-              void expandSavePath(game.savePath).then((p) => openPath(p));
+              if (!primarySavePath) return;
+              void expandSavePath(primarySavePath).then((p) => openPath(p));
+            }}
+            onOpenFolderForPath={(rawPath) => {
+              void expandSavePath(rawPath).then((p) => openPath(p));
             }}
           />
         )}
@@ -146,7 +150,7 @@ const TabStatus = () => {
       {/* Tracking & Sync status */}
       <TrackingSyncCard
         gameId={game.id}
-        savePath={game.savePath}
+        savePath={primarySavePath}
         trackChanges={game.trackChanges}
         autoSync={game.autoSync}
         isSyncing={isSyncing}

@@ -10,6 +10,27 @@ pub struct DashboardData {
     pub games: Vec<GameEntry>,
 }
 
+/// A single save-folder entry within a game.  Games can have multiple save paths
+/// (e.g. PCSX2 has separate `memcards/` and `sstates/` folders).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SavePathEntry {
+    /// Human-readable label chosen by the user (e.g. "Memory Cards"). Required.
+    pub label: String,
+    /// Portable `%VAR%` path, **or** `None` when the path is device-specific
+    /// (stored in `AppSettings.path_overrides` / `path_overrides_indexed` instead).
+    pub path: Option<String>,
+    /// Cached Google Drive subfolder ID for this path entry.
+    /// - Index 0 → uses `GameEntry.gdrive_folder_id` (root folder) — this field stays `None`.
+    /// - Index i≥1 → `game_id/path-{i}/` subfolder on Drive.
+    #[serde(default)]
+    pub gdrive_folder_id: Option<String>,
+    /// Relative paths (forward-slash) excluded from Drive sync **for this path only**.
+    /// A trailing '/' means folder prefix; otherwise it is an exact file match.
+    #[serde(default)]
+    pub sync_excludes: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameEntry {
@@ -18,7 +39,20 @@ pub struct GameEntry {
     pub description: Option<String>,
     pub thumbnail: Option<String>,
     pub source: String,
+    /// List of save-folder entries for this game (primary source of truth).
+    /// Populated from the legacy `save_path` field on first load via migration.
+    #[serde(default)]
+    pub save_paths: Vec<SavePathEntry>,
+    // ── Legacy fields — kept for migration deserialization only ──────────────
+    /// Old single save path. Populated on deserialization of pre-migration JSON;
+    /// migrated to `save_paths[0]` in `settings::load_state` and then cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub save_path: Option<String>,
+    /// Old top-level exclusion list. Migrated into `save_paths[0].sync_excludes`
+    /// during the same migration pass and then cleared.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sync_excludes: Vec<String>,
+    // ── Active fields ─────────────────────────────────────────────────────────
     /// Process name to watch (e.g. "GameName.exe"). Sync triggers when this process exits.
     #[serde(default)]
     pub exe_name: Option<String>,
@@ -35,10 +69,6 @@ pub struct GameEntry {
     /// Updated after each successful sync. Used to enforce per-user storage quotas.
     #[serde(default)]
     pub cloud_storage_bytes: Option<u64>,
-    /// Relative paths (forward-slash) excluded from Drive sync.
-    /// A trailing '/' means the entry is a folder prefix; otherwise it is an exact file match.
-    #[serde(default)]
-    pub sync_excludes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,12 +141,16 @@ pub struct AppSettings {
     pub sync_interval_minutes: u32,
     pub start_minimised: bool,
     pub run_on_startup: bool,
-    /// Device-specific save-path overrides keyed by `game_id`.
-    /// Populated when a user sets a path that cannot be represented as a
-    /// portable `%VAR%` token (e.g. `D:\Games\halo`).
+    /// Device-specific save-path overrides keyed by `game_id` for `save_paths[0]`.
+    /// Populated when a path cannot be represented as a portable `%VAR%` token.
     /// **Local-only — never written to Firestore.**
     #[serde(default)]
     pub path_overrides: HashMap<String, String>,
+    /// Device-specific overrides for additional save paths (`save_paths[i≥1]`).
+    /// Key format: `"{game_id}:{i}"` (e.g. `"manual-pcsx2:1"`).
+    /// **Local-only — never written to Firestore.**
+    #[serde(default)]
+    pub path_overrides_indexed: HashMap<String, String>,
 }
 
 impl Default for AppSettings {
@@ -126,6 +160,7 @@ impl Default for AppSettings {
             start_minimised: false,
             run_on_startup: false,
             path_overrides: HashMap::new(),
+            path_overrides_indexed: HashMap::new(),
         }
     }
 }
@@ -142,15 +177,29 @@ pub struct SaveFileInfo {
     pub modified_time: String,
 }
 
+/// Per-path breakdown returned inside `SaveInfo` when a game has multiple save paths.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathSaveInfo {
+    pub label: String,
+    pub save_path: String,
+    pub total_size: u64,
+    pub files: Vec<SaveFileInfo>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveInfo {
     pub game_id: String,
+    /// Primary (first) save path — kept for single-path backward compat.
     pub save_path: String,
     pub total_files: u32,
     pub total_size: u64,
     pub last_modified: Option<String>,
     pub files: Vec<SaveFileInfo>,
+    /// Per-path breakdown when the game has multiple save paths. Empty when only one path.
+    #[serde(default)]
+    pub path_infos: Vec<PathSaveInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

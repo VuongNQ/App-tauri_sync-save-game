@@ -94,7 +94,11 @@ export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
                     <strong className="truncate">{g.name}</strong>
                     <div className="flex items-center gap-2">
                       <span className={badge}>{g.source}</span>
-                      {g.savePath && <span className={`${MUTED} text-xs truncate`}>{g.savePath}</span>}
+                      {g.savePaths.length > 0 && g.savePaths[0].path && (
+                        <span className={`${MUTED} text-xs truncate`}>
+                          {g.savePaths.length > 1 ? `${g.savePaths[0].path} (+${g.savePaths.length - 1} more)` : g.savePaths[0].path}
+                        </span>
+                      )}
                     </div>
                     {isInvalid && (
                       <p className="m-0 text-xs text-[#ff9e9e] flex items-center gap-1">

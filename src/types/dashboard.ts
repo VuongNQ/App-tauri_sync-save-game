@@ -1,12 +1,20 @@
 export type GameSource = "emulator" | "manual";
 
+export interface SavePathEntry {
+  label: string;
+  path: string | null;
+  gdriveFolderId: string | null;
+  syncExcludes: string[];
+}
+
 export interface GameEntry {
   id: string;
   name: string;
   description: string | null;
   thumbnail: string | null;
   source: GameSource;
-  savePath: string | null;
+  /** Multiple save-path entries for this game. Primary path is index 0. */
+  savePaths: SavePathEntry[];
   /** Process name to watch (e.g. "GameName.exe"). Sync triggers when this process exits. */
   exeName: string | null;
   /** Full path to the game executable. Used to launch the game from the app. */
@@ -18,7 +26,6 @@ export interface GameEntry {
   gdriveFolderId: string | null;
   /** Total bytes stored in Google Drive for this game's save files. */
   cloudStorageBytes: number | null;
-  syncExcludes: string[];
 }
 
 export interface DashboardData {
@@ -69,6 +76,8 @@ export interface AppSettings {
   runOnStartup: boolean;
   /** Device-specific save-path overrides keyed by game id. Local-only — never synced to Firestore. */
   pathOverrides: Record<string, string>;
+  /** Device-specific save-path overrides for extra paths keyed by "{gameId}:{index}". Local-only. */
+  pathOverridesIndexed: Record<string, string>;
 }
 
 // ── Save Info ─────────────────────────────────────────────
@@ -79,13 +88,24 @@ export interface SaveFileInfo {
   modifiedTime: string;
 }
 
+/** Per-path breakdown inside `SaveInfo` when a game has multiple save paths. */
+export interface PathSaveInfo {
+  label: string;
+  savePath: string;
+  totalSize: number;
+  files: SaveFileInfo[];
+}
+
 export interface SaveInfo {
   gameId: string;
+  /** Primary (first) save path — kept for single-path backward compat. */
   savePath: string;
   totalFiles: number;
   totalSize: number;
   lastModified: string | null;
   files: SaveFileInfo[];
+  /** Per-path breakdown when the game has multiple save paths. Empty when only one path. */
+  pathInfos: PathSaveInfo[];
 }
 
 // ── Sync ──────────────────────────────────────────────────
