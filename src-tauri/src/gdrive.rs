@@ -1,4 +1,4 @@
-use std::{
+﻿use std::{
     fs,
     path::Path,
 };
@@ -8,6 +8,7 @@ use tauri::AppHandle;
 
 use crate::{
     gdrive_auth,
+    http_client,
     models::{AppSettings, DriveFile, DriveFileFlatItem, DriveFileItem, GameEntry, SyncMeta},
     settings,
 };
@@ -18,61 +19,6 @@ const ROOT_FOLDER_NAME: &str = "game-processing-sync";
 const SYNC_META_NAME: &str = ".sync-meta.json";
 const LIBRARY_FILE_NAME: &str = "library.json";
 const CONFIG_FILE_NAME: &str = "config.json";
-
-// ── Helpers ───────────────────────────────────────────────
-
-fn agent() -> ureq::Agent {
-    let config = ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .build();
-    ureq::Agent::new_with_config(config)
-}
-
-/// Generic Drive GET with automatic 401 retry.
-fn drive_get(app: &AppHandle, url: &str) -> Result<(u16, String), String> {
-    let resp = do_drive_get(app, url)?;
-    if resp.0 == 401 {
-        // Force token refresh and retry once
-        let _ = gdrive_auth::get_access_token(app)?;
-        return do_drive_get(app, url);
-    }
-    Ok(resp)
-}
-
-fn do_drive_get(app: &AppHandle, url: &str) -> Result<(u16, String), String> {
-    let token = gdrive_auth::get_access_token(app)?;
-    let resp = agent()
-        .get(url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .call()
-        .map_err(|e| format!("Drive GET failed: {e}"))?;
-    let status = resp.status().as_u16();
-    let text = resp.into_body().read_to_string().unwrap_or_default();
-    Ok((status, text))
-}
-
-/// Drive POST with JSON body, 401 retry.
-fn drive_post_json(app: &AppHandle, url: &str, body: &str) -> Result<(u16, String), String> {
-    let resp = do_drive_post_json(app, url, body)?;
-    if resp.0 == 401 {
-        let _ = gdrive_auth::get_access_token(app)?;
-        return do_drive_post_json(app, url, body);
-    }
-    Ok(resp)
-}
-
-fn do_drive_post_json(app: &AppHandle, url: &str, body: &str) -> Result<(u16, String), String> {
-    let token = gdrive_auth::get_access_token(app)?;
-    let resp = agent()
-        .post(url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .content_type("application/json")
-        .send(body.as_bytes())
-        .map_err(|e| format!("Drive POST failed: {e}"))?;
-    let status = resp.status().as_u16();
-    let text = resp.into_body().read_to_string().unwrap_or_default();
-    Ok((status, text))
-}
 
 // ── Drive list response parsing ───────────────────────────
 
@@ -108,7 +54,7 @@ pub fn ensure_root_folder(app: &AppHandle) -> Result<String, String> {
     let url = format!(
         "{DRIVE_FILES_URL}?q=name%3D%27{ROOT_FOLDER_NAME}%27+and+%27appDataFolder%27+in+parents+and+mimeType%3D%27application%2Fvnd.google-apps.folder%27+and+trashed%3Dfalse&spaces=appDataFolder&fields=files(id,name)"
     );
-    let (status, body) = drive_get(app, &url)?;
+    let (status, body) = http_client::authed_get(app, &url)?;
     if status != 200 {
         return Err(format!("Failed to list root folder (HTTP {status}): {body}"));
     }
@@ -130,7 +76,7 @@ pub fn ensure_root_folder(app: &AppHandle) -> Result<String, String> {
         "parents": ["appDataFolder"]
     });
     let (status, body) =
-        drive_post_json(app, &format!("{DRIVE_FILES_URL}?fields=id"), &meta.to_string())?;
+        http_client::authed_post_json(app, &format!("{DRIVE_FILES_URL}?fields=id"), &meta.to_string())?;
     if status != 200 {
         return Err(format!(
             "Failed to create root folder (HTTP {status}): {body}"
@@ -166,7 +112,7 @@ pub fn ensure_game_folder(
     let url = format!(
         "{DRIVE_FILES_URL}?q=name%3D%27{encoded_name}%27+and+%27{root_folder_id}%27+in+parents+and+mimeType%3D%27application%2Fvnd.google-apps.folder%27+and+trashed%3Dfalse&spaces=appDataFolder&fields=files(id,name)"
     );
-    let (status, body) = drive_get(app, &url)?;
+    let (status, body) = http_client::authed_get(app, &url)?;
     if status != 200 {
         return Err(format!(
             "Failed to list game folder (HTTP {status}): {body}"
@@ -206,7 +152,7 @@ fn create_game_folder(
         "parents": [parent_id]
     });
     let (status, body) =
-        drive_post_json(app, &format!("{DRIVE_FILES_URL}?fields=id"), &meta.to_string())?;
+        http_client::authed_post_json(app, &format!("{DRIVE_FILES_URL}?fields=id"), &meta.to_string())?;
     if status != 200 {
         return Err(format!(
             "Failed to create game folder (HTTP {status}): {body}"
@@ -228,7 +174,7 @@ pub fn list_files(app: &AppHandle, folder_id: &str) -> Result<Vec<DriveFile>, St
     let url = format!(
         "{DRIVE_FILES_URL}?q=%27{folder_id}%27+in+parents+and+trashed%3Dfalse&spaces=appDataFolder&fields=files(id,name,modifiedTime,size)"
     );
-    let (status, body) = drive_get(app, &url)?;
+    let (status, body) = http_client::authed_get(app, &url)?;
     if status != 200 {
         return Err(format!("Failed to list files (HTTP {status}): {body}"));
     }
@@ -280,7 +226,7 @@ pub fn list_drive_items(app: &AppHandle, folder_id: &str) -> Result<Vec<DriveFil
     let url = format!(
         "{DRIVE_FILES_URL}?q=%27{folder_id}%27+in+parents+and+trashed%3Dfalse&spaces=appDataFolder&fields=files(id,name,mimeType,modifiedTime,size)"
     );
-    let (status, body) = drive_get(app, &url)?;
+    let (status, body) = http_client::authed_get(app, &url)?;
     if status != 200 {
         return Err(format!("Failed to list drive items (HTTP {status}): {body}"));
     }
@@ -333,16 +279,8 @@ pub fn list_drive_items_recursive(
 pub fn rename_drive_item(app: &AppHandle, file_id: &str, new_name: &str) -> Result<(), String> {
     let url = format!("{DRIVE_FILES_URL}/{file_id}?fields=id");
     let body = serde_json::json!({ "name": new_name }).to_string();
-    let token = gdrive_auth::get_access_token(app)?;
-    let resp = agent()
-        .patch(&url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .content_type("application/json")
-        .send(body.as_bytes())
-        .map_err(|e| format!("Rename Drive item failed: {e}"))?;
-    let status = resp.status().as_u16();
+    let (status, resp_body) = http_client::authed_patch_json(app, &url, &body)?;
     if status != 200 {
-        let resp_body = resp.into_body().read_to_string().unwrap_or_default();
         return Err(format!(
             "Rename Drive item {file_id} failed (HTTP {status}): {resp_body}"
         ));
@@ -361,17 +299,9 @@ pub fn move_drive_file(
     let url = format!(
         "{DRIVE_FILES_URL}/{file_id}?addParents={new_parent_id}&removeParents={old_parent_id}&fields=id"
     );
-    let token = gdrive_auth::get_access_token(app)?;
     // PATCH with empty JSON body is required by the Drive API for metadata-only changes.
-    let resp = agent()
-        .patch(&url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .content_type("application/json")
-        .send(b"{}")
-        .map_err(|e| format!("Move Drive file failed: {e}"))?;
-    let status = resp.status().as_u16();
+    let (status, resp_body) = http_client::authed_patch_json(app, &url, "{}")?;
     if status != 200 {
-        let resp_body = resp.into_body().read_to_string().unwrap_or_default();
         return Err(format!(
             "Move Drive file {file_id} failed (HTTP {status}): {resp_body}"
         ));
@@ -390,7 +320,7 @@ pub fn copy_drive_file(
         "{DRIVE_FILES_URL}/{file_id}/copy?fields=id,name,modifiedTime,size"
     );
     let body = serde_json::json!({ "parents": [dest_folder_id] }).to_string();
-    let (status, resp_body) = drive_post_json(app, &url, &body)?;
+    let (status, resp_body) = http_client::authed_post_json(app, &url, &body)?;
     if status != 200 {
         return Err(format!(
             "Copy Drive file {file_id} failed (HTTP {status}): {resp_body}"
@@ -408,7 +338,7 @@ pub fn ensure_subfolder(app: &AppHandle, parent_id: &str, name: &str) -> Result<
     let url = format!(
         "{DRIVE_FILES_URL}?q=name%3D%27{encoded}%27+and+%27{parent_id}%27+in+parents+and+mimeType%3D%27application%2Fvnd.google-apps.folder%27+and+trashed%3Dfalse&spaces=appDataFolder&fields=files(id,name)"
     );
-    let (status, body) = drive_get(app, &url)?;
+    let (status, body) = http_client::authed_get(app, &url)?;
     if status != 200 {
         return Err(format!(
             "Failed to search subfolder '{name}' (HTTP {status}): {body}"
@@ -428,7 +358,7 @@ pub fn ensure_subfolder(app: &AppHandle, parent_id: &str, name: &str) -> Result<
         "parents": [parent_id]
     });
     let (status, body) =
-        drive_post_json(app, &format!("{DRIVE_FILES_URL}?fields=id"), &meta.to_string())?;
+        http_client::authed_post_json(app, &format!("{DRIVE_FILES_URL}?fields=id"), &meta.to_string())?;
     if status != 200 {
         return Err(format!(
             "Failed to create subfolder '{name}' (HTTP {status}): {body}"
@@ -500,14 +430,14 @@ pub fn upload_file(
 
     let token = gdrive_auth::get_access_token(app)?;
     let resp = if method_is_patch {
-        agent()
+        http_client::make_agent()
             .patch(&url)
             .header("Authorization", &format!("Bearer {token}"))
             .header("Content-Type", &content_type)
             .send(&body[..])
             .map_err(|e| format!("Upload PATCH failed: {e}"))?
     } else {
-        agent()
+        http_client::make_agent()
             .post(&url)
             .header("Authorization", &format!("Bearer {token}"))
             .header("Content-Type", &content_type)
@@ -544,7 +474,7 @@ pub fn upload_file(
             "{DRIVE_UPLOAD_URL}?uploadType=multipart&fields=id,name,modifiedTime,size"
         );
         let token2 = gdrive_auth::get_access_token(app)?;
-        let post_resp = agent()
+        let post_resp = http_client::make_agent()
             .post(&post_url)
             .header("Authorization", &format!("Bearer {token2}"))
             .header("Content-Type", &post_ct)
@@ -585,7 +515,7 @@ pub fn download_file(app: &AppHandle, file_id: &str, local_dest: &Path) -> Resul
     let url = format!("{DRIVE_FILES_URL}/{file_id}?alt=media");
     let token = gdrive_auth::get_access_token(app)?;
 
-    let resp = agent()
+    let resp = http_client::make_agent()
         .get(&url)
         .header("Authorization", &format!("Bearer {token}"))
         .call()
@@ -667,14 +597,14 @@ pub fn upload_sync_meta(
 
     let token = gdrive_auth::get_access_token(app)?;
     let resp = if method_is_patch {
-        agent()
+        http_client::make_agent()
             .patch(&url)
             .header("Authorization", &format!("Bearer {token}"))
             .header("Content-Type", &content_type)
             .send(&body[..])
             .map_err(|e| format!("SyncMeta PATCH failed: {e}"))?
     } else {
-        agent()
+        http_client::make_agent()
             .post(&url)
             .header("Authorization", &format!("Bearer {token}"))
             .header("Content-Type", &content_type)
@@ -708,15 +638,7 @@ pub fn download_sync_meta(
         None => Ok((None, None)),
         Some(f) => {
             let url = format!("{DRIVE_FILES_URL}/{}?alt=media", f.id);
-            let token = gdrive_auth::get_access_token(app)?;
-            let resp = agent()
-                .get(&url)
-                .header("Authorization", &format!("Bearer {token}"))
-                .call()
-                .map_err(|e| format!("Download SyncMeta failed: {e}"))?;
-
-            let status = resp.status().as_u16();
-            let body = resp.into_body().read_to_string().unwrap_or_default();
+            let (status, body) = http_client::authed_get(app, &url)?;
             if status != 200 {
                 return Err(format!(
                     "Download SyncMeta failed (HTTP {status}): {body}"
@@ -785,14 +707,14 @@ pub fn upload_json_to_folder(
 
     let token = gdrive_auth::get_access_token(app)?;
     let resp = if method_is_patch {
-        agent()
+        http_client::make_agent()
             .patch(&url)
             .header("Authorization", &format!("Bearer {token}"))
             .header("Content-Type", &content_type)
             .send(&body[..])
             .map_err(|e| format!("JSON PATCH failed: {e}"))?
     } else {
-        agent()
+        http_client::make_agent()
             .post(&url)
             .header("Authorization", &format!("Bearer {token}"))
             .header("Content-Type", &content_type)
@@ -817,14 +739,7 @@ pub fn upload_json_to_folder(
 /// Download a file's raw text content from Drive by file ID.
 pub fn download_json_from_drive(app: &AppHandle, file_id: &str) -> Result<String, String> {
     let url = format!("{DRIVE_FILES_URL}/{file_id}?alt=media");
-    let token = gdrive_auth::get_access_token(app)?;
-    let resp = agent()
-        .get(&url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .call()
-        .map_err(|e| format!("JSON download failed: {e}"))?;
-    let status = resp.status().as_u16();
-    let body = resp.into_body().read_to_string().unwrap_or_default();
+    let (status, body) = http_client::authed_get(app, &url)?;
     if status != 200 {
         return Err(format!(
             "JSON download failed for {file_id} (HTTP {status}): {body}"
@@ -836,7 +751,7 @@ pub fn download_json_from_drive(app: &AppHandle, file_id: &str) -> Result<String
 /// Fetch the `modifiedTime` metadata for a Drive file (ISO 8601 string).
 fn get_file_modified_time(app: &AppHandle, file_id: &str) -> Result<String, String> {
     let url = format!("{DRIVE_FILES_URL}/{file_id}?fields=modifiedTime");
-    let (status, body) = drive_get(app, &url)?;
+    let (status, body) = http_client::authed_get(app, &url)?;
     if status != 200 {
         return Err(format!(
             "Failed to get modifiedTime for {file_id} (HTTP {status}): {body}"
@@ -1053,7 +968,7 @@ pub fn upload_game_logo(app: &AppHandle, game_id: &str, logo_source: &str) -> Re
 
 /// Download image bytes from an HTTP/HTTPS URL (no auth required — public URL).
 fn fetch_logo_url_bytes(url: &str) -> Result<(Vec<u8>, String), String> {
-    let resp = agent()
+    let resp = http_client::make_agent()
         .get(url)
         .call()
         .map_err(|e| format!("Failed to download logo URL: {e}"))?;
@@ -1143,14 +1058,14 @@ fn upload_bytes_as_file(
 
     let token = gdrive_auth::get_access_token(app)?;
     let resp = if method_is_patch {
-        agent()
+        http_client::make_agent()
             .patch(&url)
             .header("Authorization", &format!("Bearer {token}"))
             .header("Content-Type", &content_type)
             .send(&body[..])
             .map_err(|e| format!("Logo upload PATCH failed: {e}"))?
     } else {
-        agent()
+        http_client::make_agent()
             .post(&url)
             .header("Authorization", &format!("Bearer {token}"))
             .header("Content-Type", &content_type)
@@ -1174,17 +1089,10 @@ fn upload_bytes_as_file(
 
 /// Delete a Drive file or folder by ID.
 pub fn delete_drive_file(app: &AppHandle, file_id: &str) -> Result<(), String> {
-    let token = gdrive_auth::get_access_token(app)?;
     let url = format!("{DRIVE_FILES_URL}/{file_id}");
-    let resp = agent()
-        .delete(&url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .call()
-        .map_err(|e| format!("Drive DELETE failed: {e}"))?;
-    let status = resp.status().as_u16();
+    let (status, body) = http_client::authed_delete(app, &url)?;
     // 204 No Content is the success status for DELETE; 404 means already gone.
     if status != 204 && status != 404 {
-        let body = resp.into_body().read_to_string().unwrap_or_default();
         return Err(format!("Delete Drive file {file_id} failed (HTTP {status}): {body}"));
     }
     println!("[gdrive] Deleted Drive file {file_id}");

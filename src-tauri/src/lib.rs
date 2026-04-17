@@ -2,6 +2,7 @@ mod drive_mgmt;
 mod firestore;
 mod gdrive;
 mod gdrive_auth;
+mod http_client;
 mod models;
 mod settings;
 mod sync;

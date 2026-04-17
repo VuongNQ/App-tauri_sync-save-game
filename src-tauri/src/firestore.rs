@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use crate::{
-    gdrive_auth,
+    http_client,
     models::{AppSettings, GameEntry, SyncMeta},
 };
 
@@ -17,78 +17,7 @@ fn base_url() -> String {
     )
 }
 
-fn agent() -> ureq::Agent {
-    let config = ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .build();
-    ureq::Agent::new_with_config(config)
-}
-
-// ── HTTP helpers with 401 retry ───────────────────────────
-
-fn fs_get(app: &AppHandle, url: &str) -> Result<(u16, String), String> {
-    let resp = do_fs_get(app, url)?;
-    if resp.0 == 401 {
-        let _ = gdrive_auth::get_access_token(app)?;
-        return do_fs_get(app, url);
-    }
-    Ok(resp)
-}
-
-fn do_fs_get(app: &AppHandle, url: &str) -> Result<(u16, String), String> {
-    let token = gdrive_auth::get_access_token(app)?;
-    let resp = agent()
-        .get(url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .call()
-        .map_err(|e| format!("Firestore GET failed: {e}"))?;
-    let status = resp.status().as_u16();
-    let text = resp.into_body().read_to_string().unwrap_or_default();
-    Ok((status, text))
-}
-
-fn fs_patch(app: &AppHandle, url: &str, body: &str) -> Result<(u16, String), String> {
-    let resp = do_fs_patch(app, url, body)?;
-    if resp.0 == 401 {
-        let _ = gdrive_auth::get_access_token(app)?;
-        return do_fs_patch(app, url, body);
-    }
-    Ok(resp)
-}
-
-fn do_fs_patch(app: &AppHandle, url: &str, body: &str) -> Result<(u16, String), String> {
-    let token = gdrive_auth::get_access_token(app)?;
-    let resp = agent()
-        .patch(url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .content_type("application/json")
-        .send(body.as_bytes())
-        .map_err(|e| format!("Firestore PATCH failed: {e}"))?;
-    let status = resp.status().as_u16();
-    let text = resp.into_body().read_to_string().unwrap_or_default();
-    Ok((status, text))
-}
-
-fn fs_delete(app: &AppHandle, url: &str) -> Result<(u16, String), String> {
-    let resp = do_fs_delete(app, url)?;
-    if resp.0 == 401 {
-        let _ = gdrive_auth::get_access_token(app)?;
-        return do_fs_delete(app, url);
-    }
-    Ok(resp)
-}
-
-fn do_fs_delete(app: &AppHandle, url: &str) -> Result<(u16, String), String> {
-    let token = gdrive_auth::get_access_token(app)?;
-    let resp = agent()
-        .delete(url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .call()
-        .map_err(|e| format!("Firestore DELETE failed: {e}"))?;
-    let status = resp.status().as_u16();
-    let text = resp.into_body().read_to_string().unwrap_or_default();
-    Ok((status, text))
-}
+// ── HTTP helpers delegated to http_client ────────────────
 
 // ── Type converters ───────────────────────────────────────
 
@@ -200,7 +129,7 @@ pub fn save_game(app: &AppHandle, user_id: &str, game: &GameEntry) -> Result<(),
     let body = json!({ "fields": fields }).to_string();
     let url = format!("{}/users/{user_id}/games/{}", base_url(), game.id);
 
-    let (status, resp_body) = fs_patch(app, &url, &body)?;
+    let (status, resp_body) = http_client::authed_patch_json(app, &url, &body)?;
     if status != 200 && status != 201 {
         return Err(format!("[firestore] save_game HTTP {status}: {resp_body}"));
     }
@@ -211,7 +140,7 @@ pub fn save_game(app: &AppHandle, user_id: &str, game: &GameEntry) -> Result<(),
 /// Delete a game document from Firestore. Returns `Ok(())` on 404 (idempotent).
 pub fn delete_game(app: &AppHandle, user_id: &str, game_id: &str) -> Result<(), String> {
     let url = format!("{}/users/{user_id}/games/{game_id}", base_url());
-    let (status, resp_body) = fs_delete(app, &url)?;
+    let (status, resp_body) = http_client::authed_delete(app, &url)?;
     if status != 200 && status != 204 && status != 404 {
         return Err(format!("[firestore] delete_game HTTP {status}: {resp_body}"));
     }
@@ -223,7 +152,7 @@ pub fn delete_game(app: &AppHandle, user_id: &str, game_id: &str) -> Result<(), 
 /// Returns an empty `Vec` if the collection doesn't exist yet.
 pub fn load_all_games(app: &AppHandle, user_id: &str) -> Result<Vec<GameEntry>, String> {
     let url = format!("{}/users/{user_id}/games", base_url());
-    let (status, body) = fs_get(app, &url)?;
+    let (status, body) = http_client::authed_get(app, &url)?;
     if status == 404 {
         return Ok(vec![]);
     }
@@ -269,7 +198,7 @@ pub fn save_settings(app: &AppHandle, user_id: &str, settings: &AppSettings) -> 
     let body = json!({ "fields": fields }).to_string();
     let url = format!("{}/users/{user_id}/settings/app", base_url());
 
-    let (status, resp_body) = fs_patch(app, &url, &body)?;
+    let (status, resp_body) = http_client::authed_patch_json(app, &url, &body)?;
     if status != 200 && status != 201 {
         return Err(format!("[firestore] save_settings HTTP {status}: {resp_body}"));
     }
@@ -281,7 +210,7 @@ pub fn save_settings(app: &AppHandle, user_id: &str, settings: &AppSettings) -> 
 /// Returns `None` if the document doesn't exist yet (first-time user).
 pub fn load_settings(app: &AppHandle, user_id: &str) -> Result<Option<AppSettings>, String> {
     let url = format!("{}/users/{user_id}/settings/app", base_url());
-    let (status, body) = fs_get(app, &url)?;
+    let (status, body) = http_client::authed_get(app, &url)?;
     if status == 404 {
         return Ok(None);
     }
@@ -322,7 +251,7 @@ pub fn save_sync_meta(
     .to_string();
 
     let url = format!("{}/users/{user_id}/syncMeta/{game_id}", base_url());
-    let (status, resp_body) = fs_patch(app, &url, &body)?;
+    let (status, resp_body) = http_client::authed_patch_json(app, &url, &body)?;
     if status != 200 && status != 201 {
         return Err(format!("[firestore] save_sync_meta HTTP {status}: {resp_body}"));
     }
@@ -339,7 +268,7 @@ pub fn load_sync_meta(
     game_id: &str,
 ) -> Result<Option<SyncMeta>, String> {
     let url = format!("{}/users/{user_id}/syncMeta/{game_id}", base_url());
-    let (status, body) = fs_get(app, &url)?;
+    let (status, body) = http_client::authed_get(app, &url)?;
     if status == 404 {
         return Ok(None);
     }

@@ -7,7 +7,10 @@ use std::{
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::models::{AuthStatus, GoogleUserInfo, OAuthTokens, SaveTokensPayload};
+use crate::{
+    http_client,
+    models::{AuthStatus, GoogleUserInfo, OAuthTokens, SaveTokensPayload},
+};
 
 // ── Google OAuth 2.0 constants ────────────────────────────
 // CLIENT_ID / CLIENT_SECRET are injected at compile time from env vars.
@@ -41,18 +44,7 @@ fn require_client_id() -> Result<(), String> {
 
 /// POST a URL-encoded form body and return the raw (status, response_body).
 fn post_form(url: &str, body: &str) -> Result<(u16, String), String> {
-    let config = ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .build();
-    let agent = ureq::Agent::new_with_config(config);
-    let resp = agent
-        .post(url)
-        .content_type("application/x-www-form-urlencoded")
-        .send(body.as_bytes())
-        .map_err(|e| format!("HTTP request failed: {e}"))?;
-    let status = resp.status().as_u16();
-    let text = resp.into_body().read_to_string().unwrap_or_default();
-    Ok((status, text))
+    http_client::post_form_unauthenticated(url, body)
 }
 
 fn now_secs() -> u64 {
@@ -247,18 +239,7 @@ pub fn get_google_user_info(app: &AppHandle) -> Result<GoogleUserInfo, String> {
 
 /// Fetch user info using an arbitrary access token (used during login before tokens are fully saved).
 fn fetch_user_info_with_token(token: &str) -> Result<GoogleUserInfo, String> {
-    let config = ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .build();
-    let agent = ureq::Agent::new_with_config(config);
-    let resp = agent
-        .get(USERINFO_URL)
-        .header("Authorization", &format!("Bearer {token}"))
-        .call()
-        .map_err(|e| format!("Userinfo request failed: {e}"))?;
-
-    let status = resp.status().as_u16();
-    let body = resp.into_body().read_to_string().unwrap_or_default();
+    let (status, body) = http_client::get_with_token(USERINFO_URL, token)?;
     if status != 200 {
         return Err(format!("Userinfo failed (HTTP {status}): {body}"));
     }
