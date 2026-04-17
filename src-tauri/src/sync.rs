@@ -126,11 +126,7 @@ pub fn scan_last_modified(save_path: &Path) -> Option<String> {
 
 pub fn get_save_info(app: &AppHandle, game_id: &str) -> Result<SaveInfo, String> {
     let state = settings::load_state(app)?;
-    let game = state
-        .games
-        .iter()
-        .find(|g| g.id == game_id)
-        .ok_or_else(|| format!("Game not found: {game_id}"))?;
+    let game = settings::find_game(&state, game_id)?;
 
     let save_path = game
         .save_path
@@ -246,12 +242,7 @@ fn download_with_fallback(
 fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String> {
     // 1. Load game entry
     let state = settings::load_state(app)?;
-    let game = state
-        .games
-        .iter()
-        .find(|g| g.id == game_id)
-        .ok_or_else(|| format!("Game not found: {game_id}"))?
-        .clone();
+    let game = settings::find_game(&state, game_id)?.clone();
 
     let save_path = game
         .save_path
@@ -261,8 +252,7 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
     let save_dir = Path::new(&expanded_path);
 
     // 2. Ensure Drive folders exist
-    let root_folder_id = gdrive::ensure_root_folder(app)?;
-    let game_folder_id = gdrive::ensure_game_folder(app, &root_folder_id, game_id)?;
+    let (_, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
 
     // 3. Get cloud sync metadata
     let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
@@ -474,12 +464,7 @@ pub fn check_sync_structure_diff(
 ) -> Result<SyncStructureDiff, String> {
     // 1. Load game entry
     let state = settings::load_state(app)?;
-    let game = state
-        .games
-        .iter()
-        .find(|g| g.id == game_id)
-        .ok_or_else(|| format!("Game not found: {game_id}"))?
-        .clone();
+    let game = settings::find_game(&state, game_id)?.clone();
 
     let save_path = game
         .save_path
@@ -489,8 +474,7 @@ pub fn check_sync_structure_diff(
     let save_dir = Path::new(&expanded_path);
 
     // 2. Ensure Drive folders exist (idempotent — creates only if absent)
-    let root_folder_id = gdrive::ensure_root_folder(app)?;
-    let game_folder_id = gdrive::ensure_game_folder(app, &root_folder_id, game_id)?;
+    let (_, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
 
     // 3. Download sync metadata
     let (cloud_meta_opt, _) = gdrive::download_sync_meta(app, &game_folder_id)?;
@@ -599,12 +583,7 @@ pub fn restore_from_cloud(app: &AppHandle, game_id: &str) -> Result<SyncResult, 
 fn restore_from_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String> {
     // 1. Load game entry
     let state = settings::load_state(app)?;
-    let game = state
-        .games
-        .iter()
-        .find(|g| g.id == game_id)
-        .ok_or_else(|| format!("Game not found: {game_id}"))?
-        .clone();
+    let game = settings::find_game(&state, game_id)?.clone();
 
     let save_path = game
         .save_path
@@ -614,8 +593,7 @@ fn restore_from_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult
     let save_dir = Path::new(&expanded_path);
 
     // 2. Ensure Drive folders exist
-    let root_folder_id = gdrive::ensure_root_folder(app)?;
-    let game_folder_id = gdrive::ensure_game_folder(app, &root_folder_id, game_id)?;
+    let (_, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
 
     // 3. Get cloud sync metadata — required for a restore
     let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
@@ -702,12 +680,7 @@ pub fn push_to_cloud(app: &AppHandle, game_id: &str) -> Result<SyncResult, Strin
 fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String> {
     // 1. Load game entry
     let state = settings::load_state(app)?;
-    let game = state
-        .games
-        .iter()
-        .find(|g| g.id == game_id)
-        .ok_or_else(|| format!("Game not found: {game_id}"))?
-        .clone();
+    let game = settings::find_game(&state, game_id)?.clone();
 
     let save_path = game
         .save_path
@@ -717,8 +690,7 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
     let save_dir = Path::new(&expanded_path);
 
     // 2. Ensure Drive folders exist
-    let root_folder_id = gdrive::ensure_root_folder(app)?;
-    let game_folder_id = gdrive::ensure_game_folder(app, &root_folder_id, game_id)?;
+    let (_, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
 
     // 3. Get cloud meta + existing Drive file list
     let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
@@ -830,8 +802,7 @@ pub fn cleanup_excluded_from_cloud(
     );
 
     // 1. Ensure Drive folder exists
-    let root_folder_id = gdrive::ensure_root_folder(app)?;
-    let game_folder_id = gdrive::ensure_game_folder(app, &root_folder_id, game_id)?;
+    let (_, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
 
     // 2. Download sync metadata
     let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
@@ -891,13 +862,8 @@ pub fn cleanup_excluded_from_cloud(
 /// to mirror the same data to Firestore. Drive remains the authoritative read
 /// source — this is a write-only mirror for future cross-device querying.
 fn spawn_sync_meta_mirror(app: &AppHandle, game_id: &str, meta: crate::models::SyncMeta) {
-    let app = app.clone();
     let game_id = game_id.to_string();
-    std::thread::spawn(move || {
-        if let Some(user_id) = crate::gdrive_auth::get_current_user_id(&app) {
-            if let Err(e) = crate::firestore::save_sync_meta(&app, &user_id, &game_id, &meta) {
-                eprintln!("[firestore] SyncMeta mirror failed for '{game_id}': {e}");
-            }
-        }
+    settings::spawn_firestore_task(app, move |app, user_id| {
+        crate::firestore::save_sync_meta(app, user_id, &game_id, &meta)
     });
 }

@@ -138,17 +138,34 @@ pub fn update_settings(app: &AppHandle, settings: AppSettings) -> Result<AppSett
     Ok(state.settings)
 }
 
+/// Look up a game by ID (immutable reference).
+pub fn find_game<'a>(state: &'a StoredState, game_id: &str) -> Result<&'a GameEntry, String> {
+    state
+        .games
+        .iter()
+        .find(|g| g.id == game_id)
+        .ok_or_else(|| format!("Game not found: {game_id}"))
+}
+
+/// Look up a game by ID (mutable reference).
+pub fn find_game_mut<'a>(
+    state: &'a mut StoredState,
+    game_id: &str,
+) -> Result<&'a mut GameEntry, String> {
+    state
+        .games
+        .iter_mut()
+        .find(|g| g.id == game_id)
+        .ok_or_else(|| format!("Game not found: {game_id}"))
+}
+
 pub fn update_game_field(
     app: &AppHandle,
     game_id: &str,
     updater: impl FnOnce(&mut GameEntry),
 ) -> Result<StoredState, String> {
     let mut state = load_state(app)?;
-    let game = state
-        .games
-        .iter_mut()
-        .find(|g| g.id == game_id)
-        .ok_or_else(|| format!("Game not found: {game_id}"))?;
+    let game = find_game_mut(&mut state, game_id)?;
     updater(game);
     let game_snapshot = game.clone();
     save_state(app, &state)?;
@@ -232,43 +249,39 @@ pub fn fetch_all_from_firestore(app: &AppHandle) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Upsert a single game to Firestore in a background thread.
-fn spawn_firestore_game_upsert(app: &AppHandle, game: GameEntry) {
+/// Run a Firestore operation in a background thread.
+/// Skips silently if the user is not authenticated (no `user_id`).
+pub(crate) fn spawn_firestore_task<F>(app: &AppHandle, f: F)
+where
+    F: FnOnce(&AppHandle, &str) -> Result<(), String> + Send + 'static,
+{
     let app = app.clone();
     std::thread::spawn(move || {
         if let Some(user_id) = crate::gdrive_auth::get_current_user_id(&app) {
-            if let Err(e) = firestore::save_game(&app, &user_id, &game) {
-                eprintln!("[firestore] Background game upsert '{}' failed: {e}", game.id);
+            if let Err(e) = f(&app, &user_id) {
+                eprintln!("[firestore] background task failed: {e}");
             }
         }
     });
 }
 
+/// Upsert a single game to Firestore in a background thread.
+fn spawn_firestore_game_upsert(app: &AppHandle, game: GameEntry) {
+    spawn_firestore_task(app, move |app, user_id| firestore::save_game(app, user_id, &game));
+}
+
 /// Delete a single game from Firestore in a background thread.
 fn spawn_firestore_game_delete(app: &AppHandle, game_id: String) {
-    let app = app.clone();
-    std::thread::spawn(move || {
-        if let Some(user_id) = crate::gdrive_auth::get_current_user_id(&app) {
-            if let Err(e) = firestore::delete_game(&app, &user_id, &game_id) {
-                eprintln!("[firestore] Background game delete '{game_id}' failed: {e}");
-            }
-        }
+    spawn_firestore_task(app, move |app, user_id| {
+        firestore::delete_game(app, user_id, &game_id)
     });
 }
 
 /// Push the current `AppSettings` to Firestore in a background thread.
 fn spawn_firestore_settings_sync(app: &AppHandle) {
-    let app = app.clone();
-    std::thread::spawn(move || {
-        let settings = match load_state(&app) {
-            Ok(s) => s.settings,
-            Err(_) => return,
-        };
-        if let Some(user_id) = crate::gdrive_auth::get_current_user_id(&app) {
-            if let Err(e) = firestore::save_settings(&app, &user_id, &settings) {
-                eprintln!("[firestore] Background settings sync failed: {e}");
-            }
-        }
+    spawn_firestore_task(app, move |app, user_id| {
+        let settings = load_state(app)?.settings;
+        firestore::save_settings(app, user_id, &settings)
     });
 }
 

@@ -169,6 +169,13 @@ fn create_game_folder(
     Ok(id)
 }
 
+/// Ensure both the root and per-game Drive folders exist, returning `(root_folder_id, game_folder_id)`.
+pub fn ensure_game_folders(app: &AppHandle, game_id: &str) -> Result<(String, String), String> {
+    let root_folder_id = ensure_root_folder(app)?;
+    let game_folder_id = ensure_game_folder(app, &root_folder_id, game_id)?;
+    Ok((root_folder_id, game_folder_id))
+}
+
 /// List all files in a Drive folder.
 pub fn list_files(app: &AppHandle, folder_id: &str) -> Result<Vec<DriveFile>, String> {
     let url = format!(

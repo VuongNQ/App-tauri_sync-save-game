@@ -284,11 +284,7 @@ pub fn handle_track_changes_toggle(
     if enabled {
         let state =
             settings::load_state(app).map_err(|e| format!("Failed to load state: {e}"))?;
-        let game = state
-            .games
-            .iter()
-            .find(|g| g.id == game_id)
-            .ok_or_else(|| format!("Game '{game_id}' not found"))?;
+        let game = settings::find_game(&state, game_id)?;
 
         match &game.exe_name {
             Some(exe) if !exe.is_empty() => {

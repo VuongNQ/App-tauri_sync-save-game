@@ -468,11 +468,7 @@ fn launch_game(app: tauri::AppHandle, game_id: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
 
     let state = settings::load_state(&app)?;
-    let game = state
-        .games
-        .iter()
-        .find(|g| g.id == game_id)
-        .ok_or_else(|| format!("Game not found: {game_id}"))?;
+    let game = settings::find_game(&state, &game_id)?;
 
     let raw_path = game
         .exe_path
