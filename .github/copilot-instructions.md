@@ -11,6 +11,7 @@ This is a **Windows desktop tool** built with Tauri 2 that tracks and syncs save
 3. **Background Tracking** — The app runs in the background (system tray) on Windows startup. Per-game **process tracking** monitors whether the game executable is running; syncs save files when the process exits (**default: off**, user must opt-in per game and set the game's executable name `exeName`).
 4. **Auto-Sync** — When enabled, automatically backs up local save files to Google Drive whenever changes are detected.
 5. **Conflict Resolution** — On each sync, compare the local file's last-modified timestamp with the Google Drive version's timestamp; always pick the **newest** save.
+6. **Device Management** — Each Windows machine that signs in is automatically registered in Firestore with a deterministic UUID (SHA-256 of `MachineGuid`), hostname, OS, CPU, and RAM info. Users can rename or remove devices from the `/devices` page.
 
 ---
 
@@ -33,6 +34,7 @@ src-tauri/src/
   gdrive.rs                     # Google Drive API client (upload, download, list, folders)
   watcher.rs                    # Process monitor / poller — detects game launch/exit, triggers sync on exit
   sync.rs                       # Sync logic: compare timestamps, upload/download newest save
+  devices.rs                    # Device UUID generation (SHA-256 MachineGuid), sysinfo collection, device CRUD commands
   tray.rs                       # System-tray setup and background lifecycle
   lib.rs                        # Tauri commands wired to handler functions
 ```
@@ -102,6 +104,24 @@ Each entry in `GameEntry.save_paths`:
 | `gdrive_folder_id` | `Option<String>` | `string \| null` | Drive folder ID for this path. Index 0 uses `GameEntry.gdrive_folder_id` (root); index i≥1 uses `save_paths[i].gdrive_folder_id` (subfolder `path-{i}/`) |
 | `sync_excludes` | `Vec<String>` | `string[]` | Relative paths excluded from Drive sync for this specific path; trailing `/` means folder prefix |
 
+### DeviceInfo
+
+Stored in Firestore at `users/{user_id}/devices/{device_id}`. Never stored in the local `games-library-*.json`.
+
+| Field | Rust type | TS type | Description |
+|---|---|---|---|
+| `id` | `String` | `string` | Deterministic UUID: first 16 bytes of SHA-256(`MachineGuid`) in `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` format |
+| `name` | `String` | `string` | User-editable display name (initially set to hostname) |
+| `hostname` | `String` | `string` | `System::host_name()` from sysinfo |
+| `os_name` | `String` | `string` | OS name (e.g. `"Windows"`) |
+| `os_version` | `String` | `string` | OS version string |
+| `cpu_name` | `String` | `string` | CPU brand string from sysinfo |
+| `cpu_cores` | `u32` | `number` | Physical CPU core count |
+| `total_ram_mb` | `u64` | `number` | Total RAM in MB |
+| `registered_at` | `String` | `string` | ISO 8601 timestamp of first registration (preserved on upsert) |
+| `last_seen_at` | `String` | `string` | ISO 8601 timestamp updated every app startup |
+| `is_current` | `bool` (never stored) | `boolean \| undefined` | Computed locally — `true` on the device returned by the current machine; **never written to Firestore** |
+
 > **Legacy fields** (`save_path: Option<String>`, `sync_excludes: Vec<String>` on `GameEntry`) are kept on the Rust struct with `#[serde(default, skip_serializing_if)]` for migration deserialization only. They are never written by current code.
 
 ### Serialisation Convention
@@ -151,6 +171,8 @@ tauri::generate_handler![
     list_game_drive_files, list_game_drive_files_flat,
     rename_game_drive_file, move_game_drive_file, delete_game_drive_file,
     create_version_backup, list_version_backups, restore_version_backup, delete_version_backup,
+    // Device management
+    get_devices, rename_device, remove_device,
 ]
 ```
 
@@ -184,6 +206,7 @@ appDataFolder/
 users/{user_id}/games/{game_id}     # GameEntry documents (primary game library)
 users/{user_id}/settings/app        # AppSettings document (key is always "app")
 users/{user_id}/syncMeta/{game_id}  # SyncMeta documents (per-game sync state)
+users/{user_id}/devices/{device_id} # DeviceInfo documents (one per registered machine)
 ```
 
 ### Why Firestore
@@ -202,6 +225,9 @@ users/{user_id}/syncMeta/{game_id}  # SyncMeta documents (per-game sync state)
 | `firestore::load_all_games(app, user_id)` | Cloud → Local | On first login via `fetch_all_from_firestore`. |
 | `firestore::load_settings(app, user_id)` | Cloud → Local | On first login via `fetch_all_from_firestore`. |
 | `settings::fetch_all_from_firestore(app)` | Cloud → Local | On first login; called from `save_auth_tokens` and `restore_from_cloud`. |
+| `firestore::save_device(app, user_id, device)` | Local → Cloud | Called by `devices::register_current_device()` on every startup and post-login. |
+| `firestore::load_all_devices(app, user_id)` | Cloud → Local | Called by `devices::get_devices_cmd()`. |
+| `firestore::delete_device(app, user_id, device_id)` | Cloud delete | Called by `devices::remove_device_cmd()`. |
 
 ### Legacy Drive JSON Files (Migration Only)
 
@@ -297,6 +323,7 @@ The frontend uses **React Router** for navigation. The app shell includes a pers
 | `/login` | `LoginPage` | No | Google OAuth sign-in |
 | `/` | `DashboardPage` | Yes | Game library overview |
 | `/game/:id` | `GameDetailPage` | Yes | Single game detail + sync controls |
+| `/devices` | `DevicesPage` | Yes | Device management — rename / remove registered machines |
 | `/settings` | `SettingsPage` | Yes | Global sync settings, account info |
 
 ### Auth Guard
@@ -438,7 +465,7 @@ fn register_startup(...) { /* no-op */ }
 winreg = "0.55"
 ```
 
-Import `HKEY` from `winreg::HKEY` (not `winreg::enums::HKEY` — that path does not exist in 0.55).
+Correct imports for winreg 0.55: `use winreg::enums::HKEY_LOCAL_MACHINE;` and `use winreg::RegKey;`. Open a predefined key with `RegKey::predef(HKEY_LOCAL_MACHINE)`. Do **not** import from `winreg::HKEY` — that path does not exist.
 
 ---
 
@@ -455,7 +482,7 @@ Import `HKEY` from `winreg::HKEY` (not `winreg::enums::HKEY` — that path does 
 | `serde` + `serde_json` | Serialisation |
 | `ureq` 3 (feature `json`) | **Blocking** HTTP client for Google Drive API |
 | `tokio` 1 (feature `rt`) | Async runtime (for sync tasks) |
-| `sysinfo` 0.32 | Process list polling (replaces file-system watcher) |
+| `sysinfo` 0.32 | Process list polling + system info collection (CPU brand, RAM, hostname) — use `RefreshKind::new()` not `RefreshKind::nothing()` |
 | `chrono` 0.4 (feature `serde`) | Timestamp handling |
 | `walkdir` 2 | Recursive directory traversal |
 | `sha2` 0.10 | File hashing |

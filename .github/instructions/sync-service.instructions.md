@@ -1,5 +1,5 @@
 ---
-description: "Use when: syncing save-game files to Google Drive, implementing sync logic, modifying sync.rs, modifying watcher.rs, modifying gdrive.rs, modifying drive_mgmt.rs, modifying firestore.rs, adding process-monitoring features, changing background tracking, changing process tracking, adding exeName game executable, extending sync algorithm, handling sync conflicts, adding sync Tauri commands, creating sync React Query hooks, building sync UI components, emitting or listening to sync events, game-status-changed event, game-sync-pending event, sysinfo process poller, syncing library.json or config.json to Google Drive as a file-based database, storing game library or settings in Firestore, implementing Firestore REST API, SyncMeta Firestore mirror, cloud library restore on first login, forced-direction sync (restore from cloud, push to cloud), checking sync structure diff, SyncStructureDiff, Drive file manager, list Drive files, rename Drive file, move Drive file, delete Drive file, version backup, create backup, restore version backup, delete version backup. Covers the full sync pipeline: local file collection, timestamp comparison, Drive upload/download, .sync-meta.json management, Firestore game library/settings/SyncMeta mirror, local-first strategy, process-monitor lifecycle, Drive file management, version snapshots, and frontend sync integration."
+description: "Use when: syncing save-game files to Google Drive, implementing sync logic, modifying sync.rs, modifying watcher.rs, modifying gdrive.rs, modifying drive_mgmt.rs, modifying firestore.rs, modifying devices.rs, adding process-monitoring features, changing background tracking, changing process tracking, adding exeName game executable, extending sync algorithm, handling sync conflicts, adding sync Tauri commands, creating sync React Query hooks, building sync UI components, emitting or listening to sync events, game-status-changed event, game-sync-pending event, sysinfo process poller, syncing library.json or config.json to Google Drive as a file-based database, storing game library or settings in Firestore, implementing Firestore REST API, SyncMeta Firestore mirror, cloud library restore on first login, forced-direction sync (restore from cloud, push to cloud), checking sync structure diff, SyncStructureDiff, Drive file manager, list Drive files, rename Drive file, move Drive file, delete Drive file, version backup, create backup, restore version backup, delete version backup, device management, register device, save device to Firestore, load all devices, delete device, rename device, get devices, DeviceInfo, MachineGuid UUID, sysinfo system info. Covers the full sync pipeline: local file collection, timestamp comparison, Drive upload/download, .sync-meta.json management, Firestore game library/settings/SyncMeta/devices mirror, local-first strategy, process-monitor lifecycle, Drive file management, version snapshots, device registration, and frontend sync integration."
 ---
 
 # Save-Game Sync Service
@@ -111,11 +111,13 @@ users/{user_id}/
   games/{game_id}       → GameEntry fields (Firestore typed values, flat document)
   settings/app          → AppSettings fields (Firestore typed values, flat document)
   syncMeta/{game_id}    → { data: stringValue (JSON blob of SyncMeta), gameId: stringValue }
+  devices/{device_id}   → DeviceInfo fields (Firestore typed values, flat document)
 ```
 
 - **`games/{game_id}`**: Each `GameEntry` is a separate Firestore document. Field keys match camelCase TypeScript names.
 - **`settings/app`**: A single document under the `settings` collection. Key is always `"app"`.
 - **`syncMeta/{game_id}`**: SyncMeta is stored as a **JSON blob** (`stringValue`) in a field called `data`. This avoids Firestore restrictions on `/` in field names (file paths like `"saves/slot1.sav"` cannot be Firestore field names).
+- **`devices/{device_id}`**: One document per registered Windows machine. `id` is a deterministic UUID (SHA-256 of `MachineGuid`). `is_current` is **never** stored — computed locally.
 
 ### Project ID
 
@@ -138,8 +140,10 @@ const PROJECT_ID: &str = match option_env!("GOOGLE_CLOUD_PROJECT_ID") {
 | `save_settings(app, user_id, settings)` | PATCH (upsert) | `users/{uid}/settings/app` |
 | `load_settings(app, user_id)` | GET | `users/{uid}/settings/app` → `Option<AppSettings>` |
 | `save_sync_meta(app, user_id, game_id, meta)` | PATCH (upsert) | `users/{uid}/syncMeta/{game_id}` |
-| `load_sync_meta(app, user_id, game_id)` | GET | `users/{uid}/syncMeta/{game_id}` → `Option<SyncMeta>` |
-
+| `load_sync_meta(app, user_id, game_id)` | GET | `users/{uid}/syncMeta/{game_id}` → `Option<SyncMeta>` || `save_device(app, user_id, device)` | PATCH (upsert) | `users/{uid}/devices/{device_id}` — strips `is_current` before write |
+| `load_device(app, user_id, device_id)` | GET | `users/{uid}/devices/{device_id}` → `Option<DeviceInfo>` |
+| `load_all_devices(app, user_id)` | GET collection | `users/{uid}/devices` → `Vec<DeviceInfo>` |
+| `delete_device(app, user_id, device_id)` | DELETE (idempotent on 404) | `users/{uid}/devices/{device_id}` |
 > `load_sync_meta` is marked `#[allow(dead_code)]` — retained for future cross-device read path. Drive `.sync-meta.json` remains the exclusive read source today.
 > **`save_settings` strips local-only fields**: When serialising `AppSettings` to Firestore, **both `pathOverrides` and `pathOverridesIndexed`** fields are **always filtered out** before the write. They are local-only device-specific values and must never be stored in Firestore.
 ### 401 Retry Pattern (same as gdrive.rs)

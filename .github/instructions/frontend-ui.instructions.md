@@ -1,7 +1,7 @@
 ---
 applyTo: "src/**/*.{ts,tsx}"
 description: >
-  Use when: creating or editing any React component, page, hook, query hook, mutation hook, service function, route, form, layout, or Tailwind style in this Tauri app. Covers the full frontend architecture: component conventions, React Query patterns, service layer, routing, TypeScript, form validation, and Tauri event integration.
+  Use when: creating or editing any React component, page, hook, query hook, mutation hook, service function, route, form, layout, or Tailwind style in this Tauri app. Covers the full frontend architecture: component conventions, React Query patterns, service layer, routing, TypeScript, form validation, Tauri event integration, and device management UI (DevicesPage, useDevicesQuery, useRenameDeviceMutation, useRemoveDeviceMutation).
 ---
 
 # Frontend UI — Structure & Workflow
@@ -38,12 +38,14 @@ src/
     detail.ts          # Per-game hooks: useSyncAndLaunchFlow (phase state machine)
     sync.ts            # Sync mutation hooks
     settings.ts        # Settings query/mutation hooks
+    devices.ts         # Device management query/mutation hooks
     index.ts           # Re-exports from all query files
   pages/               # Route-level components (one file per route)
     LoginPage.tsx
     DashboardPage.tsx
     GameDetailPage/      # folder: index.tsx + hooks.ts + components/
     SettingsPage.tsx
+    DevicesPage.tsx
   components/          # Reusable UI building blocks
     styles.ts          # Shared Tailwind class-string constants
     AppLayout.tsx      # Sidebar + <Outlet /> shell
@@ -132,6 +134,7 @@ import { HashRouter, Routes, Route, Navigate } from "react-router";
       <Route element={<AppLayout />}>
         <Route index element={<DashboardPage />} />
         <Route path="game/:id" element={<GameDetailPage />} />
+        <Route path="devices" element={<DevicesPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
     </Route>
@@ -233,6 +236,7 @@ export const VALIDATE_PATHS_KEY = ["validate-paths"] as const;
 export const SETTINGS_KEY = ["settings"] as const;
 export const GOOGLE_USER_INFO_KEY = ["google-user-info"] as const;
 export const SAVE_INFO_KEY = ["save-info"] as const;
+export const DEVICES_KEY = ["devices"] as const;
 // Per-game dynamic keys — factory functions:
 /** Prefix key — use for invalidating all cached folder queries of a game. */
 export const driveFilesKey = (gameId: string) => ["drive-files", gameId] as const;
@@ -443,6 +447,20 @@ export interface DashboardData {
 }
 
 export type GameSource = "manual" | "emulator"; // string union, never enum
+
+export interface DeviceInfo {
+  id: string;
+  name: string;              // user-editable display name (initially hostname)
+  hostname: string;
+  osName: string;
+  osVersion: string;
+  cpuName: string;
+  cpuCores: number;
+  totalRamMb: number;
+  registeredAt: string;      // ISO 8601
+  lastSeenAt: string;        // ISO 8601
+  isCurrent?: boolean;       // computed locally — true on the current machine; never stored in Firestore
+}
 ```
 
 **camelCase ↔ snake_case mapping:** Rust uses `snake_case`, TypeScript uses `camelCase`. The Rust structs have `#[serde(rename_all = "camelCase")]` so serialisation is automatic. Always define TS types in camelCase.
