@@ -27,5 +27,9 @@ export const driveFilesFolderKey = (gameId: string, folderId: string) => ["drive
 export const driveFilesFlatKey = (gameId: string) => ["drive-files-flat", gameId] as const;
 export const versionBackupsKey = (gameId: string) => ["version-backups", gameId] as const;
 
+/** Device management query key. */
+export const DEVICES_KEY = ["devices"] as const;
+export type DevicesKey = typeof DEVICES_KEY;
+
 /** Playing state set by the game-status-changed Tauri event. */
 export const gamePlayingKey = (gameId: string) => ["game-playing", gameId] as const;

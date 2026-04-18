@@ -8,6 +8,7 @@ import { AuthGuard } from "./components/AuthGuard";
 import { AUTH_STATUS_KEY, DASHBOARD_KEY, gamePlayingKey } from "./queries/keys";
 import { useAuthStatusQuery, useSyncLibraryFromCloudMutation } from "./queries";
 import { DashboardPage } from "./pages/DashboardPage";
+import { DevicesPage } from "./pages/DevicesPage";
 import { GameDetailPage } from "./pages/GameDetailPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -26,6 +27,7 @@ export function App() {
           <Route element={<AppLayout />}>
             <Route index element={<DashboardPage />} />
             <Route path="game/:id" element={<GameDetailPage />} />
+            <Route path="devices" element={<DevicesPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Route>

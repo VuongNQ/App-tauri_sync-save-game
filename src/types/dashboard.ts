@@ -68,6 +68,34 @@ export interface GoogleUserInfo {
   picture: string | null;
 }
 
+// ── Devices ───────────────────────────────────────────────
+
+/** A registered device (machine) for the authenticated Google account. */
+export interface DeviceInfo {
+  /** Deterministic UUID derived from the Windows MachineGuid registry value. */
+  id: string;
+  /** User-editable display name (auto-populated from hostname on first registration). */
+  name: string;
+  /** OS-reported computer hostname. */
+  hostname: string;
+  /** OS name (e.g. "Windows 11"). */
+  osName: string;
+  /** OS version string (e.g. "23H2"). */
+  osVersion: string;
+  /** CPU brand string. */
+  cpuName: string;
+  /** Number of logical CPU cores. */
+  cpuCores: number;
+  /** Total system RAM in megabytes. */
+  totalRamMb: number;
+  /** ISO 8601 timestamp when this device was first registered. */
+  registeredAt: string;
+  /** ISO 8601 timestamp of the most recent registration / startup upsert. */
+  lastSeenAt: string;
+  /** True when this device is the one currently running the app. Computed, never stored. */
+  isCurrent?: boolean;
+}
+
 // ── Settings ──────────────────────────────────────────────
 
 export interface AppSettings {

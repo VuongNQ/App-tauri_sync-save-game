@@ -3,7 +3,7 @@ use tauri::AppHandle;
 
 use crate::{
     http_client,
-    models::{AppSettings, GameEntry, SyncMeta},
+    models::{AppSettings, DeviceInfo, GameEntry, SyncMeta},
 };
 
 const PROJECT_ID: &str = match option_env!("GOOGLE_CLOUD_PROJECT_ID") {
@@ -290,4 +290,99 @@ pub fn load_sync_meta(
     let meta = serde_json::from_str::<SyncMeta>(data_json)
         .map_err(|e| format!("Deserialize SyncMeta from Firestore: {e}"))?;
     Ok(Some(meta))
+}
+
+// ── Device CRUD ───────────────────────────────────────────
+
+/// Write (upsert) a `DeviceInfo` to Firestore at `users/{user_id}/devices/{device_id}`.
+/// `is_current` is local-only and is stripped before writing.
+pub fn save_device(app: &AppHandle, user_id: &str, device: &DeviceInfo) -> Result<(), String> {
+    // is_current is computed at query time — never persisted.
+    let cloud_device = DeviceInfo { is_current: false, ..device.clone() };
+    let device_val = serde_json::to_value(&cloud_device)
+        .map_err(|e| format!("Serialize DeviceInfo: {e}"))?;
+
+    let fields = match device_val {
+        Value::Object(map) => map
+            .into_iter()
+            .map(|(k, v)| (k, json_to_firestore(&v)))
+            .collect::<serde_json::Map<_, _>>(),
+        _ => return Err("DeviceInfo did not serialize to object".into()),
+    };
+
+    let body = json!({ "fields": fields }).to_string();
+    let url = format!("{}/users/{user_id}/devices/{}", base_url(), device.id);
+
+    let (status, resp_body) = http_client::authed_patch_json(app, &url, &body)?;
+    if status != 200 && status != 201 {
+        return Err(format!("[firestore] save_device HTTP {status}: {resp_body}"));
+    }
+    println!("[firestore] Saved device '{}' for user {user_id}", device.id);
+    Ok(())
+}
+
+/// Load a single `DeviceInfo` from Firestore.
+/// Returns `None` if the document does not exist yet (device never registered).
+pub fn load_device(
+    app: &AppHandle,
+    user_id: &str,
+    device_id: &str,
+) -> Result<Option<DeviceInfo>, String> {
+    let url = format!("{}/users/{user_id}/devices/{device_id}", base_url());
+    let (status, body) = http_client::authed_get(app, &url)?;
+    if status == 404 {
+        return Ok(None);
+    }
+    if status != 200 {
+        return Err(format!("[firestore] load_device HTTP {status}: {body}"));
+    }
+    let doc: Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Parse Firestore device doc: {e}"))?;
+    let plain = extract_doc_fields(&doc);
+    let device = serde_json::from_value::<DeviceInfo>(plain)
+        .map_err(|e| format!("Deserialize DeviceInfo from Firestore: {e}"))?;
+    Ok(Some(device))
+}
+
+/// Load all device documents for a user from `users/{user_id}/devices`.
+/// Returns an empty `Vec` if the collection doesn't exist yet.
+pub fn load_all_devices(app: &AppHandle, user_id: &str) -> Result<Vec<DeviceInfo>, String> {
+    let url = format!("{}/users/{user_id}/devices", base_url());
+    let (status, body) = http_client::authed_get(app, &url)?;
+    if status == 404 {
+        return Ok(vec![]);
+    }
+    if status != 200 {
+        return Err(format!("[firestore] load_all_devices HTTP {status}: {body}"));
+    }
+
+    let resp: Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Parse Firestore devices list: {e}"))?;
+
+    let docs = match resp.get("documents").and_then(Value::as_array) {
+        Some(a) => a,
+        None => return Ok(vec![]),
+    };
+
+    let mut devices = Vec::with_capacity(docs.len());
+    for doc in docs {
+        let plain = extract_doc_fields(doc);
+        match serde_json::from_value::<DeviceInfo>(plain) {
+            Ok(d) => devices.push(d),
+            Err(e) => eprintln!("[firestore] Skipping malformed device doc: {e}"),
+        }
+    }
+    println!("[firestore] Loaded {} devices for user {user_id}", devices.len());
+    Ok(devices)
+}
+
+/// Delete a device document from Firestore. Returns `Ok(())` on 404 (idempotent).
+pub fn delete_device(app: &AppHandle, user_id: &str, device_id: &str) -> Result<(), String> {
+    let url = format!("{}/users/{user_id}/devices/{device_id}", base_url());
+    let (status, resp_body) = http_client::authed_delete(app, &url)?;
+    if status != 200 && status != 204 && status != 404 {
+        return Err(format!("[firestore] delete_device HTTP {status}: {resp_body}"));
+    }
+    println!("[firestore] Deleted device '{device_id}' for user {user_id}");
+    Ok(())
 }

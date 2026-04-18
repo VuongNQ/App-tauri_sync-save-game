@@ -1,3 +1,4 @@
+mod devices;
 mod drive_mgmt;
 mod firestore;
 mod gdrive;
@@ -14,8 +15,8 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 use models::{
-    AddGamePayload, AppSettings, AuthStatus, DashboardData, DriveFileFlatItem, DriveFileItem,
-    DriveVersionBackup, GoogleUserInfo, OAuthCredentials, PathValidation, SaveInfo,
+    AddGamePayload, AppSettings, AuthStatus, DashboardData, DeviceInfo, DriveFileFlatItem,
+    DriveFileItem, DriveVersionBackup, GoogleUserInfo, OAuthCredentials, PathValidation, SaveInfo,
     SaveTokensPayload, SyncResult, SyncStructureDiff, UpdateGamePayload,
 };
 
@@ -220,6 +221,9 @@ fn save_auth_tokens(
             Ok(false) => println!("[firestore] Post-login: no data in Firestore yet"),
             Err(e) => eprintln!("[firestore] Post-login restore failed: {e}"),
         }
+
+        // Register / update device record after successful login.
+        devices::register_current_device(&app_clone);
 
         // Sync all game saves from Drive (picks up cloud-side changes).
         match sync::sync_all_games(&app_clone) {
@@ -578,6 +582,34 @@ fn toggle_auto_sync(
     Ok(DashboardData { games: state.games })
 }
 
+// ── Device management commands ────────────────────────────
+
+#[tauri::command]
+async fn get_devices(app: tauri::AppHandle) -> Result<Vec<DeviceInfo>, String> {
+    tokio::task::spawn_blocking(move || devices::get_devices_cmd(&app)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn rename_device(
+    app: tauri::AppHandle,
+    device_id: String,
+    name: String,
+) -> Result<Vec<DeviceInfo>, String> {
+    tokio::task::spawn_blocking(move || devices::rename_device_cmd(&app, device_id, name))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn remove_device(
+    app: tauri::AppHandle,
+    device_id: String,
+) -> Result<Vec<DeviceInfo>, String> {
+    tokio::task::spawn_blocking(move || devices::remove_device_cmd(&app, device_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -592,6 +624,12 @@ pub fn run() {
 
             // Start watchers for games that have tracking enabled
             watcher::init_watchers(app.handle());
+
+            // Register this device in Firestore (if already authenticated — e.g. on subsequent launches)
+            let app_for_device = app.handle().clone();
+            std::thread::spawn(move || {
+                devices::register_current_device(&app_for_device);
+            });
 
             // Set up system tray icon and context menu
             tray::setup_tray(app).map_err(|e| e.to_string())?;
@@ -644,6 +682,9 @@ pub fn run() {
             list_version_backups,
             restore_version_backup,
             delete_version_backup,
+            get_devices,
+            rename_device,
+            remove_device,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

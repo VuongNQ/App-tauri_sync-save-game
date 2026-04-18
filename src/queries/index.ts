@@ -2,6 +2,7 @@ export { DASHBOARD_KEY, AUTH_STATUS_KEY, SETTINGS_KEY, VALIDATE_PATHS_KEY } from
 export { useAddGameMutation, useDashboardQuery, useRemoveGameMutation, useUpdateGameMutation, useValidatePathsQuery } from "./dashboard";
 export { useAuthStatusQuery, useGoogleUserInfoQuery, useLoginMutation, useLogoutMutation } from "./auth";
 export { useClearAllDriveMutation, useSettingsQuery, useUpdateSettingsMutation } from "./settings";
+export { useDevicesQuery, useRenameDeviceMutation, useRemoveDeviceMutation } from "./devices";
 export {
   useCheckSyncDiffMutation,
   useCreateVersionBackupMutation,

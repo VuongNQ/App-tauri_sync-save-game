@@ -133,6 +133,40 @@ pub struct GoogleUserInfo {
     pub picture: Option<String>,
 }
 
+// ── Devices ───────────────────────────────────────────────
+
+/// A registered device (machine) associated with the authenticated Google account.
+/// Stored in Firestore at `users/{user_id}/devices/{device_id}`.
+/// `is_current` is computed at query time and never persisted to Firestore.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInfo {
+    /// Deterministic UUID derived from the Windows MachineGuid registry value.
+    pub id: String,
+    /// User-editable display name (auto-populated from hostname on first registration).
+    pub name: String,
+    /// OS-reported computer hostname.
+    pub hostname: String,
+    /// OS name (e.g. "Windows 11").
+    pub os_name: String,
+    /// OS version string (e.g. "23H2").
+    pub os_version: String,
+    /// CPU brand string (e.g. "Intel(R) Core(TM) i7-12700K").
+    pub cpu_name: String,
+    /// Number of logical CPU cores.
+    pub cpu_cores: u32,
+    /// Total system RAM in megabytes.
+    pub total_ram_mb: u64,
+    /// ISO 8601 timestamp when this device was first registered. Preserved on re-registration.
+    pub registered_at: String,
+    /// ISO 8601 timestamp of the most recent registration / startup upsert.
+    pub last_seen_at: String,
+    /// `true` when this device is the one currently running the app.
+    /// Computed at query time — never stored in Firestore.
+    #[serde(default)]
+    pub is_current: bool,
+}
+
 // ── Settings ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

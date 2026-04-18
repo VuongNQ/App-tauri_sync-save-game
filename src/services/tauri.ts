@@ -5,6 +5,7 @@ import type {
   AppSettings,
   AuthStatus,
   DashboardData,
+  DeviceInfo,
   DriveFileFlatItem,
   DriveFileItem,
   DriveVersionBackup,
@@ -223,3 +224,21 @@ export async function restoreVersionBackup(gameId: string, backupFolderId: strin
 export async function deleteVersionBackup(gameId: string, backupFolderId: string): Promise<void> {
   return invoke<void>("delete_version_backup", { gameId, backupFolderId });
 }
+
+// ── Devices ───────────────────────────────────────────────────────────────────
+
+/** Load all devices registered to the authenticated Google account. */
+export async function getDevices(): Promise<DeviceInfo[]> {
+  return invoke<DeviceInfo[]>("get_devices");
+}
+
+/** Rename a registered device. Returns the updated device list. */
+export async function renameDevice(deviceId: string, name: string): Promise<DeviceInfo[]> {
+  return invoke<DeviceInfo[]>("rename_device", { deviceId, name });
+}
+
+/** Remove a registered device. Returns the updated device list. */
+export async function removeDevice(deviceId: string): Promise<DeviceInfo[]> {
+  return invoke<DeviceInfo[]>("remove_device", { deviceId });
+}
+
