@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 
 import { useDeleteDriveFileMutation, useDriveFilesFlatQuery, useMoveDriveFileMutation, useRenameDriveFileMutation } from "../queries";
 import type { DriveFileFlatItem, SavePathEntry } from "../types/dashboard";
@@ -12,6 +12,8 @@ interface Props {
   gameFolderId: string;
   /** Save path entries for the game — used to label path-N subfolders. */
   savePaths?: SavePathEntry[];
+  /** Path mode for the game — controls whether paths are portable or per-device. */
+  pathMode?: "auto" | "per_device";
 }
 
 const PROTECTED_PATHS = new Set([".sync-meta.json", "backups"]);
@@ -30,12 +32,27 @@ function isProtected(relativePath: string): boolean {
   );
 }
 
-export function DriveFilesSection({ gameId, gameFolderId, savePaths }: Props) {
+export function DriveFilesSection({ gameId, gameFolderId, savePaths, pathMode = "auto" }: Props) {
   const [isOpen, setIsOpen] = useState(false);
 
   const { data: flatItems, isLoading, isError, error, refetch } = useDriveFilesFlatQuery(gameId, isOpen);
 
   const tree = useMemo(() => (flatItems ? buildDriveTree(flatItems) : null), [flatItems]);
+
+  // Separate root items: path-N folders vs everything else (root files, non-path-N folders).
+  const { pathNRoots, otherRoots } = useMemo(() => {
+    if (!tree) return { pathNRoots: [], otherRoots: [] };
+    const pathN: DriveTreeItem[] = [];
+    const other: DriveTreeItem[] = [];
+    for (const node of tree) {
+      if (node.kind === "folder" && PATH_N_RE.test(node.name)) {
+        pathN.push(node);
+      } else {
+        other.push(node);
+      }
+    }
+    return { pathNRoots: pathN, otherRoots: other };
+  }, [tree]);
 
   // Top-level subfolders available for file move operations (excludes protected path-N folders).
   const topSubfolders = useMemo(
@@ -68,7 +85,11 @@ export function DriveFilesSection({ gameId, gameFolderId, savePaths }: Props) {
                 <p className={`${MUTED} text-sm`}>No files found in this folder.</p>
               ) : (
                 <ul className="list-none p-0 rounded-[14px] bg-[rgba(255,255,255,0.02)] border border-[rgba(165,185,255,0.06)] overflow-hidden">
-                  {tree.map((node, i) => (
+                  {/* Root save-path section (save_paths[0]) */}
+                  {otherRoots.length > 0 && savePaths?.[0] && (
+                    <SavePathSectionLabel savePath={savePaths[0]} pathMode={pathMode} />
+                  )}
+                  {otherRoots.map((node, i) => (
                     <DriveTreeNode
                       key={i}
                       node={node}
@@ -77,8 +98,38 @@ export function DriveFilesSection({ gameId, gameFolderId, savePaths }: Props) {
                       gameFolderId={gameFolderId}
                       topSubfolders={topSubfolders}
                       savePaths={savePaths}
+                      pathMode={pathMode}
                     />
                   ))}
+                  {/* path-N subfolders (save_paths[1+]) — each gets a SavePathSectionLabel header above it.
+                      The path-N folder row itself is hidden; children are rendered flat at depth 0. */}
+                  {pathNRoots.map((node, i) => {
+                    const m = PATH_N_RE.exec(node.name);
+                    const pathIndex = m ? parseInt(m[1]) : null;
+                    const entry = pathIndex != null ? savePaths?.[pathIndex] : undefined;
+                    const children = node.kind === "folder" ? node.children : [];
+                    return (
+                      <Fragment key={`path-n-${i}`}>
+                        {entry && <SavePathSectionLabel savePath={entry} pathMode={pathMode} topBorder />}
+                        {children.length === 0 ? (
+                          <li className="px-3 py-2 text-xs text-[#9aa8c7]/50 italic">No files synced yet for this path.</li>
+                        ) : (
+                          children.map((child, j) => (
+                            <DriveTreeNode
+                              key={j}
+                              node={child}
+                              depth={0}
+                              gameId={gameId}
+                              gameFolderId={gameFolderId}
+                              topSubfolders={topSubfolders}
+                              savePaths={savePaths}
+                              pathMode={pathMode}
+                            />
+                          ))
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </ul>
               )}
               <button type="button" className={`${SECONDARY_BTN} mt-3 text-sm`} onClick={() => refetch()}>
@@ -202,6 +253,37 @@ function formatDriveBytes(bytes: number): string {
 
 // ── DriveTreeNode ──────────────────────────────────────────────────────────────
 
+// ── SavePathSectionLabel ──────────────────────────────────────────────────────
+
+interface SectionLabelProps {
+  savePath: SavePathEntry;
+  pathMode: "auto" | "per_device";
+  /** Add a top border to visually separate from the previous section. */
+  topBorder?: boolean;
+}
+
+function SavePathSectionLabel({ savePath, pathMode, topBorder = false }: SectionLabelProps) {
+  return (
+    <li
+      className={`flex items-center gap-2 px-3 py-2 border-b border-[rgba(165,185,255,0.06)] bg-[rgba(165,185,255,0.03)] select-none${
+        topBorder ? " border-t border-t-[rgba(165,185,255,0.10)]" : ""
+      }`}
+    >
+      <span className="text-[0.7rem] font-semibold text-[#7dc9ff] bg-[rgba(125,201,255,0.12)] px-2 py-0.5 rounded-full shrink-0">
+        {savePath.label}
+      </span>
+      {pathMode === "per_device" && (
+        <span className="text-[0.65rem] px-1.5 py-0.5 rounded-full bg-[rgba(255,196,91,0.12)] text-[#ffd98a] shrink-0">per-device</span>
+      )}
+      <span className="text-[0.68rem] text-[#9aa8c7]/70 truncate min-w-0" title={savePath.path ?? undefined}>
+        {savePath.path ?? <em className="not-italic text-[#9aa8c7]/40">Not configured on this device</em>}
+      </span>
+    </li>
+  );
+}
+
+// ── DriveTreeNode ──────────────────────────────────────────────────────────────
+
 interface TreeNodeProps {
   node: DriveTreeItem;
   depth: number;
@@ -209,9 +291,10 @@ interface TreeNodeProps {
   gameFolderId: string;
   topSubfolders: DriveFileFlatItem[];
   savePaths?: SavePathEntry[];
+  pathMode?: "auto" | "per_device";
 }
 
-function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders, savePaths }: TreeNodeProps) {
+function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders, savePaths, pathMode = "auto" }: TreeNodeProps) {
   const indent = depth * 14;
   const protected_ = isProtected(node.relativePath);
 
@@ -305,14 +388,6 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders, saveP
             ) : (
               <span className="min-w-0 flex-1 truncate">
                 <span className="text-[#7dc9ff] font-medium">{node.name}/</span>
-                {/* For path-N folders, show the human-readable save path label */}
-                {(() => {
-                  const m = PATH_N_RE.exec(node.name);
-                  const label = m ? savePaths?.[parseInt(m[1]) - 1]?.label : undefined;
-                  return label ? (
-                    <span className="ml-2 text-[0.65rem] text-[#9aa8c7]/70 bg-white/5 px-1.5 py-0.5 rounded-full align-middle">{label}</span>
-                  ) : null;
-                })()}
               </span>
             )}
           </div>
@@ -389,6 +464,7 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders, saveP
               gameFolderId={gameFolderId}
               topSubfolders={topSubfolders}
               savePaths={savePaths}
+              pathMode={pathMode}
             />
           ))}
       </>

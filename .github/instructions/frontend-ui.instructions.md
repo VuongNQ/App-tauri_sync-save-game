@@ -1,4 +1,4 @@
----
+﻿---
 applyTo: "src/**/*.{ts,tsx}"
 description: >
   Use when: creating or editing any React component, page, hook, query hook, mutation hook, service function, route, form, layout, or Tailwind style in this Tauri app. Covers the full frontend architecture: component conventions, React Query patterns, service layer, routing, TypeScript, form validation, Tauri event integration, and device management UI (DevicesPage, useDevicesQuery, useRenameDeviceMutation, useRemoveDeviceMutation).
@@ -685,16 +685,21 @@ savePaths: (gameSettings?.savePaths ?? []).map((e) => ({
 ### DriveFilesSection
 
 **File**: `src/components/DriveFilesSection.tsx`  
-**Props**: `{ gameId: string; gameFolderId: string }`  
+**Props**: `{ gameId: string; gameFolderId: string; savePaths?: SavePathEntry[]; pathMode?: "auto" | "per_device" }`  
 **Used in**: `GameDetailPage` — only rendered when `game.gdriveFolderId !== null`.
 
 - Collapsible section; `useDriveFilesFlatQuery(gameId, isOpen)` — **single recursive fetch** when the section is first opened. Key: `driveFilesFlatKey(gameId)`. `staleTime: Infinity`.
 - `buildDriveTree(items: DriveFileFlatItem[]): DriveTreeItem[]` — client-side tree builder that splits each `relativePath` on `/` to produce a typed union:
   - `DriveTreeLeaf { kind: "file", id, name, relativePath, size, modifiedTime, parentFolderId }`
   - `DriveTreeDir { kind: "folder", id | null, name, relativePath, children, totalSize, parentFolderId | null }`
-- **Protected items** (`.sync-meta.json`, `backups` and anything under `backups/`): displayed but actions (rename/move/delete) are disabled; show a `"protected"` badge. Check via `isProtected(relativePath)`.
+- **Multi-path rendering**: tree is split into `otherRoots` (root files + non-path-N folders) and `pathNRoots` (folders matching `PATH_N_RE = /^path-(\d+)$/`).
+  - `otherRoots` are rendered after a `SavePathSectionLabel` for `savePaths[0]`.
+  - `pathNRoots` each get a `SavePathSectionLabel` header (label, per-device badge, path) rendered **above** them. The `path-N/` folder row itself is **not rendered** — only the folder's children are rendered flat at `depth=0`. If a path-N folder has no children yet, a `"No files synced yet for this path."` placeholder is shown.
+  - `SavePathSectionLabel` shows the save path's `label` (blue pill), a `per-device` badge when `pathMode === "per_device"`, and the local path (or italic "Not configured on this device" when `path` is null).
+- `PATH_N_RE = /^path-(\d+)$/` — used to identify path-N folders, extract index `i` to lookup `savePaths[i]`, and mark them as protected.
+- **Protected items** (`.sync-meta.json`, `backups`, items under `backups/`, nested `*.sync-meta.json`, and `path-N` folder nodes themselves): displayed but actions (rename/move/delete) are disabled; show a `"protected"` badge. Check via `isProtected(relativePath)`.
 - **Rename**: pencil button ✏️ → inline input replaces name text; `Enter` commits, `Escape` cancels.
-- **Move**: folder icon button 📂 → `MoveFileModal` with radio list of **top-level subfolders** (items where `isFolder && !relativePath.includes("/")` and not protected); includes “game root” option. Receives `DriveFileFlatItem[]`.
+- **Move**: folder icon button 📂 → `MoveFileModal` with radio list of **top-level subfolders** (items where `isFolder && !relativePath.includes("/")` and not protected); includes "game root" option. Receives `DriveFileFlatItem[]`.
 - **Delete**: trash icon 🗑️ → `ConfirmModal` before calling `useDeleteDriveFileMutation`.
 - Compact list rows inside a single `<ul>` with `border-b` separators: folder rows show `▼/►` toggle + blue `name/` + size badge; file rows show `↳` + name + size + formatted date.
 - Move warning: files moved out of game root are removed from `.sync-meta.json` and will be re-uploaded on next sync.

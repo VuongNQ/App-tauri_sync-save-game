@@ -157,17 +157,31 @@ fn drive_get(app: &AppHandle, url: &str) -> Result<(u16, String), String> {
 ```
 appDataFolder/
   game-processing-sync/          ← root folder (ensure_root_folder)
-    config.json                  ← AppSettings (global configuration DB record)
-    library.json                 ← Vec<GameEntry> (game library DB table)
-    {game_id}/                   ← per-game folder (ensure_game_folder)
-      <save files...>
-      .sync-meta.json            ← { last_synced, files: { relativePath → SyncFileMeta } }
+    config.json                  ← LEGACY AppSettings backup (migration only)
+    library.json                 ← LEGACY Vec<GameEntry> backup (migration only)
+    {game_id}/                   ← per-game folder (ensure_game_folder); ID = GameEntry.gdrive_folder_id
+      <save files...>            ← save_paths[0] files — stored flat in root
+      .sync-meta.json            ← SyncMeta for save_paths[0]
+      path-1/                    ← save_paths[1] subfolder (created by ensure_subfolder on first sync)
+        <save files...>
+        .sync-meta.json          ← SyncMeta for save_paths[1]; ID cached in save_paths[1].gdrive_folder_id
+      path-2/                    ← save_paths[2] subfolder, etc.
+        <save files...>
+        .sync-meta.json
+      backups/                   ← version backup snapshots (protected — never renamed/deleted by sync)
+        {ISO-timestamp}/
+          <copied save files...>
+          .backup-meta.json
 ```
 
 - Root folder name: `"game-processing-sync"`, parent: `"appDataFolder"`.
-- Per-game folder name: `{game_id}` (matches `GameEntry.id`).
-- Always cache `gdrive_folder_id` in `GameEntry` — avoid repeated Drive list calls.
-- `library.json` and `config.json` sit directly under the root folder (not inside a game sub-folder).
+- Per-game folder name: `{game_id}` (matches `GameEntry.id`). ID cached in `GameEntry.gdrive_folder_id`.
+- `save_paths[0]` files are stored **flat** in the game root folder — no subfolder.
+- `save_paths[i≥1]` each get a `path-{i}/` subfolder created via `gdrive::ensure_subfolder(app, &game_folder_id, "path-{i}")`. The returned folder ID is cached in `save_paths[i].gdrive_folder_id`.
+- Each save path has its **own `.sync-meta.json`** in its respective folder. Never share a single meta across paths.
+- `ensure_subfolder` is **search-or-create**: it lists the parent folder first and returns the existing ID if found — safe to call on every sync.
+- `library.json` and `config.json` are legacy Drive files kept only for one-time migration from old installs; they are never written by current code.
+- `backups/` is a protected folder — `isProtected()` prevents rename/delete of it or its contents via the Drive file manager.
 
 ### Cloud Library & Config DB Operations
 
