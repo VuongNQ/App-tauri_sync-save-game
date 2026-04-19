@@ -319,6 +319,8 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
     state.games.push(game.clone());
     save_state(app, &state)?;
     spawn_firestore_game_upsert(app, game.clone());
+    // Path routing may have stored new device-specific overrides — sync them to Firestore.
+    spawn_firestore_device_paths_sync(app);
     Ok(game)
 }
 
@@ -363,6 +365,8 @@ pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
 
     save_state(app, &state)?;
     spawn_firestore_game_upsert(app, to_sync);
+    // Path routing may have updated device-specific overrides — sync them to Firestore.
+    spawn_firestore_device_paths_sync(app);
     Ok(())
 }
 
@@ -496,7 +500,8 @@ pub fn fetch_all_from_firestore(app: &AppHandle) -> Result<bool, String> {
 
     if let Ok(Some(mut cloud_settings)) = firestore::load_settings(app, &user_id) {
         // path_overrides and path_overrides_indexed are local-only (device-specific paths)
-        // — never synced to Firestore. Preserve the local machine's overrides.
+        // — never synced via AppSettings. Preserve the local machine's overrides for now;
+        // load_and_merge_device_paths (called below) will reconcile with the device doc.
         cloud_settings.path_overrides = state.settings.path_overrides.clone();
         cloud_settings.path_overrides_indexed = state.settings.path_overrides_indexed.clone();
         state.settings = cloud_settings;
@@ -507,6 +512,13 @@ pub fn fetch_all_from_firestore(app: &AppHandle) -> Result<bool, String> {
         "[firestore] Restored {} games from Firestore",
         state.games.len()
     );
+
+    // Reconcile device path overrides: restore from Firestore (reinstall) or push local
+    // overrides up (one-time migration for existing installs).
+    if let Err(e) = load_and_merge_device_paths(app) {
+        eprintln!("[firestore] load_and_merge_device_paths failed: {e}");
+    }
+
     Ok(true)
 }
 
@@ -551,6 +563,86 @@ fn spawn_firestore_settings_sync(app: &AppHandle) {
         let settings = load_state(app)?.settings;
         firestore::save_settings(app, user_id, &settings)
     });
+}
+
+/// Push the current device's `path_overrides` / `path_overrides_indexed` to Firestore
+/// under `users/{user_id}/devices/{device_id}` using a targeted `updateMask` PATCH.
+/// Called in a background thread so it never blocks the UI.
+pub(crate) fn spawn_firestore_device_paths_sync(app: &AppHandle) {
+    spawn_firestore_task(app, move |app, user_id| {
+        let device_id = match crate::devices::get_machine_device_id() {
+            Some(id) => id,
+            None => return Ok(()), // non-Windows or registry unavailable
+        };
+        let settings = load_state(app)?.settings;
+        firestore::save_device_path_overrides(
+            app,
+            user_id,
+            &device_id,
+            &settings.path_overrides,
+            &settings.path_overrides_indexed,
+        )
+    });
+}
+
+/// Load device-scoped path overrides from Firestore and merge them into local state.
+///
+/// Logic:
+/// - Firestore has **non-empty** overrides → restore from Firestore (covers reinstall)
+/// - Firestore has **empty** overrides AND local has non-empty → push local to Firestore (one-time migration)
+/// - Both empty → no-op
+///
+/// Returns `Ok(true)` if local state was updated, `Ok(false)` otherwise.
+pub fn load_and_merge_device_paths(app: &AppHandle) -> Result<bool, String> {
+    let device_id = match crate::devices::get_machine_device_id() {
+        Some(id) => id,
+        None => return Ok(false), // non-Windows
+    };
+    let user_id = match crate::gdrive_auth::get_current_user_id(app) {
+        Some(id) => id,
+        None => return Ok(false),
+    };
+
+    let cloud_device = match firestore::load_device(app, &user_id, &device_id) {
+        Ok(Some(d)) => d,
+        Ok(None) => return Ok(false), // device not yet registered
+        Err(e) => {
+            eprintln!("[firestore] load_and_merge_device_paths: load_device failed: {e}");
+            return Ok(false);
+        }
+    };
+
+    let mut state = load_state(app)?;
+
+    let cloud_has_overrides = !cloud_device.path_overrides.is_empty();
+    let local_has_overrides = !state.settings.path_overrides.is_empty()
+        || !state.settings.path_overrides_indexed.is_empty();
+
+    if cloud_has_overrides {
+        // Firestore is authoritative — restore (covers clean reinstall scenario).
+        state.settings.path_overrides = cloud_device.path_overrides;
+        state.settings.path_overrides_indexed = cloud_device.path_overrides_indexed;
+        save_state(app, &state)?;
+        println!("[firestore] Restored device path overrides from Firestore ({} entries)",
+            state.settings.path_overrides.len() + state.settings.path_overrides_indexed.len());
+        Ok(true)
+    } else if local_has_overrides {
+        // One-time migration: push existing local overrides up to Firestore.
+        if let Err(e) = firestore::save_device_path_overrides(
+            app,
+            &user_id,
+            &device_id,
+            &state.settings.path_overrides,
+            &state.settings.path_overrides_indexed,
+        ) {
+            eprintln!("[firestore] load_and_merge_device_paths: migration push failed: {e}");
+        } else {
+            println!("[firestore] Migrated local path overrides to Firestore device doc");
+        }
+        Ok(false) // local state unchanged
+    } else {
+        Ok(false) // nothing to do
+    }
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {

@@ -180,6 +180,15 @@ pub struct DeviceInfo {
     /// Computed at query time — never stored in Firestore.
     #[serde(default)]
     pub is_current: bool,
+    /// Device-local save-path overrides for save_paths[0].
+    /// Stored in Firestore only under this device's document for disaster recovery.
+    /// Stripped from the main DeviceInfo PATCH — written via `save_device_path_overrides`.
+    #[serde(default)]
+    pub path_overrides: std::collections::HashMap<String, String>,
+    /// Device-local save-path overrides for save_paths[i≥1].
+    /// Same lifecycle as `path_overrides`.
+    #[serde(default)]
+    pub path_overrides_indexed: std::collections::HashMap<String, String>,
 }
 
 // ── Settings ──────────────────────────────────────────────

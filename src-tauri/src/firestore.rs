@@ -306,10 +306,18 @@ pub fn load_sync_meta(
 // ── Device CRUD ───────────────────────────────────────────
 
 /// Write (upsert) a `DeviceInfo` to Firestore at `users/{user_id}/devices/{device_id}`.
-/// `is_current` is local-only and is stripped before writing.
+/// `is_current`, `path_overrides`, and `path_overrides_indexed` are local-only and are
+/// stripped before writing. Path overrides are written separately via
+/// `save_device_path_overrides` with an `updateMask` PATCH so they are never clobbered.
 pub fn save_device(app: &AppHandle, user_id: &str, device: &DeviceInfo) -> Result<(), String> {
     // is_current is computed at query time — never persisted.
-    let cloud_device = DeviceInfo { is_current: false, ..device.clone() };
+    // path_overrides / path_overrides_indexed are written via a separate updateMask PATCH.
+    let cloud_device = DeviceInfo {
+        is_current: false,
+        path_overrides: std::collections::HashMap::new(),
+        path_overrides_indexed: std::collections::HashMap::new(),
+        ..device.clone()
+    };
     let device_val = serde_json::to_value(&cloud_device)
         .map_err(|e| format!("Serialize DeviceInfo: {e}"))?;
 
@@ -329,6 +337,43 @@ pub fn save_device(app: &AppHandle, user_id: &str, device: &DeviceInfo) -> Resul
         return Err(format!("[firestore] save_device HTTP {status}: {resp_body}"));
     }
     println!("[firestore] Saved device '{}' for user {user_id}", device.id);
+    Ok(())
+}
+
+/// Update only `pathOverrides` and `pathOverridesIndexed` on an existing device document
+/// using a Firestore `updateMask` PATCH so no other fields are touched.
+/// This is the safe write path for device-local save-path overrides.
+pub fn save_device_path_overrides(
+    app: &AppHandle,
+    user_id: &str,
+    device_id: &str,
+    path_overrides: &std::collections::HashMap<String, String>,
+    path_overrides_indexed: &std::collections::HashMap<String, String>,
+) -> Result<(), String> {
+    use serde_json::json;
+
+    let po_val = serde_json::to_value(path_overrides)
+        .map_err(|e| format!("Serialize path_overrides: {e}"))?;
+    let poi_val = serde_json::to_value(path_overrides_indexed)
+        .map_err(|e| format!("Serialize path_overrides_indexed: {e}"))?;
+
+    let fields = serde_json::json!({
+        "pathOverrides": json_to_firestore(&po_val),
+        "pathOverridesIndexed": json_to_firestore(&poi_val),
+    });
+
+    let body = json!({ "fields": fields }).to_string();
+    // updateMask ensures only these two fields are written; all other device fields are preserved.
+    let url = format!(
+        "{}/users/{user_id}/devices/{device_id}?updateMask.fieldPaths=pathOverrides&updateMask.fieldPaths=pathOverridesIndexed",
+        base_url()
+    );
+
+    let (status, resp_body) = http_client::authed_patch_json(app, &url, &body)?;
+    if status != 200 && status != 201 {
+        return Err(format!("[firestore] save_device_path_overrides HTTP {status}: {resp_body}"));
+    }
+    println!("[firestore] Saved path overrides for device '{device_id}' (user {user_id})");
     Ok(())
 }
 

@@ -225,6 +225,12 @@ fn save_auth_tokens(
         // Register / update device record after successful login.
         devices::register_current_device(&app_clone);
 
+        // Restore device-local path overrides from Firestore (disaster recovery)
+        // or push existing local overrides up for the first time (migration).
+        if let Err(e) = settings::load_and_merge_device_paths(&app_clone) {
+            eprintln!("[firestore] Post-login: load_and_merge_device_paths failed: {e}");
+        }
+
         // Sync all game saves from Drive (picks up cloud-side changes).
         match sync::sync_all_games(&app_clone) {
             Ok(results) => {
