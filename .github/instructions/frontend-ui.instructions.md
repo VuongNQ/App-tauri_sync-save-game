@@ -419,6 +419,8 @@ export interface GameEntry {
   description: string | null;       // null, not undefined (Rust Option<T>)
   thumbnail: string | null;         // local file path or remote URL for logo
   source: GameSource;               // "manual" | "emulator"
+  pathMode: "auto" | "per_device";  // "auto" = portable %VAR% paths shared across devices;
+                                    // "per_device" = paths stored locally per machine (override key includes device UUID)
   savePaths: SavePathEntry[];       // ordered list; index 0 is primary. Replaces old savePath + syncExcludes.
   exeName: string | null;           // game executable filename (e.g. "MyGame.exe"); used by process monitor
   exePath: string | null;           // full exe path with %VAR% tokens (e.g. "%PROGRAMFILES%\\Steam\\game.exe"); used by launch_game
@@ -435,9 +437,19 @@ export interface AppSettings {
   syncIntervalMinutes: number;
   startMinimised: boolean;
   runOnStartup: boolean;
-  /** Device-specific save-path overrides for save_paths[0] keyed by game id. Local-only. */
+  /**
+   * Device-specific save-path overrides. Local-only — never written to Firestore.
+   * Key format depends on GameEntry.pathMode:
+   *   "auto"       game, index 0   → key = "{gameId}"
+   *   "per_device" game, index 0   → key = "{gameId}:{deviceId}"
+   */
   pathOverrides: Record<string, string>;
-  /** Device-specific save-path overrides for save_paths[i≥1] keyed by "{gameId}:{i}". Local-only. */
+  /**
+   * Device-specific save-path overrides for save_paths[i≥1]. Local-only — never written to Firestore.
+   * Key format depends on GameEntry.pathMode:
+   *   "auto"       game, index i   → key = "{gameId}:{i}"
+   *   "per_device" game, index i   → key = "{gameId}:{deviceId}:{i}"
+   */
   pathOverridesIndexed: Record<string, string>;
 }
 

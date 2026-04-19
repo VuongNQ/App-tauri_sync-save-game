@@ -83,6 +83,7 @@ src-tauri/src/
 | `description` | `Option<String>` | `string \| null` | User-provided description |
 | `thumbnail` | `Option<String>` | `string \| null` | Local file path **or** remote URL for logo/thumbnail |
 | `source` | `String` | `string` | One of: `"manual"`, `"emulator"` |
+| `path_mode` | `String` | `string` | `"auto"` (default) or `"per_device"`. Controls how save-path override keys are keyed: `"auto"` uses plain `game_id`; `"per_device"` uses `"{game_id}:{device_id}"`. Old records without this field deserialize as `"auto"` via `#[serde(default)]`. |
 | `save_paths` | `Vec<SavePathEntry>` | `SavePathEntry[]` | Ordered list of save-game folder entries. Primary path is index 0. Users can add multiple paths (e.g. memcards + save states). See `SavePathEntry` below. |
 | `exe_name` | `Option<String>` | `string \| null` | Game executable filename (e.g. `"MyGame.exe"`); used by the process monitor to detect when the game is running |
 | `exe_path` | `Option<String>` | `string \| null` | Full path to the game executable (e.g. `%PROGRAMFILES%\Steam\game.exe`); used by the `launch_game` command. **LOCAL-ONLY — never synced to Firestore or Drive; stripped to `None` before any cloud write; restored from local state after any cloud-to-local overwrite.** |
@@ -259,10 +260,14 @@ pub struct AppSettings {
     pub sync_interval_minutes: u32,
     pub start_minimised: bool,
     pub run_on_startup: bool,
-    /// Device-specific path for save_paths[0], keyed by game_id. Local-only.
+    /// Override map for save_paths[0]. Key format depends on GameEntry.path_mode:
+    ///   "auto"       → "{game_id}"
+    ///   "per_device" → "{game_id}:{device_id}"
     #[serde(default)]
     pub path_overrides: HashMap<String, String>,
-    /// Device-specific paths for save_paths[i≥1], keyed by "{game_id}:{i}". Local-only.
+    /// Override map for save_paths[i≥1]. Key format:
+    ///   "auto"       → "{game_id}:{i}"
+    ///   "per_device" → "{game_id}:{device_id}:{i}"
     #[serde(default)]
     pub path_overrides_indexed: HashMap<String, String>,
 }
@@ -275,9 +280,15 @@ export interface AppSettings {
   syncIntervalMinutes: number;
   startMinimised: boolean;
   runOnStartup: boolean;
-  /** Device-specific save-path overrides for save_paths[0] keyed by game id. Local-only — never synced to Firestore. */
+  /**
+   * Device-specific save-path overrides for save_paths[0]. Local-only — never synced to Firestore.
+   * Key: "{gameId}" for "auto" games; "{gameId}:{deviceId}" for "per_device" games.
+   */
   pathOverrides: Record<string, string>;
-  /** Device-specific save-path overrides for save_paths[i≥1] keyed by "{gameId}:{i}". Local-only. */
+  /**
+   * Device-specific save-path overrides for save_paths[i≥1]. Local-only — never synced to Firestore.
+   * Key: "{gameId}:{i}" for "auto" games; "{gameId}:{deviceId}:{i}" for "per_device" games.
+   */
   pathOverridesIndexed: Record<string, string>;
 }
 ```
@@ -357,16 +368,24 @@ Save paths are stored with Windows environment-variable tokens instead of hardco
 
 Each game has **one or more** `SavePathEntry` records in `GameEntry.save_paths`. Each entry has a `label`, `path`, `gdrive_folder_id`, and `sync_excludes`.
 
-| Path index | Portable path storage | Device-specific path storage |
-|---|---|---|
-| `save_paths[0]` | `SavePathEntry.path` (contains `%`) | `AppSettings.path_overrides[game_id]` |
-| `save_paths[i≥1]` | `SavePathEntry.path` (contains `%`) | `AppSettings.path_overrides_indexed["{game_id}:{i}"]` |
+The override map key depends on `GameEntry.path_mode`:
 
-Both `path_overrides` and `path_overrides_indexed` are **local-only** — never written to Firestore.
+| `path_mode` | Path index | Override map | Override key |
+|---|---|---|---|
+| `"auto"` | 0 | `path_overrides` | `"{game_id}"` |
+| `"auto"` | i≥1 | `path_overrides_indexed` | `"{game_id}:{i}"` |
+| `"per_device"` | 0 | `path_overrides` | `"{game_id}:{device_id}"` |
+| `"per_device"` | i≥1 | `path_overrides_indexed` | `"{game_id}:{device_id}:{i}"` |
+
+`device_id` = SHA-256(`MachineGuid`) UUID from `devices::get_machine_device_id()`. Falls back to `"unknown"` on non-Windows.
+
+Both `path_overrides` and `path_overrides_indexed` are **local-only** — never written to Firestore. For `"per_device"` games `SavePathEntry.path` is always `None` in Firestore — each device stores its own path in the local override map.
 
 ### Key Functions (`settings.rs`)
 
-`route_save_paths(save_paths, game_id, settings)` — routes each `SavePathEntry.path` to either the portable field or the appropriate override map depending on token presence. Called on every `add_manual_game` / `upsert_game`.
+`build_override_key(game_id, path_mode, index, device_id) -> String` — **single source of truth** for override map key construction. Called by `route_save_paths`, `effective_save_paths`, and `apply_path_overrides`. Never construct these keys manually elsewhere.
+
+`route_save_paths(save_paths, game_id, settings, path_mode)` — routes each `SavePathEntry.path` to either the portable field or the correct device-keyed override map. Called on every `add_manual_game` / `upsert_game`.
 
 `effective_save_paths(game, settings) -> Vec<Option<String>>` — returns the active path for each index (override wins over `save_paths[i].path`). Use **everywhere** a path is needed at runtime.
 
@@ -389,6 +408,8 @@ Both `path_overrides` and `path_overrides_indexed` are **local-only** — never 
 `migrate_save_paths_to_vec()` runs automatically on every `load_state()` call. Any existing `GameEntry` with no `save_paths` but a legacy `save_path` + `sync_excludes` is converted to `save_paths[0]`. Safe to run repeatedly.
 
 `migrate_absolute_save_paths()` also runs on load. Any `SavePathEntry.path` without `%` tokens is moved to the appropriate override map.
+
+`migrate_per_device_override_keys()` also runs on load (pass 3). For `"per_device"` games, upgrades old plain-`game_id` override keys (`"game_id"` / `"game_id:i"`) to the device-ID-keyed format (`"game_id:device_id"` / `"game_id:device_id:i"`). The old vs new format is distinguished by whether the part after the colon is a bare integer (old) or a UUID (new).
 
 ### New-device UX
 When a `SavePathEntry.path` is `null` (device-specific path not configured for this machine), `SavePathCard` in `GameSettingsForm` shows a blue info banner prompting the user to Browse. The banner auto-dismisses when the field is filled.
@@ -441,8 +462,8 @@ pub struct AppSettings {
     pub start_minimised: bool,       // launch to tray on Windows startup
     pub run_on_startup: bool,        // register in Windows Run key
     pub sync_interval_minutes: u32,  // periodic sync interval (0 = only on change)
-    pub path_overrides: HashMap<String, String>, // device-specific paths for save_paths[0], local-only
-    pub path_overrides_indexed: HashMap<String, String>, // device-specific paths for save_paths[i≥1] keyed by "{game_id}:{i}", local-only
+    pub path_overrides: HashMap<String, String>, // key: "{game_id}" (auto) or "{game_id}:{device_id}" (per_device). Local-only.
+    pub path_overrides_indexed: HashMap<String, String>, // key: "{game_id}:{i}" (auto) or "{game_id}:{device_id}:{i}" (per_device). Local-only.
 }
 ```
 

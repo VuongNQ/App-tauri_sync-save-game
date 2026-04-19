@@ -279,22 +279,31 @@ Public wrapper over `contract_env_vars` (normalises backslashes then tokenises).
 
 Each game has **one or more** `SavePathEntry` records in `GameEntry.save_paths`. Each entry has a `label`, `path`, `gdrive_folder_id`, and `sync_excludes`.
 
-| Path index | Portable path storage | Device-specific path storage | Synced to Firestore? |
-|---|---|---|---|
-| `save_paths[0]` | `SavePathEntry.path` (contains `%`) | `AppSettings.path_overrides[game_id]` | Yes (portable only) |
-| `save_paths[i≥1]` | `SavePathEntry.path` (contains `%`) | `AppSettings.path_overrides_indexed["{game_id}:{i}"]` | Yes (portable only) |
+The key format inside `path_overrides` / `path_overrides_indexed` depends on `GameEntry.path_mode`:
+
+| `path_mode` | Path index | Override map | Override key format | Portable `SavePathEntry.path` |
+|---|---|---|---|---|
+| `"auto"` | 0 | `path_overrides` | `"{game_id}"` | Set when `%`-tokens present; `None` otherwise |
+| `"auto"` | i≥1 | `path_overrides_indexed` | `"{game_id}:{i}"` | Set when `%`-tokens present; `None` otherwise |
+| `"per_device"` | 0 | `path_overrides` | `"{game_id}:{device_id}"` | Always `None` (never stored in cloud) |
+| `"per_device"` | i≥1 | `path_overrides_indexed` | `"{game_id}:{device_id}:{i}"` | Always `None` (never stored in cloud) |
+
+`device_id` is the deterministic SHA-256(`MachineGuid`) UUID from `devices::get_machine_device_id()`. Falls back to `"unknown"` on non-Windows.
 
 Both `path_overrides` and `path_overrides_indexed` are **local-only** — never written to Firestore.
 
-**Routing function**: `route_save_paths(save_paths, game_id, settings)` in `settings.rs` — called on every `add_manual_game` / `upsert_game`. Iterates all entries; routes each normalised path to either `SavePathEntry.path` or the appropriate override map depending on token presence.
+**Routing function**: `route_save_paths(save_paths, game_id, settings, path_mode)` in `settings.rs` — called on every `add_manual_game` / `upsert_game`. Uses `build_override_key(game_id, path_mode, index, device_id)` to construct the correct map key. For `"per_device"` mode all paths go to the device-keyed override and `entry.path` is set to `None`.
+
+**Key helper**: `build_override_key(game_id, path_mode, index, device_id) -> String` — single source of truth for override map key construction; called by `route_save_paths`, `effective_save_paths`, and `apply_path_overrides`.
 
 **Read function**: `effective_save_paths(game, settings) -> Vec<Option<String>>` — returns the active path for each index (override wins over `save_paths[i].path`). Use this **everywhere** paths are needed at runtime (sync, validate, browse default, watcher).
 
 **Merge function**: `apply_path_overrides(games, settings)` — merges all overrides back into `GameEntry.save_paths[i].path` in-place. **Must be called before every `DashboardData` return** in `lib.rs`. Forgetting this causes `path: null` in the UI for device-specific paths after any mutation.
 
-**One-time migrations** (both run automatically on every `load_state()`):
-- `migrate_save_paths_to_vec()` — converts any `GameEntry` without `save_paths` but with legacy `save_path` + `sync_excludes` into `save_paths[0]`.
-- `migrate_absolute_save_paths()` — moves any `SavePathEntry.path` without `%` tokens into the appropriate override map.
+**One-time migrations** (all run automatically on every `load_state()`):
+- Pass 1 — `migrate_absolute_save_paths()` — moves any `SavePathEntry.path` without `%` tokens into the appropriate override map.
+- Pass 2 — `migrate_save_paths_to_vec()` — converts any `GameEntry` without `save_paths` but with legacy `save_path` + `sync_excludes` into `save_paths[0]`.
+- Pass 3 — `migrate_per_device_override_keys()` — for `per_device` games, upgrades old plain-`game_id` override keys (`"game_id"` / `"game_id:i"`) written before the device-ID scheme was introduced to the new `"game_id:device_id"` / `"game_id:device_id:i"` format. Disambiguates by checking whether the part after the colon is a bare integer (old format) vs. a UUID (new format). Returns `true` when at least one key was migrated; triggers a `save_state` call.
 
 **`sync_all_games` filter**: Must check `!g.save_paths.is_empty()` to include games with configured paths.
 
