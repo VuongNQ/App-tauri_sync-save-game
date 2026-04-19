@@ -83,13 +83,19 @@ fn firestore_to_json(value: &Value) -> Value {
         return Value::Array(values);
     }
     if let Some(map_wrap) = value.get("mapValue") {
-        if let Some(fields) = map_wrap.get("fields").and_then(Value::as_object) {
-            let map: serde_json::Map<String, Value> = fields
-                .iter()
-                .map(|(k, v)| (k.clone(), firestore_to_json(v)))
-                .collect();
-            return Value::Object(map);
-        }
+        // Firestore REST omits the `fields` key entirely for empty maps,
+        // so we must handle both `{ "fields": {...} }` and `{}`.
+        let map: serde_json::Map<String, Value> = map_wrap
+            .get("fields")
+            .and_then(Value::as_object)
+            .map(|fields| {
+                fields
+                    .iter()
+                    .map(|(k, v)| (k.clone(), firestore_to_json(v)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        return Value::Object(map);
     }
     Value::Null
 }

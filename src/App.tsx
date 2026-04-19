@@ -5,7 +5,7 @@ import { HashRouter, Routes, Route, Navigate } from "react-router";
 
 import { AppLayout } from "./components/AppLayout";
 import { AuthGuard } from "./components/AuthGuard";
-import { AUTH_STATUS_KEY, DASHBOARD_KEY, gamePlayingKey } from "./queries/keys";
+import { AUTH_STATUS_KEY, DASHBOARD_KEY, DEVICES_KEY, gamePlayingKey } from "./queries/keys";
 import { useAuthStatusQuery, useSyncLibraryFromCloudMutation } from "./queries";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DevicesPage } from "./pages/DevicesPage";
@@ -50,9 +50,12 @@ function useAuthStatusCallbacks() {
       void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
     });
 
-    // Refresh dashboard after post-login sync-all-from-Drive completes.
+    // Refresh dashboard and devices after post-login sync-all-from-Drive completes.
+    // register_current_device() runs before this event is emitted, so invalidating
+    // DEVICES_KEY here ensures the devices page shows the registered device.
     const unlistenPostLoginSyncPromise = listen("post-login-sync-completed", () => {
       void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
+      void queryClient.invalidateQueries({ queryKey: DEVICES_KEY });
     });
 
     // Track game playing state for TrackingSyncCard status banner.
