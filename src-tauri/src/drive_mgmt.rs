@@ -35,7 +35,12 @@ fn require_game_folder(app: &AppHandle, game_id: &str) -> Result<String, String>
 /// Files inside subfolders are included; each item's `relative_path` is relative
 /// to the game's Drive root folder (e.g. `"76561197960271872/Default_0.sav"`).
 /// Each item's `sync_path` is populated from SyncMeta when its Drive file ID
-/// matches a tracked entry (e.g. `"76561198241997832/UserMetaData.sav"`).
+/// matches a tracked entry.
+///
+/// For multi-path games, files inside `path-{i}/` subfolders are listed from
+/// their respective Drive subfolder's SyncMeta. The `sync_path` value for those
+/// files is prefixed with `"[{label}] "` so the UI can show which save path it
+/// belongs to.
 pub fn list_game_drive_files_flat(
     app: &AppHandle,
     game_id: &str,
@@ -43,18 +48,38 @@ pub fn list_game_drive_files_flat(
     let folder_id = require_game_folder(app, game_id)?;
     let mut items = gdrive::list_drive_items_recursive(app, &folder_id, "")?;
 
-    // Build a Drive-file-ID → pathFile lookup from SyncMeta so we can show
-    // the real save path (e.g. `76561198241997832/UserMetaData.sav`) for each
-    // Drive file, even when multiple files share the same name at root level.
-    let id_to_path: std::collections::HashMap<String, String> =
-        match gdrive::download_sync_meta(app, &folder_id) {
-            Ok((Some(meta), _)) => meta
-                .files
-                .into_iter()
-                .filter_map(|e| e.drive_file_id.map(|id| (id, e.path_file)))
-                .collect(),
-            _ => std::collections::HashMap::new(),
-        };
+    // Build a Drive-file-ID → sync_path lookup across ALL save paths.
+    let mut id_to_path: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+
+    // save_paths[0] — root folder SyncMeta (unlabelled prefix)
+    if let Ok((Some(meta), _)) = gdrive::download_sync_meta(app, &folder_id) {
+        for entry in meta.files {
+            if let Some(drive_id) = entry.drive_file_id {
+                id_to_path.insert(drive_id, entry.path_file);
+            }
+        }
+    }
+
+    // save_paths[i≥1] — subfolder SyncMeta, prefixed with the save path label
+    let state = settings::load_state(app)?;
+    if let Some(game) = state.games.iter().find(|g| g.id == game_id) {
+        for (i, path_entry) in game.save_paths.iter().enumerate().skip(1) {
+            let subfolder_id = match &path_entry.gdrive_folder_id {
+                Some(id) => id.clone(),
+                None => continue, // subfolder not yet synced — skip
+            };
+            let label = &path_entry.label;
+            if let Ok((Some(meta), _)) = gdrive::download_sync_meta(app, &subfolder_id) {
+                for entry in meta.files {
+                    if let Some(drive_id) = entry.drive_file_id {
+                        id_to_path.insert(drive_id, format!("[{label}] {}", entry.path_file));
+                    }
+                }
+            }
+            let _ = i; // suppress unused-variable warning; index kept for clarity
+        }
+    }
 
     for item in &mut items {
         item.sync_path = id_to_path.get(&item.id).cloned();

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
 import { useDeleteDriveFileMutation, useDriveFilesFlatQuery, useMoveDriveFileMutation, useRenameDriveFileMutation } from "../queries";
-import type { DriveFileFlatItem } from "../types/dashboard";
+import type { DriveFileFlatItem, SavePathEntry } from "../types/dashboard";
 import { msg } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
 import { CARD, EYEBROW, GHOST_BTN, INPUT_CLS, MUTED, PRIMARY_BTN, SECONDARY_BTN } from "./styles";
@@ -10,24 +10,36 @@ interface Props {
   gameId: string;
   /** The game's Drive folder root ID. */
   gameFolderId: string;
+  /** Save path entries for the game — used to label path-N subfolders. */
+  savePaths?: SavePathEntry[];
 }
 
 const PROTECTED_PATHS = new Set([".sync-meta.json", "backups"]);
 
+/** Match top-level path-N folder names (path-1, path-2, …) */
+const PATH_N_RE = /^path-(\d+)$/;
+
 function isProtected(relativePath: string): boolean {
-  return PROTECTED_PATHS.has(relativePath) || relativePath.startsWith("backups/");
+  return (
+    PROTECTED_PATHS.has(relativePath) ||
+    relativePath.startsWith("backups/") ||
+    // nested .sync-meta.json files inside path-N subfolders
+    relativePath.endsWith("/.sync-meta.json") ||
+    // path-N folder nodes themselves must not be renamed/deleted
+    PATH_N_RE.test(relativePath)
+  );
 }
 
-export function DriveFilesSection({ gameId, gameFolderId }: Props) {
+export function DriveFilesSection({ gameId, gameFolderId, savePaths }: Props) {
   const [isOpen, setIsOpen] = useState(false);
 
   const { data: flatItems, isLoading, isError, error, refetch } = useDriveFilesFlatQuery(gameId, isOpen);
 
   const tree = useMemo(() => (flatItems ? buildDriveTree(flatItems) : null), [flatItems]);
 
-  // Top-level subfolders available for file move operations.
+  // Top-level subfolders available for file move operations (excludes protected path-N folders).
   const topSubfolders = useMemo(
-    () => flatItems?.filter((item) => item.isFolder && !item.relativePath.includes("/") && !PROTECTED_PATHS.has(item.relativePath)) ?? [],
+    () => flatItems?.filter((item) => item.isFolder && !item.relativePath.includes("/") && !isProtected(item.relativePath)) ?? [],
     [flatItems]
   );
 
@@ -64,6 +76,7 @@ export function DriveFilesSection({ gameId, gameFolderId }: Props) {
                       gameId={gameId}
                       gameFolderId={gameFolderId}
                       topSubfolders={topSubfolders}
+                      savePaths={savePaths}
                     />
                   ))}
                 </ul>
@@ -195,9 +208,10 @@ interface TreeNodeProps {
   gameId: string;
   gameFolderId: string;
   topSubfolders: DriveFileFlatItem[];
+  savePaths?: SavePathEntry[];
 }
 
-function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: TreeNodeProps) {
+function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders, savePaths }: TreeNodeProps) {
   const indent = depth * 14;
   const protected_ = isProtected(node.relativePath);
 
@@ -289,7 +303,17 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
                 </button>
               </div>
             ) : (
-              <span className="text-[#7dc9ff] font-medium truncate">{node.name}/</span>
+              <span className="min-w-0 flex-1 truncate">
+                <span className="text-[#7dc9ff] font-medium">{node.name}/</span>
+                {/* For path-N folders, show the human-readable save path label */}
+                {(() => {
+                  const m = PATH_N_RE.exec(node.name);
+                  const label = m ? savePaths?.[parseInt(m[1]) - 1]?.label : undefined;
+                  return label ? (
+                    <span className="ml-2 text-[0.65rem] text-[#9aa8c7]/70 bg-white/5 px-1.5 py-0.5 rounded-full align-middle">{label}</span>
+                  ) : null;
+                })()}
+              </span>
             )}
           </div>
 
@@ -364,6 +388,7 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders }: Tre
               gameId={gameId}
               gameFolderId={gameFolderId}
               topSubfolders={topSubfolders}
+              savePaths={savePaths}
             />
           ))}
       </>

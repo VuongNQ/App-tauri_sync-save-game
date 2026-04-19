@@ -160,7 +160,7 @@ const TabStatus = () => {
       />
 
       {/* Drive file manager */}
-      {game.gdriveFolderId && <DriveFilesSection gameId={game.id} gameFolderId={game.gdriveFolderId} />}
+      {game.gdriveFolderId && <DriveFilesSection gameId={game.id} gameFolderId={game.gdriveFolderId} savePaths={game.savePaths} />}
 
       {/* Version backups */}
       {game.gdriveFolderId && <VersionBackupsSection gameId={game.id} />}

@@ -51,20 +51,20 @@ export function AppLayout() {
             {!collapsed && "Dashboard"}
           </NavLink>
           <NavLink
-            to="/settings"
-            className={({ isActive }) => (collapsed ? (isActive ? iconNavLinkActive : iconNavLink) : isActive ? NAV_LINK_ACTIVE : NAV_LINK)}
-            title={collapsed ? "Settings" : undefined}
-          >
-            <SettingsIcon />
-            {!collapsed && "Settings"}
-          </NavLink>
-          <NavLink
             to="/devices"
             className={({ isActive }) => (collapsed ? (isActive ? iconNavLinkActive : iconNavLink) : isActive ? NAV_LINK_ACTIVE : NAV_LINK)}
             title={collapsed ? "Devices" : undefined}
           >
             <DevicesIcon />
             {!collapsed && "Devices"}
+          </NavLink>
+          <NavLink
+            to="/settings"
+            className={({ isActive }) => (collapsed ? (isActive ? iconNavLinkActive : iconNavLink) : isActive ? NAV_LINK_ACTIVE : NAV_LINK)}
+            title={collapsed ? "Settings" : undefined}
+          >
+            <SettingsIcon />
+            {!collapsed && "Settings"}
           </NavLink>
         </nav>
       </aside>

@@ -461,7 +461,7 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
     }
 
     // 2. Ensure root + game Drive folders exist (idempotent)
-    let (root_folder_id, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
+    let (_root_folder_id, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
 
     let other_games_bytes: u64 = state
         .games
@@ -485,27 +485,20 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
         let save_dir_owned = expanded_path.clone();
         let save_dir = Path::new(&save_dir_owned);
 
-        // Resolve the Drive folder for this path index
+        // Resolve the Drive folder for this path index.
+        // Always call ensure_subfolder (search-or-create) so that a stale or
+        // incorrectly-placed cached folder ID is never used blindly.
         let drive_folder_id = if i == 0 {
             game_folder_id.clone()
         } else {
-            // Find or create `{game_id}/path-{i}/` subfolder on Drive,
-            // caching the ID in save_paths[i].gdrive_folder_id.
-            let cached_id = game.save_paths.get(i).and_then(|e| e.gdrive_folder_id.clone());
-            let fid = match cached_id {
-                Some(id) => id,
-                None => {
-                    let new_id =
-                        gdrive::ensure_subfolder(app, &root_folder_id, &format!("path-{i}"))?;
-                    // Persist the cached folder ID
-                    let _ = settings::update_game_field(app, game_id, |g| {
-                        if let Some(entry) = g.save_paths.get_mut(i) {
-                            entry.gdrive_folder_id = Some(new_id.clone());
-                        }
-                    });
-                    new_id
+            let fid =
+                gdrive::ensure_subfolder(app, &game_folder_id, &format!("path-{i}"))?;
+            // Update the cache with the verified correct ID.
+            let _ = settings::update_game_field(app, game_id, |g| {
+                if let Some(entry) = g.save_paths.get_mut(i) {
+                    entry.gdrive_folder_id = Some(fid.clone());
                 }
-            };
+            });
             fid
         };
 
@@ -592,7 +585,7 @@ pub fn check_sync_structure_diff(
     let effectives = settings::effective_save_paths(&game, &state.settings);
 
     // 2. Ensure Drive folders exist (idempotent — creates only if absent)
-    let (root_folder_id, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
+    let (_root_folder_id, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
 
     let mut cloud_has_data = false;
     let mut local_only_files = Vec::new();
@@ -612,11 +605,7 @@ pub fn check_sync_structure_diff(
         let drive_folder_id = if i == 0 {
             game_folder_id.clone()
         } else {
-            let cached = game.save_paths.get(i).and_then(|e| e.gdrive_folder_id.clone());
-            match cached {
-                Some(id) => id,
-                None => gdrive::ensure_subfolder(app, &root_folder_id, &format!("path-{i}"))?,
-            }
+            gdrive::ensure_subfolder(app, &game_folder_id, &format!("path-{i}"))?
         };
 
         let sync_excludes = game
@@ -743,7 +732,7 @@ fn restore_from_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult
     }
 
     // 2. Ensure Drive folders exist
-    let (root_folder_id, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
+    let (_root_folder_id, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
 
     let mut total_downloaded = 0u32;
     let mut total_skipped = 0u32;
@@ -761,11 +750,7 @@ fn restore_from_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult
         let drive_folder_id = if i == 0 {
             game_folder_id.clone()
         } else {
-            let cached = game.save_paths.get(i).and_then(|e| e.gdrive_folder_id.clone());
-            match cached {
-                Some(id) => id,
-                None => gdrive::ensure_subfolder(app, &root_folder_id, &format!("path-{i}"))?,
-            }
+            gdrive::ensure_subfolder(app, &game_folder_id, &format!("path-{i}"))?
         };
 
         // 3. Get cloud sync metadata — required for a restore
@@ -870,7 +855,7 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
     }
 
     // 2. Ensure Drive folders exist
-    let (root_folder_id, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
+    let (_root_folder_id, game_folder_id) = gdrive::ensure_game_folders(app, game_id)?;
 
     let other_games_bytes: u64 = state
         .games
@@ -895,20 +880,14 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
         let drive_folder_id = if i == 0 {
             game_folder_id.clone()
         } else {
-            let cached = game.save_paths.get(i).and_then(|e| e.gdrive_folder_id.clone());
-            match cached {
-                Some(id) => id,
-                None => {
-                    let new_id =
-                        gdrive::ensure_subfolder(app, &root_folder_id, &format!("path-{i}"))?;
-                    let _ = settings::update_game_field(app, game_id, |g| {
-                        if let Some(entry) = g.save_paths.get_mut(i) {
-                            entry.gdrive_folder_id = Some(new_id.clone());
-                        }
-                    });
-                    new_id
+            let fid =
+                gdrive::ensure_subfolder(app, &game_folder_id, &format!("path-{i}"))?;
+            let _ = settings::update_game_field(app, game_id, |g| {
+                if let Some(entry) = g.save_paths.get_mut(i) {
+                    entry.gdrive_folder_id = Some(fid.clone());
                 }
-            }
+            });
+            fid
         };
 
         let sync_excludes = game
