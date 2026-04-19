@@ -311,27 +311,74 @@ Both `path_overrides` and `path_overrides_indexed` are **local-only** — never 
 
 ### Sync Algorithm (sync.rs)
 
+### Delta-Sync Design
+
+The sync system uses a **three-way comparison** between local state, cloud state, and a **local tracker** to determine what to transfer per file. This avoids unnecessary uploads/downloads when neither side has changed since the last sync.
+
+**Local Tracker files** — stored at `{app_data_dir}/local-sync-{user_id}/{game_id}-p{path_index}.json`
+
+Each tracker is a `LocalSyncState` JSON file with `Vec<LocalFileRecord>`:
+
+```rust
+pub struct LocalSyncState {
+    pub game_id: String,
+    pub path_index: usize,
+    pub last_updated: String,       // ISO 8601 timestamp of when tracker was saved
+    pub files: Vec<LocalFileRecord>,
+}
+
+pub struct LocalFileRecord {
+    pub path_file: String,     // relative path (forward slashes)
+    pub size: u64,
+    pub modified_time: String, // OS mtime captured at last sync
+}
+```
+
+The tracker is empty on first sync (file absent). All files are treated as new → uploaded.
+
+**`SyncFileEntry.modified_time`** — the `SyncFileEntry` struct in `SyncMeta.files` now carries an `Option<String>` field `modified_time` (`#[serde(default)]` for backward compat) recording the local file's mtime at the time it was last uploaded to Drive.
+
 ### Pipeline
 
 1. Load `GameEntry` from state; obtain all effective save paths via `settings::effective_save_paths(game, settings)`. Error if all are `None`.
-2. `gdrive::ensure_root_folder()` → `gdrive::ensure_game_folder()` → game root Drive folder.
+2. `gdrive::ensure_game_folders()` → game root Drive folder.
 3. For each index `i` with a configured path:
    - `i == 0`: use `GameEntry.gdrive_folder_id` (the game root folder).
    - `i >= 1`: call `gdrive::ensure_subfolder(app, root_folder_id, "path-{i}")` → cache ID in `save_paths[i].gdrive_folder_id`.
 4. Per path: `gdrive::download_sync_meta()` → `Option<SyncMeta>` + optional file ID.
 5. Per path: `gdrive::list_files()` in that Drive folder (for Drive file ID lookup).
 6. Per path: `collect_local_files(effective_path)` — recursively walk directory with `walkdir`.
-7. **Per-file timestamp comparison** (ISO 8601 string comparison):
-   - Local newer → upload (PATCH if `drive_file_id` exists, POST if new).
-   - Cloud newer → download from Drive to local path.
-   - Equal → skip.
-8. Per path: download cloud-only files (present in `SyncMeta` but not locally).
-9. Per path: upload updated `.sync-meta.json` with new file entries.
-10. Accumulate totals across all paths; update `GameEntry.last_local_modified`, `last_cloud_modified`, and `cloud_storage_bytes` (sum across all paths).
+7. Per path: `load_local_tracker(app, user_id, game_id, i)` → `LocalSyncState`.
+8. **Per-file delta comparison** using `meta_lookup` (cloud SyncMeta) and `tracker_lookup` (last-known local state):
+   - `local_changed = tracker_entry.is_none() || mtime != tracker.modified_time || size != tracker.size`
+   - `cloud_newer = cloud_entry.modified_time > tracker_entry.modified_time` (both non-empty)
+   - Decision matrix:
+     | `local_changed` | `cloud_newer` | Action |
+     |---|---|---|
+     | true | true | **Conflict** → compare absolute timestamps → newer wins (upload or download) |
+     | true | false | Upload local → Drive |
+     | false | true | Download Drive → local |
+     | false | false | Skip (no-op) |
+9. Per path: handle cloud-only files (present in `SyncMeta.files` but absent locally):
+   - If tracker has a record AND cloud timestamp ≤ last-known tracker timestamp → **skip** (user deleted the file locally).
+   - Otherwise → download (new cloud file never seen locally, or cloud has a newer version).
+10. Per path: upload updated `.sync-meta.json` with `modified_time` populated on every `SyncFileEntry`.
+11. Per path: **re-scan** the save directory to capture post-sync file states (downloaded files get OS-assigned mtimes); save `LocalSyncState` to disk.
+12. Accumulate totals across all paths; update `GameEntry.last_cloud_modified` and `cloud_storage_bytes` (sum across all paths).
 
 ### Conflict Resolution
 
-**Newest wins**, per file, by ISO 8601 timestamp comparison. No manual conflict resolution—the most recently modified version always takes precedence.
+**Newest wins**, per file, by ISO 8601 timestamp comparison. When both local and cloud have changed since the last sync, whichever absolute timestamp is later takes precedence. No manual conflict resolution UI required.
+
+### Local Tracker Helpers (private, sync.rs)
+
+```rust
+fn local_tracker_path(app, user_id, game_id, path_index) -> PathBuf
+fn load_local_tracker(app, user_id, game_id, path_index) -> LocalSyncState  // empty default on first sync
+fn save_local_tracker(app, user_id, state: &LocalSyncState) -> Result<(), String>
+```
+
+Tracker files are saved/updated after every call to `sync_single_path`, `restore_from_cloud_inner`, and `push_to_cloud_inner`. Tracker writes are skipped when `user_id` is empty.
 
 ### Path Normalization
 
@@ -647,6 +694,39 @@ pub struct SyncResult {
 }
 ```
 
+### SyncFileEntry (in SyncMeta.files)
+
+```rust
+pub struct SyncFileEntry {
+    pub path_file: String,              // relative path (forward slashes)
+    pub size: u64,
+    pub drive_file_id: Option<String>,
+    #[serde(default)]
+    pub modified_time: Option<String>,  // local file mtime (ISO 8601) at last upload. None on old records.
+}
+```
+
+Old `.sync-meta.json` files without `modified_time` deserialise as `None` via `#[serde(default)]` (backward-compatible). Always populate `modified_time` when writing new `SyncFileEntry` values.
+
+### LocalSyncState / LocalFileRecord (local tracker — never synced)
+
+```rust
+pub struct LocalSyncState {
+    pub game_id: String,
+    pub path_index: usize,
+    pub last_updated: String,       // ISO 8601
+    pub files: Vec<LocalFileRecord>,
+}
+
+pub struct LocalFileRecord {
+    pub path_file: String,     // relative path (forward slashes)
+    pub size: u64,
+    pub modified_time: String, // OS mtime at last sync (ISO 8601)
+}
+```
+
+Stored at `{app_data_dir}/local-sync-{user_id}/{game_id}-p{path_index}.json`. Never uploaded to Drive or Firestore. Used exclusively by the delta-sync comparison in `sync.rs`.
+
 ### SaveInfo / PathSaveInfo (Rust → TypeScript)
 
 Returned by `get_save_info`. Aggregates files from **all** configured save paths.
@@ -811,9 +891,9 @@ Calls `gdrive::list_drive_items_recursive(app, &folder_id, "")` to walk the enti
 
 | Command | Behaviour |
 |---------|----------|
-| `sync_game` | Auto — newest file wins per-file timestamp comparison |
-| `restore_from_cloud` | Force-download ALL Drive files unconditionally; local-only files left untouched |
-| `push_to_cloud` | Force-upload ALL local files unconditionally; cloud-only files left in Drive |
+| `sync_game` | Delta-sync — per-file three-way comparison (local tracker + cloud SyncMeta) |
+| `restore_from_cloud` | Force-download ALL Drive files unconditionally; local-only files left untouched; tracker updated post-restore |
+| `push_to_cloud` | Force-upload ALL local files unconditionally; cloud-only files left in Drive; tracker updated post-push |
 
 All three emit `"sync-started"` / `"sync-completed"` / `"sync-error"` events and return `SyncResult`.
 
