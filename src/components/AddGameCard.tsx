@@ -8,7 +8,7 @@ import { z } from "zod";
 import { useAddGameMutation } from "../queries";
 import type { AddGamePayload } from "../types/dashboard";
 import { norm, msg } from "../utils";
-import { uploadGameLogo } from "../services/tauri";
+import { contractPath, uploadGameLogo } from "../services/tauri";
 import { CARD, FIELD_ERROR, FORM_GRID, FORM_LABEL, INPUT_CLS, INPUT_ROW, LABEL_SPAN, PRIMARY_BTN, SEC_HDR, SECONDARY_BTN } from "./styles";
 
 const addGameSchema = z.object({
@@ -17,14 +17,19 @@ const addGameSchema = z.object({
   thumbnail: z.string().nullable(),
   source: z.enum(["manual", "emulator"]),
   savePath: z.string().nullable(),
-}) satisfies z.ZodType<AddGamePayload>;
+  pathMode: z.enum(["auto", "per_device"]),
+  exePath: z.string().nullable(),
+}) satisfies z.ZodType<Required<AddGamePayload>>;
 
-const DEFAULT_VALUES: AddGamePayload = {
+const DEFAULT_VALUES: Required<AddGamePayload> = {
   name: "",
   description: null,
   thumbnail: null,
   source: "manual",
   savePath: null,
+  exeName: null,
+  pathMode: "auto",
+  exePath: null,
 };
 
 export function AddGameCard() {
@@ -35,7 +40,7 @@ export function AddGameCard() {
     reset,
     watch,
     formState: { errors },
-  } = useForm<AddGamePayload>({
+  } = useForm<Required<AddGamePayload>>({
     defaultValues: DEFAULT_VALUES,
     resolver: zodResolver(addGameSchema),
   });
@@ -45,10 +50,23 @@ export function AddGameCard() {
 
   const thumbnail = watch("thumbnail");
   const savePath = watch("savePath");
+  const exePath = watch("exePath");
 
   async function handleBrowseSave() {
     const p = await open({ directory: true, multiple: false, title: "Choose the save game folder" });
     if (typeof p === "string") setValue("savePath", p);
+  }
+
+  async function handleBrowseExe() {
+    const p = await open({
+      multiple: false,
+      title: "Choose the game executable",
+      filters: [{ name: "Executable", extensions: ["exe"] }],
+    });
+    if (typeof p === "string") {
+      const portable = await contractPath(p);
+      setValue("exePath", portable);
+    }
   }
 
   async function handleBrowseThumbnail() {
@@ -68,6 +86,8 @@ export function AddGameCard() {
       thumbnail: norm(values.thumbnail),
       source: values.source,
       savePath: norm(values.savePath),
+      pathMode: values.pathMode,
+      exePath: norm(values.exePath),
     };
     const data = await addMutation.mutateAsync(payload);
     const added = data.games.find((g) => g.name.toLowerCase() === payload.name.toLowerCase());
@@ -140,6 +160,29 @@ export function AddGameCard() {
           <div className={INPUT_ROW}>
             <input className={INPUT_CLS} {...register("savePath")} value={savePath ?? ""} placeholder="Choose the save game folder" />
             <button type="button" className={SECONDARY_BTN} onClick={handleBrowseSave}>
+              Browse
+            </button>
+          </div>
+        </label>
+
+        <label className={FORM_LABEL}>
+          <span className={LABEL_SPAN}>Path type</span>
+          <select className={INPUT_CLS} {...register("pathMode")}>
+            <option value="auto">Auto — portable paths shared across devices</option>
+            <option value="per_device">Per device — path stored locally on each machine</option>
+          </select>
+        </label>
+
+        <label className={FORM_LABEL}>
+          <span className={LABEL_SPAN}>Executable path (optional)</span>
+          <div className={INPUT_ROW}>
+            <input
+              className={INPUT_CLS}
+              {...register("exePath")}
+              value={exePath ?? ""}
+              placeholder="Browse or paste the .exe path (e.g. %PROGRAMFILES%\…)"
+            />
+            <button type="button" className={SECONDARY_BTN} onClick={handleBrowseExe}>
               Browse
             </button>
           </div>

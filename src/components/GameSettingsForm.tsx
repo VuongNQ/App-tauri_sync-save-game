@@ -40,8 +40,7 @@ const gameSettingsSchema = z.object({
       (v) => !v || v.startsWith("https://") || v.startsWith("http://") || /^[A-Za-z]:[\\/]/.test(v),
       "Enter a valid image URL (https://…) or browse a local file."
     ),
-  description: z.string().max(1000, "Description must be 1000 characters or fewer."),
-  savePaths: z.array(savePathEntrySchema),
+  description: z.string().max(1000, "Description must be 1000 characters or fewer."),  pathMode: z.enum(["auto", "per_device"]),  savePaths: z.array(savePathEntrySchema),
   exeName: z.string().max(260, "Executable name must be 260 characters or fewer."),
   exePath: z.string().optional().nullable(),
   trackChanges: z.boolean(),
@@ -80,6 +79,7 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
     defaultValues: {
       thumbnail: gameSettings?.thumbnail ?? "",
       description: gameSettings?.description ?? "",
+      pathMode: gameSettings?.pathMode ?? "auto",
       savePaths: (gameSettings?.savePaths ?? []).map((e) => ({ ...e, path: e.path ?? "", gdriveFolderId: e.gdriveFolderId ?? null })),
       exeName: gameSettings?.exeName ?? "",
       exePath: gameSettings?.exePath ?? "",
@@ -96,6 +96,7 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
     reset({
       thumbnail: gameSettings?.thumbnail ?? "",
       description: gameSettings?.description ?? "",
+      pathMode: gameSettings?.pathMode ?? "auto",
       savePaths: (gameSettings?.savePaths ?? []).map((e) => ({ ...e, path: e.path ?? "", gdriveFolderId: e.gdriveFolderId ?? null })),
       exeName: gameSettings?.exeName ?? "",
       exePath: gameSettings?.exePath ?? "",
@@ -130,6 +131,7 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
       ...gameSettings,
       thumbnail: src || null,
       description: trimmed || null,
+      pathMode: values.pathMode,
       savePaths: values.savePaths.map((entry) => ({
         label: entry.label,
         path: norm(entry.path),
@@ -297,11 +299,21 @@ interface SavePathsSectionProps {
 }
 
 function SavePathsSection({ game, isSyncing, isPathInvalid }: SavePathsSectionProps) {
-  const { control } = useFormContext<GameSettingsFormValues>();
+  const { control, setValue } = useFormContext<GameSettingsFormValues>();
   const { fields, append, remove } = useFieldArray({ control, name: "savePaths" });
+  const pathMode = useWatch({ control, name: "pathMode" });
 
   function handleAdd() {
     append({ label: `Save Folder ${fields.length + 1}`, path: "", gdriveFolderId: null, syncExcludes: [] });
+  }
+
+  function handleModeChange(newMode: "auto" | "per_device") {
+    if (newMode === pathMode) return;
+    setValue("pathMode", newMode, { shouldDirty: true });
+    // Clear all path fields — each device must set its own path after switching modes.
+    fields.forEach((_, i) => {
+      setValue(`savePaths.${i}.path`, "", { shouldDirty: true });
+    });
   }
 
   return (
@@ -311,6 +323,42 @@ function SavePathsSection({ game, isSyncing, isPathInvalid }: SavePathsSectionPr
         <button type="button" className={SECONDARY_BTN} onClick={handleAdd} disabled={isSyncing}>
           + Add save path
         </button>
+      </div>
+
+      {/* Path mode selector */}
+      <div className="mb-4 flex flex-col gap-2">
+        <span className="text-xs font-medium text-[#9aa8c7]">Path storage mode</span>
+        <div className="flex rounded-xl bg-[rgba(255,255,255,0.05)] border border-[rgba(165,185,255,0.1)] p-1 gap-1 w-fit">
+          <button
+            type="button"
+            onClick={() => handleModeChange("auto")}
+            disabled={isSyncing}
+            className={`px-4 py-1.5 rounded-[10px] text-sm font-medium transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed ${
+              pathMode === "auto"
+                ? "bg-[rgba(109,125,255,0.35)] text-[#d0d8ff]"
+                : "text-[#9aa8c7] hover:text-[#c7d3f7]"
+            }`}
+          >
+            Automatic
+          </button>
+          <button
+            type="button"
+            onClick={() => handleModeChange("per_device")}
+            disabled={isSyncing}
+            className={`px-4 py-1.5 rounded-[10px] text-sm font-medium transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed ${
+              pathMode === "per_device"
+                ? "bg-[rgba(109,125,255,0.35)] text-[#d0d8ff]"
+                : "text-[#9aa8c7] hover:text-[#c7d3f7]"
+            }`}
+          >
+            Per device
+          </button>
+        </div>
+        <p className="m-0 text-xs text-[#9aa8c7]">
+          {pathMode === "per_device"
+            ? "Each device sets its own path locally — paths are not shared across machines."
+            : "Paths use portable tokens (e.g. %USERPROFILE%) and are shared across all devices."}
+        </p>
       </div>
 
       {fields.length === 0 && (
@@ -328,12 +376,13 @@ function SavePathsSection({ game, isSyncing, isPathInvalid }: SavePathsSectionPr
         </div>
       )}
 
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col">
         {fields.map((field, index) => (
           <SavePathCard
             key={field.id}
             index={index}
             game={game}
+            pathMode={pathMode}
             isSyncing={isSyncing}
             onRemove={() => remove(index)}
             canRemove={fields.length > 1}
@@ -349,12 +398,13 @@ function SavePathsSection({ game, isSyncing, isPathInvalid }: SavePathsSectionPr
 interface SavePathCardProps {
   index: number;
   game: GameEntry;
+  pathMode: "auto" | "per_device";
   isSyncing: boolean;
   onRemove: () => void;
   canRemove: boolean;
 }
 
-function SavePathCard({ index, game, isSyncing, onRemove, canRemove }: SavePathCardProps) {
+function SavePathCard({ index, game, pathMode, isSyncing, onRemove, canRemove }: SavePathCardProps) {
   const { control, setValue } = useFormContext<GameSettingsFormValues>();
   const currentPath = useWatch({ control, name: `savePaths.${index}.path` });
   const isPathEmpty = !currentPath;
@@ -381,7 +431,7 @@ function SavePathCard({ index, game, isSyncing, onRemove, canRemove }: SavePathC
   }
 
   return (
-    <div className="rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] p-4 flex flex-col gap-3">
+    <div className="flex flex-col gap-3 py-4 border-b border-white/8 last:border-b-0">
       <div className="flex items-center justify-between gap-2">
         <Controller
           name={`savePaths.${index}.label`}
@@ -421,7 +471,14 @@ function SavePathCard({ index, game, isSyncing, onRemove, canRemove }: SavePathC
         control={control}
         render={({ field }) => (
           <label className={FORM_LABEL}>
-            <span className={LABEL_SPAN}>Folder path</span>
+            <span className="text-[#c7d3f7] text-[0.92rem] flex items-center gap-2">
+              Folder path
+              {pathMode === "per_device" && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.72rem] bg-[rgba(109,125,255,0.15)] text-[#9daeff] border border-[rgba(109,125,255,0.22)]">
+                  Device path
+                </span>
+              )}
+            </span>
             <div className={INPUT_ROW}>
               <input className={INPUT_CLS} {...field} placeholder="Choose or enter the save folder path" />
               <button type="button" className={SECONDARY_BTN} onClick={handleBrowse} disabled={isSyncing}>

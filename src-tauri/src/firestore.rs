@@ -148,6 +148,17 @@ pub fn delete_game(app: &AppHandle, user_id: &str, game_id: &str) -> Result<(), 
     Ok(())
 }
 
+/// Delete a game's SyncMeta document from Firestore. Returns `Ok(())` on 404 (idempotent).
+pub fn delete_sync_meta(app: &AppHandle, user_id: &str, game_id: &str) -> Result<(), String> {
+    let url = format!("{}/users/{user_id}/syncMeta/{game_id}", base_url());
+    let (status, resp_body) = http_client::authed_delete(app, &url)?;
+    if status != 200 && status != 204 && status != 404 {
+        return Err(format!("[firestore] delete_sync_meta HTTP {status}: {resp_body}"));
+    }
+    println!("[firestore] Deleted syncMeta '{game_id}' for user {user_id}");
+    Ok(())
+}
+
 /// Load all game documents from `users/{user_id}/games`.
 /// Returns an empty `Vec` if the collection doesn't exist yet.
 pub fn load_all_games(app: &AppHandle, user_id: &str) -> Result<Vec<GameEntry>, String> {

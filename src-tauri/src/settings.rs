@@ -3,6 +3,7 @@ use std::{fs, path::PathBuf};
 use tauri::{AppHandle, Manager};
 
 use crate::{
+    devices::get_machine_device_id,
     firestore,
     models::{AddGamePayload, AppSettings, GameEntry, PathValidation, SavePathEntry, StoredState},
 };
@@ -12,25 +13,23 @@ use crate::{
 /// Return the effective save paths for all `save_paths` entries at runtime.
 /// For each entry, `path_overrides` / `path_overrides_indexed` (device-specific) take priority.
 /// Returns the raw unexpanded paths — call `expand_env_vars` before filesystem use.
+///
+/// Key format depends on `GameEntry.path_mode`:
+/// - `"auto"`: key = `"{game_id}"` (index 0) or `"{game_id}:{i}"` (index i≥1)
+/// - `"per_device"`: key = `"{game_id}:{device_id}"` (index 0) or `"{game_id}:{device_id}:{i}"` (index i≥1)
 pub fn effective_save_paths(game: &GameEntry, settings: &AppSettings) -> Vec<Option<String>> {
+    let device_id = get_machine_device_id().unwrap_or_else(|| "unknown".to_string());
     game.save_paths
         .iter()
         .enumerate()
         .map(|(i, entry)| {
-            if i == 0 {
-                settings
-                    .path_overrides
-                    .get(&game.id)
-                    .cloned()
-                    .or_else(|| entry.path.clone())
+            let key = build_override_key(&game.id, &game.path_mode, i, &device_id);
+            let override_val = if i == 0 {
+                settings.path_overrides.get(&key).cloned()
             } else {
-                let key = format!("{}:{}", game.id, i);
-                settings
-                    .path_overrides_indexed
-                    .get(&key)
-                    .cloned()
-                    .or_else(|| entry.path.clone())
-            }
+                settings.path_overrides_indexed.get(&key).cloned()
+            };
+            override_val.or_else(|| entry.path.clone())
         })
         .collect()
 }
@@ -46,13 +45,16 @@ pub fn effective_save_path(game: &GameEntry, settings: &AppSettings) -> Option<S
 /// Merge device-specific path overrides into each `save_paths` entry **in place** (transient).
 /// Must be called before every `DashboardData` response so the frontend always sees
 /// the effective save path, regardless of whether it is portable or device-specific.
+///
+/// Uses device-ID-keyed lookups for `per_device` games and plain game-ID keys for `auto` games.
 pub fn apply_path_overrides(games: &mut Vec<GameEntry>, settings: &AppSettings) {
+    let device_id = get_machine_device_id().unwrap_or_else(|| "unknown".to_string());
     for game in games.iter_mut() {
         for (i, entry) in game.save_paths.iter_mut().enumerate() {
+            let key = build_override_key(&game.id, &game.path_mode, i, &device_id);
             let override_path = if i == 0 {
-                settings.path_overrides.get(&game.id).cloned()
+                settings.path_overrides.get(&key).cloned()
             } else {
-                let key = format!("{}:{}", game.id, i);
                 settings.path_overrides_indexed.get(&key).cloned()
             };
             if let Some(p) = override_path {
@@ -87,38 +89,99 @@ fn route_save_path_at(
     }
 }
 
+/// Build the `path_overrides` / `path_overrides_indexed` map key for a save-path at `index`.
+///
+/// Key formats:
+/// - "auto"       index 0:  `"{game_id}"`
+/// - "auto"       index i≥1: `"{game_id}:{i}"`            (in `path_overrides_indexed`)
+/// - "per_device" index 0:  `"{game_id}:{device_id}"`
+/// - "per_device" index i≥1: `"{game_id}:{device_id}:{i}"` (in `path_overrides_indexed`)
+fn build_override_key(game_id: &str, path_mode: &str, index: usize, device_id: &str) -> String {
+    if path_mode == "per_device" {
+        if index == 0 {
+            format!("{game_id}:{device_id}")
+        } else {
+            format!("{game_id}:{device_id}:{index}")
+        }
+    } else if index == 0 {
+        game_id.to_string()
+    } else {
+        format!("{game_id}:{index}")
+    }
+}
+
+/// Return whether a `path_overrides_indexed` key is stale (its index ≥ `new_len`).
+/// Handles both "auto" (`"{game_id}:{i}"`) and "per_device" (`"{game_id}:{device_id}:{i}"`) formats.
+fn is_stale_indexed_override(
+    key: &str,
+    game_id: &str,
+    new_len: usize,
+    path_mode: &str,
+    device_id: &str,
+) -> bool {
+    if path_mode == "per_device" {
+        let prefix = format!("{game_id}:{device_id}:");
+        if let Some(idx_str) = key.strip_prefix(&prefix) {
+            return idx_str.parse::<usize>().map_or(false, |idx| idx >= new_len);
+        }
+        false
+    } else {
+        match key.split_once(':') {
+            Some((id, idx_str)) if id == game_id => {
+                idx_str.parse::<usize>().map_or(false, |idx| idx >= new_len)
+            }
+            _ => false,
+        }
+    }
+}
+
 /// Route every `SavePathEntry.path` in the game's `save_paths` list to the correct
 /// storage bucket and remove overrides for indices that no longer exist.
+///
+/// - `"auto"` mode: portable `%VAR%` paths stay in `entry.path`; absolute paths go to overrides.
+/// - `"per_device"` mode: all paths go to device-local overrides keyed by device ID;
+///   `entry.path` is always `None` (never written to Firestore).
 fn route_save_paths(
     save_paths: &mut Vec<SavePathEntry>,
     game_id: &str,
     settings: &mut AppSettings,
+    path_mode: &str,
 ) {
+    let device_id = get_machine_device_id().unwrap_or_else(|| "unknown".to_string());
     for (i, entry) in save_paths.iter_mut().enumerate() {
         let normalized = normalize_optional_path(entry.path.clone());
-        if i == 0 {
-            entry.path = route_save_path_at(normalized, game_id, &mut settings.path_overrides);
+        let key = build_override_key(game_id, path_mode, i, &device_id);
+        if path_mode == "per_device" {
+            // Per-device: always store locally under a device-ID-keyed key.
+            if i == 0 {
+                match normalized {
+                    Some(p) => { settings.path_overrides.insert(key, p); }
+                    None => { settings.path_overrides.remove(&key); }
+                }
+            } else {
+                match normalized {
+                    Some(p) => { settings.path_overrides_indexed.insert(key, p); }
+                    None => { settings.path_overrides_indexed.remove(&key); }
+                }
+            }
+            entry.path = None;
         } else {
-            let key = format!("{game_id}:{i}");
-            entry.path =
-                route_save_path_at(normalized, &key, &mut settings.path_overrides_indexed);
+            // "auto" mode: portable paths stay in entry, absolute paths go to overrides.
+            if i == 0 {
+                entry.path = route_save_path_at(normalized, &key, &mut settings.path_overrides);
+            } else {
+                entry.path =
+                    route_save_path_at(normalized, &key, &mut settings.path_overrides_indexed);
+            }
         }
     }
-    // Remove stale indexed overrides for indices >= new length.
+    // Remove stale indexed overrides for indices >= new save_paths length.
     let len = save_paths.len();
+    let device_id_ref = device_id.as_str();
     let stale_keys: Vec<String> = settings
         .path_overrides_indexed
         .keys()
-        .filter(|k| {
-            if let Some((id, idx_str)) = k.split_once(':') {
-                if id == game_id {
-                    if let Ok(idx) = idx_str.parse::<usize>() {
-                        return idx >= len;
-                    }
-                }
-            }
-            false
-        })
+        .filter(|k| is_stale_indexed_override(k, game_id, len, path_mode, device_id_ref))
         .cloned()
         .collect();
     for k in stale_keys {
@@ -182,6 +245,15 @@ pub fn load_state(app: &AppHandle) -> Result<StoredState, String> {
         }
     }
 
+    // One-time migration (pass 3): for per-device games, upgrade plain game-ID override keys
+    // to device-ID-keyed keys ("game_id:device_id") so paths are unambiguously per-device.
+    if migrate_per_device_override_keys(&mut state) {
+        println!("[settings] Migrated per-device override keys to include device ID");
+        if let Err(e) = save_state(app, &state) {
+            eprintln!("[settings] Per-device key migration save failed: {e}");
+        }
+    }
+
     Ok(state)
 }
 
@@ -222,7 +294,7 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
         gdrive_folder_id: None,
         sync_excludes: vec![],
     }];
-    route_save_paths(&mut save_paths, &id, &mut state.settings);
+    route_save_paths(&mut save_paths, &id, &mut state.settings, &payload.path_mode);
 
     let game = GameEntry {
         id,
@@ -233,13 +305,14 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
         save_paths,
         save_path: None,
         exe_name: None,
-        exe_path: None,
+        exe_path: payload.exe_path,
         track_changes: false,
         auto_sync: false,
         last_local_modified: None,
         last_cloud_modified: None,
         gdrive_folder_id: None,
         cloud_storage_bytes: None,
+        path_mode: payload.path_mode,
         sync_excludes: vec![],
     };
 
@@ -256,6 +329,10 @@ pub fn remove_game(app: &AppHandle, game_id: &str) -> Result<(), String> {
     if state.games.len() == before {
         return Err(format!("Game not found: {game_id}"));
     }
+    // Clean up all device-specific path overrides for this game.
+    let prefix = format!("{game_id}:");
+    state.settings.path_overrides.retain(|k, _| k != game_id && !k.starts_with(&prefix));
+    state.settings.path_overrides_indexed.retain(|k, _| !k.starts_with(&prefix));
     save_state(app, &state)?;
     spawn_firestore_game_delete(app, game_id.to_string());
     Ok(())
@@ -266,8 +343,9 @@ pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
     let game_id = game.id.clone();
     let normalized_exe_path = normalize_optional_path(game.exe_path);
 
+    let path_mode = game.path_mode.clone();
     let mut save_paths = game.save_paths.clone();
-    route_save_paths(&mut save_paths, &game_id, &mut state.settings);
+    route_save_paths(&mut save_paths, &game_id, &mut state.settings, &path_mode);
 
     let normalized = GameEntry {
         save_paths,
@@ -458,7 +536,12 @@ fn spawn_firestore_game_upsert(app: &AppHandle, game: GameEntry) {
 /// Delete a single game from Firestore in a background thread.
 fn spawn_firestore_game_delete(app: &AppHandle, game_id: String) {
     spawn_firestore_task(app, move |app, user_id| {
-        firestore::delete_game(app, user_id, &game_id)
+        firestore::delete_game(app, user_id, &game_id)?;
+        // Also delete the game's syncMeta document (best-effort — idempotent on 404).
+        if let Err(e) = firestore::delete_sync_meta(app, user_id, &game_id) {
+            eprintln!("[firestore] delete_sync_meta for '{game_id}' failed: {e}");
+        }
+        Ok(())
     });
 }
 
@@ -638,6 +721,72 @@ fn migrate_save_paths_to_vec(state: &mut StoredState) -> bool {
             migrated = true;
         }
     }
+    migrated
+}
+
+/// One-time migration (pass 3): upgrade per-device override keys from the old
+/// device-agnostic format (`"{game_id}"` / `"{game_id}:{i}"`) to the new
+/// device-ID-keyed format (`"{game_id}:{device_id}"` / `"{game_id}:{device_id}:{i}"`).
+///
+/// Only per-device games are touched; "auto" game keys are left unchanged.
+/// Returns `true` when at least one key was migrated (caller should persist state).
+fn migrate_per_device_override_keys(state: &mut StoredState) -> bool {
+    let device_id = match get_machine_device_id() {
+        Some(id) => id,
+        None => return false, // Non-Windows or registry unavailable — skip.
+    };
+
+    let per_device_ids: Vec<String> = state
+        .games
+        .iter()
+        .filter(|g| g.path_mode == "per_device")
+        .map(|g| g.id.clone())
+        .collect();
+
+    let mut migrated = false;
+
+    for game_id in &per_device_ids {
+        // ── Index 0: path_overrides ────────────────────────────────────────
+        // Old key: "{game_id}"  →  New key: "{game_id}:{device_id}"
+        let new_key_0 = format!("{game_id}:{device_id}");
+        if !state.settings.path_overrides.contains_key(&new_key_0) {
+            if let Some(path) = state.settings.path_overrides.remove(game_id.as_str()) {
+                state.settings.path_overrides.insert(new_key_0, path);
+                migrated = true;
+            }
+        }
+
+        // ── Index ≥1: path_overrides_indexed ──────────────────────────────
+        // Old key: "{game_id}:{i}"  →  New key: "{game_id}:{device_id}:{i}"
+        // Identify old-format keys: id matches, remainder is a bare integer.
+        let old_indexed: Vec<(String, usize)> = state
+            .settings
+            .path_overrides_indexed
+            .keys()
+            .filter_map(|k| {
+                let (id, rest) = k.split_once(':')?;
+                if id != game_id.as_str() {
+                    return None;
+                }
+                // Old format has a bare integer after the colon.
+                // New format has device_id:i — device_id contains hyphens and hex chars,
+                // not parseable as usize, so this filter is unambiguous.
+                let idx = rest.parse::<usize>().ok()?;
+                Some((k.clone(), idx))
+            })
+            .collect();
+
+        for (old_key, idx) in old_indexed {
+            let new_key = format!("{game_id}:{device_id}:{idx}");
+            if !state.settings.path_overrides_indexed.contains_key(&new_key) {
+                if let Some(path) = state.settings.path_overrides_indexed.remove(&old_key) {
+                    state.settings.path_overrides_indexed.insert(new_key, path);
+                    migrated = true;
+                }
+            }
+        }
+    }
+
     migrated
 }
 

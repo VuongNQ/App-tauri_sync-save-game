@@ -1,5 +1,6 @@
 ﻿use std::{
     fs,
+    io,
     path::Path,
 };
 
@@ -536,19 +537,17 @@ pub fn download_file(app: &AppHandle, file_id: &str, local_dest: &Path) -> Resul
         ));
     }
 
-    // Read response body as bytes
-    let bytes = resp
-        .into_body()
-        .read_to_vec()
-        .map_err(|e| format!("Failed to read download body: {e}"))?;
-
     if let Some(parent) = local_dest.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Cannot create directory {}: {e}", parent.display()))?;
     }
 
-    fs::write(local_dest, &bytes)
-        .map_err(|e| format!("Cannot write file {}: {e}", local_dest.display()))?;
+    // Stream response directly to disk — avoids ureq's 10 MB in-memory body limit.
+    let mut file = fs::File::create(local_dest)
+        .map_err(|e| format!("Cannot create file {}: {e}", local_dest.display()))?;
+    let mut reader = resp.into_body().into_reader();
+    io::copy(&mut reader, &mut file)
+        .map_err(|e| format!("Failed to read download body: {e}"))?;
 
     println!(
         "[gdrive] Downloaded {file_id} → {}",

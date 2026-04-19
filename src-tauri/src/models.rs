@@ -69,6 +69,15 @@ pub struct GameEntry {
     /// Updated after each successful sync. Used to enforce per-user storage quotas.
     #[serde(default)]
     pub cloud_storage_bytes: Option<u64>,
+    /// Save-path mode for this game.
+    /// - `"auto"` (default): portable `%VAR%` token paths shared across devices.
+    /// - `"per_device"`: each machine stores its own path in local overrides; `save_paths[i].path` is always `None` in Firestore.
+    #[serde(default = "default_path_mode")]
+    pub path_mode: String,
+}
+
+fn default_path_mode() -> String {
+    "auto".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +88,12 @@ pub struct AddGamePayload {
     pub thumbnail: Option<String>,
     pub source: String,
     pub save_path: Option<String>,
+    /// Full path to the game executable (tokenised, e.g. `%PROGRAMFILES%\…`). Optional at creation.
+    #[serde(default)]
+    pub exe_path: Option<String>,
+    /// Save-path mode: `"auto"` (default) or `"per_device"`.
+    #[serde(default = "default_path_mode")]
+    pub path_mode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

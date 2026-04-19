@@ -26,6 +26,12 @@ export interface GameEntry {
   gdriveFolderId: string | null;
   /** Total bytes stored in Google Drive for this game's save files. */
   cloudStorageBytes: number | null;
+  /**
+   * Save-path mode for this game.
+   * - `"auto"` (default): portable `%VAR%` token paths shared across devices.
+   * - `"per_device"`: each machine stores its own path locally; not shared via Firestore.
+   */
+  pathMode: "auto" | "per_device";
 }
 
 export interface DashboardData {
@@ -39,6 +45,10 @@ export interface AddGamePayload {
   source: GameSource;
   savePath: string | null;
   exeName?: string | null;
+  /** Full path to the game executable (tokenised). Optional at creation. */
+  exePath?: string | null;
+  /** Save-path mode: "auto" = portable shared paths; "per_device" = device-specific local paths. */
+  pathMode?: "auto" | "per_device";
 }
 
 export interface UpdateGamePayload {
