@@ -436,6 +436,7 @@ pub fn restore_version_backup(
             path_file: item.name.clone(),
             size: item.size.unwrap_or(0),
             drive_file_id: Some(item.id.clone()),
+            modified_time: None,
         });
     }
     let (_, meta_id) = gdrive::download_sync_meta(app, &game_folder_id)?;

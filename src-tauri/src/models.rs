@@ -293,6 +293,11 @@ pub struct SyncFileEntry {
     pub path_file: String,
     pub size: u64,
     pub drive_file_id: Option<String>,
+    /// ISO 8601 UTC timestamp of the file's last modification at the time it was
+    /// last synced. Used for delta-sync: comparison is against the local tracker,
+    /// not Drive's upload time. `None` on old entries (pre delta-sync upgrade).
+    #[serde(default)]
+    pub modified_time: Option<String>,
 }
 
 /// Deserialize `SyncMeta.files` from either:
@@ -340,6 +345,7 @@ where
                 path_file: e.relative_path,
                 size: e.size,
                 drive_file_id: e.drive_file_id,
+                modified_time: None,
             })
             .collect()),
         Format::Old(map) => Ok(map
@@ -348,9 +354,36 @@ where
                 path_file: rel,
                 size: meta.size,
                 drive_file_id: meta.drive_file_id,
+                modified_time: None,
             })
             .collect()),
     }
+}
+
+/// Per-device, per-game, per-path tracker of the last known local file states.
+/// Persisted at `{app_data_dir()}/local-sync-{user_id}/{game_id}-p{i}.json`.
+/// Used for delta-sync: detects which files changed locally since the last sync.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalSyncState {
+    pub game_id: String,
+    pub path_index: usize,
+    /// ISO 8601 UTC timestamp when this tracker was last written.
+    pub last_updated: String,
+    /// Snapshot of each tracked file's state at the time of the last sync.
+    pub files: Vec<LocalFileRecord>,
+}
+
+/// Snapshot of a single file's state at the time of the last successful sync.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalFileRecord {
+    /// Relative path within the save folder (forward slashes).
+    pub path_file: String,
+    /// File size in bytes.
+    pub size: u64,
+    /// ISO 8601 UTC timestamp of the file's last modification at the time of last sync.
+    pub modified_time: String,
 }
 
 /// Diff between local save files and Drive sync metadata.
