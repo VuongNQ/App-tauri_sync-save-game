@@ -17,11 +17,12 @@ const addGameSchema = z.object({
   thumbnail: z.string().nullable(),
   source: z.enum(["manual", "emulator"]),
   savePath: z.string().nullable(),
-  pathMode: z.enum(["auto", "per_device"]),
-  exePath: z.string().nullable(),
-}) satisfies z.ZodType<Required<AddGamePayload>>;
+  exeName: z.string().nullable().optional(),
+  pathMode: z.enum(["auto", "per_device"]).optional(),
+  exePath: z.string().nullable().optional(),
+}) satisfies z.ZodType<AddGamePayload>;
 
-const DEFAULT_VALUES: Required<AddGamePayload> = {
+const DEFAULT_VALUES: AddGamePayload = {
   name: "",
   description: null,
   thumbnail: null,
@@ -40,7 +41,7 @@ export function AddGameCard() {
     reset,
     watch,
     formState: { errors },
-  } = useForm<Required<AddGamePayload>>({
+  } = useForm<AddGamePayload>({
     defaultValues: DEFAULT_VALUES,
     resolver: zodResolver(addGameSchema),
   });
