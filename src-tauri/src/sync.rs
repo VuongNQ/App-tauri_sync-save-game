@@ -408,6 +408,8 @@ fn sync_single_path(
                         });
                         downloaded += 1;
                     } else {
+                        // Drive file is gone — remove stale sync-meta entry; local copy kept.
+                        new_meta.files.retain(|f| f.path_file != local.relative_path);
                         skipped += 1;
                     }
                 } else {
@@ -458,6 +460,8 @@ fn sync_single_path(
                     });
                     downloaded += 1;
                 } else {
+                    // Drive file is gone — remove stale sync-meta entry; local copy kept.
+                    new_meta.files.retain(|f| f.path_file != local.relative_path);
                     skipped += 1;
                 }
             } else {
@@ -479,8 +483,10 @@ fn sync_single_path(
         let last_known_ts = tracker_entry.map(|t| t.modified_time.as_str()).unwrap_or("");
 
         // If we've seen this file before and cloud hasn't changed since then, the user
-        // likely deleted it locally — skip to avoid re-downloading a deliberately deleted file.
+        // likely deleted it locally — remove the ghost entry from new_meta so it no longer
+        // appears in .sync-meta.json or Firestore after this sync.
         if tracker_entry.is_some() && (cloud_ts.is_empty() || cloud_ts <= last_known_ts) {
+            new_meta.files.retain(|f| f.path_file != entry.path_file);
             skipped += 1;
             continue;
         }
@@ -505,6 +511,11 @@ fn sync_single_path(
                     modified_time: entry.modified_time.clone(),
                 });
                 downloaded += 1;
+            } else {
+                // Drive file is truly gone — remove the stale sync-meta entry so it
+                // doesn't cause repeated download attempts on every subsequent sync.
+                new_meta.files.retain(|f| f.path_file != entry.path_file);
+                skipped += 1;
             }
         }
     }

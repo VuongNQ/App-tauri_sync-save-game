@@ -127,9 +127,20 @@ pub fn rename_game_drive_file(
         let folder_id = require_game_folder(app, game_id)?;
         let (meta_opt, meta_id) = gdrive::download_sync_meta(app, &folder_id)?;
         if let Some(mut meta) = meta_opt {
-        if let Some(pos) = meta.files.iter().position(|f| f.path_file == old_name) {
+            // Match by Drive file ID (authoritative) or by name/path-suffix as fallback.
+            let old_name_suffix = format!("/{old_name}");
+            if let Some(pos) = meta.files.iter().position(|f| {
+                f.drive_file_id.as_deref() == Some(file_id)
+                    || f.path_file == old_name
+                    || f.path_file.ends_with(&old_name_suffix)
+            }) {
                 let mut entry = meta.files.remove(pos);
-                entry.path_file = new_name.to_string();
+                // Preserve any directory prefix in path_file, only replace the base name.
+                if let Some(sep_pos) = entry.path_file.rfind('/') {
+                    entry.path_file = format!("{}/{new_name}", &entry.path_file[..sep_pos]);
+                } else {
+                    entry.path_file = new_name.to_string();
+                }
                 meta.files.push(entry);
                 gdrive::upload_sync_meta(app, &folder_id, &meta, meta_id.as_deref())?;
                 spawn_sync_meta_mirror(app, game_id, meta.clone());
@@ -185,7 +196,12 @@ pub fn move_game_drive_file(
         let (meta_opt, meta_id) = gdrive::download_sync_meta(app, &game_folder_id)?;
         if let Some(mut meta) = meta_opt {
             let before = meta.files.len();
-            meta.files.retain(|f| f.path_file != file_name);
+            let name_suffix = format!("/{file_name}");
+            meta.files.retain(|f| {
+                f.drive_file_id.as_deref() != Some(file_id)
+                    && f.path_file != file_name
+                    && !f.path_file.ends_with(&name_suffix)
+            });
             if meta.files.len() < before {
                 gdrive::upload_sync_meta(app, &game_folder_id, &meta, meta_id.as_deref())?;
                 spawn_sync_meta_mirror(app, game_id, meta.clone());
@@ -227,11 +243,41 @@ pub fn delete_game_drive_file(
         let (meta_opt, meta_id) = gdrive::download_sync_meta(app, &folder_id)?;
         if let Some(mut meta) = meta_opt {
             let before = meta.files.len();
-            meta.files.retain(|f| f.path_file != file_name);
+            // Match by Drive file ID (authoritative) or by name/path-suffix as fallback.
+            // path_file stores the full relative path (e.g. "76561199685111768/UserMetaData.sav")
+            // while file_name is just the base name, so a plain equality check would miss entries
+            // whose path_file includes a subdirectory prefix.
+            let name_suffix = format!("/{file_name}");
+            let matches = |f: &SyncFileEntry| -> bool {
+                f.drive_file_id.as_deref() == Some(file_id)
+                    || f.path_file == file_name
+                    || f.path_file.ends_with(&name_suffix)
+            };
+            // Capture the removed entry's size so we can decrement cloud_storage_bytes.
+            let removed_size: u64 = meta
+                .files
+                .iter()
+                .find(|f| matches(f))
+                .map(|f| f.size)
+                .unwrap_or(0);
+            meta.files.retain(|f| !matches(f));
             if meta.files.len() < before {
                 gdrive::upload_sync_meta(app, &folder_id, &meta, meta_id.as_deref())?;
                 spawn_sync_meta_mirror(app, game_id, meta.clone());
                 println!("[gdrive] Removed '{file_name}' from sync-meta after delete");
+
+                // Update cloud_storage_bytes in local state and mirror to Firestore.
+                if removed_size > 0 {
+                    if let Err(e) = settings::update_game_field(app, game_id, |g| {
+                        if let Some(current) = g.cloud_storage_bytes {
+                            g.cloud_storage_bytes = Some(current.saturating_sub(removed_size));
+                        }
+                    }) {
+                        eprintln!(
+                            "[gdrive] Failed to update cloud_storage_bytes after delete of '{file_name}': {e}"
+                        );
+                    }
+                }
             }
         }
     }
