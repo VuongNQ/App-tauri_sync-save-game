@@ -5,6 +5,7 @@ export { useClearAllDriveMutation, useSettingsQuery, useUpdateSettingsMutation }
 export { useDevicesQuery, useRenameDeviceMutation, useRemoveDeviceMutation } from "./devices";
 export {
   useCheckSyncDiffMutation,
+  useCleanExcludedDriveFilesMutation,
   useCreateVersionBackupMutation,
   useDeleteDriveFileMutation,
   useDeleteVersionBackupMutation,

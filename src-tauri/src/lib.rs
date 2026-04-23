@@ -127,6 +127,7 @@ fn update_game(
                 ) {
                     eprintln!("[sync] cleanup excluded from cloud failed: {e}");
                 }
+                // Return value (deleted count) is intentionally ignored here
             }
         });
     }
@@ -518,6 +519,21 @@ async fn push_to_cloud(
         .map_err(|e| format!("Push task failed: {e}"))?
 }
 
+#[tauri::command]
+async fn clean_excluded_drive_files(
+    app: tauri::AppHandle,
+    game_id: String,
+) -> Result<DashboardData, String> {
+    tokio::task::spawn_blocking(move || {
+        sync::clean_excluded_from_cloud_all_paths(&app, &game_id)?;
+        let mut state = settings::load_state(&app)?;
+        settings::apply_path_overrides(&mut state.games, &state.settings);
+        Ok(DashboardData { games: state.games })
+    })
+    .await
+    .map_err(|e| format!("Clean excluded task failed: {e}"))?
+}
+
 // ── Launcher command ──────────────────────────────────────
 
 #[tauri::command]
@@ -671,6 +687,7 @@ pub fn run() {
             check_sync_structure_diff,
             restore_from_cloud,
             push_to_cloud,
+            clean_excluded_drive_files,
             toggle_track_changes,
             toggle_auto_sync,
             launch_game,

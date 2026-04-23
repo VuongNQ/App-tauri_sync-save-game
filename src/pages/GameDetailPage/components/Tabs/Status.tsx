@@ -2,7 +2,9 @@ import { DriveFilesSection } from "@/components/DriveFilesSection";
 import { CARD, PRIMARY_BTN, SECONDARY_BTN } from "@/components/styles";
 import { Toast } from "@/components/Toast";
 import { VersionBackupsSection } from "@/components/VersionBackupsSection";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import { useGetSaveInfoQuery, useSyncGameMutation, useSyncLibraryFromCloudMutation } from "@/queries";
+import { useCleanExcludedDriveFilesMutation } from "@/queries/sync";
 import { DashboardQuery } from "@/queries/dashboard";
 import { useGamePlaying } from "@/queries/detail";
 import { expandSavePath } from "@/services/tauri";
@@ -31,13 +33,18 @@ const TabStatus = () => {
   const saveInfoQuery = useGetSaveInfoQuery(id ?? "", !!primarySavePath);
 
   const syncLibraryMutation = useSyncLibraryFromCloudMutation();
+  const cleanExcludedMutation = useCleanExcludedDriveFilesMutation();
 
-  const isSyncing = syncMutation.isPending || syncLibraryMutation.isPending;
+  const isSyncing = syncMutation.isPending || syncLibraryMutation.isPending || cleanExcludedMutation.isPending;
+
+  const hasExcludes = game?.savePaths.some((sp) => sp.syncExcludes.length > 0) ?? false;
 
   const [toast, setToast] = useState<{
     message: string;
     type: "success" | "error";
   } | null>(null);
+
+  const [showCleanConfirm, setShowCleanConfirm] = useState(false);
 
   const restoreFlow = useRestoreFromDriveFlow(id ?? "", setToast);
 
@@ -80,6 +87,15 @@ const TabStatus = () => {
             {restoreFlow.isChecking ? "Checking…" : "Restore from Drive"}
           </button>
           <button
+            className={SECONDARY_BTN}
+            type="button"
+            disabled={isSyncing || !hasExcludes}
+            title={!hasExcludes ? "No sync exclusions configured for this game" : undefined}
+            onClick={() => setShowCleanConfirm(true)}
+          >
+            {cleanExcludedMutation.isPending ? "Cleaning…" : "Clean excluded from Drive"}
+          </button>
+          <button
             className={`${PRIMARY_BTN} col-span-full inline-flex items-center justify-center gap-2`}
             type="button"
             disabled={!primarySavePath || isSyncing}
@@ -105,7 +121,7 @@ const TabStatus = () => {
               })
             }
           >
-            {isSyncing ? (
+            {isSyncing && !cleanExcludedMutation.isPending ? (
               <>
                 <svg
                   className="animate-spin h-4 w-4 shrink-0"
@@ -175,6 +191,23 @@ const TabStatus = () => {
           onCancel={restoreFlow.closeModal}
         />
       )}
+
+      <ConfirmModal
+        open={showCleanConfirm}
+        title="Remove excluded files from Drive"
+        message="This will permanently delete all Drive files matching your current sync exclusions. This cannot be undone."
+        confirmLabel="Delete from Drive"
+        onConfirm={() => {
+          setShowCleanConfirm(false);
+          cleanExcludedMutation.mutate(id ?? "", {
+            onSuccess: () =>
+              setToast({ message: "Excluded files removed from Drive.", type: "success" }),
+            onError: (err) =>
+              setToast({ message: msg(err, "Failed to clean excluded files."), type: "error" }),
+          });
+        }}
+        onCancel={() => setShowCleanConfirm(false)}
+      />
     </>
   );
 };

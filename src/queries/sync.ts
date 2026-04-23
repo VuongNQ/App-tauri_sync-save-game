@@ -2,6 +2,7 @@ import { mutationOptions, useMutation, useQuery, useQueryClient } from "@tanstac
 
 import {
   checkSyncStructureDiff,
+  cleanExcludedDriveFiles,
   createVersionBackup,
   deleteGameDriveFile,
   deleteVersionBackup,
@@ -115,6 +116,14 @@ export function usePushToCloudMutation() {
   return useMutation({
     mutationFn: (gameId: string) => pushToCloud(gameId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY }),
+  });
+}
+
+export function useCleanExcludedDriveFilesMutation() {
+  const setCache = useSetDashboardCache();
+  return useMutation({
+    mutationFn: (gameId: string) => cleanExcludedDriveFiles(gameId),
+    onSuccess: setCache,
   });
 }
 

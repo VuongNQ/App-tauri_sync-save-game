@@ -106,7 +106,10 @@ export function DashboardPage() {
 
       {/* Stats + Add game */}
       <div className="grid grid-cols-[1fr_1fr] gap-5 max-[900px]:grid-cols-1">
-        <HeroCard gamesCount={games.length} />
+        <HeroCard
+          gamesCount={games.length}
+          totalStorageBytes={games.reduce((sum, g) => sum + (g.cloudStorageBytes ?? 0), 0)}
+        />
         <AddGameCard />
       </div>
 

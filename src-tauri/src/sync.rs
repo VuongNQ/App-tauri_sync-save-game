@@ -1155,14 +1155,15 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
 /// Updates `.sync-meta.json` to remove the deleted entries.
 /// Called in a background thread from the `update_game` command handler.
 /// `drive_folder_id` is the specific Drive folder for the affected save-path entry.
+/// Returns the number of Drive files deleted.
 pub fn cleanup_excluded_from_cloud(
     app: &AppHandle,
     game_id: &str,
     drive_folder_id: &str,
     newly_excluded: Vec<String>,
-) -> Result<(), String> {
+) -> Result<u32, String> {
     if newly_excluded.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
 
     println!(
@@ -1176,7 +1177,7 @@ pub fn cleanup_excluded_from_cloud(
         Some(m) => m,
         None => {
             println!("[sync] No cloud meta for {game_id} — nothing to clean up");
-            return Ok(());
+            return Ok(0);
         }
     };
 
@@ -1188,12 +1189,15 @@ pub fn cleanup_excluded_from_cloud(
         .map(|f| f.path_file.clone())
         .collect();
 
+    let mut deleted_count: u32 = 0;
     for rel_path in &keys_to_remove {
         if let Some(file_entry) = cloud_meta.files.iter().find(|f| f.path_file == *rel_path).cloned() {
             if let Some(ref drive_file_id) = file_entry.drive_file_id {
                 println!("[sync] Deleting excluded Drive file '{rel_path}' (id={drive_file_id})");
                 if let Err(e) = gdrive::delete_drive_file(app, drive_file_id) {
                     eprintln!("[sync] Failed to delete Drive file '{rel_path}': {e}");
+                } else {
+                    deleted_count += 1;
                 }
             }
         }
@@ -1211,11 +1215,51 @@ pub fn cleanup_excluded_from_cloud(
     });
 
     println!(
-        "[sync] Cleanup complete for {game_id}: removed {} path(s) from Drive",
-        keys_to_remove.len()
+        "[sync] Cleanup complete for {game_id}: removed {deleted_count} file(s) from Drive"
     );
 
-    Ok(())
+    Ok(deleted_count)
+}
+
+// ── On-demand cleanup for all paths ──────────────────────
+
+/// Delete all Drive files matching the game's current `sync_excludes` for every
+/// configured save path. This is the engine for the on-demand "Clean excluded
+/// from Drive" command — handles files that were already on Drive before an
+/// exclusion rule was added.
+/// Returns the total number of Drive files deleted across all paths.
+pub fn clean_excluded_from_cloud_all_paths(app: &AppHandle, game_id: &str) -> Result<u32, String> {
+    let state = settings::load_state(app)?;
+    let game = settings::find_game(&state, game_id)?.clone();
+
+    let mut total_deleted: u32 = 0;
+
+    for (i, sp) in game.save_paths.iter().enumerate() {
+        if sp.sync_excludes.is_empty() {
+            continue;
+        }
+
+        let folder_id = if i == 0 {
+            match game.gdrive_folder_id.clone() {
+                Some(id) => id,
+                None => continue, // Not yet synced to Drive — nothing to clean
+            }
+        } else {
+            match sp.gdrive_folder_id.clone() {
+                Some(id) => id,
+                None => continue, // Subfolder not yet created on Drive — nothing to clean
+            }
+        };
+
+        println!("[sync] Cleaning excluded files for {game_id} path-{i} from folder {folder_id}");
+        match cleanup_excluded_from_cloud(app, game_id, &folder_id, sp.sync_excludes.clone()) {
+            Ok(count) => total_deleted += count,
+            Err(e) => eprintln!("[sync] Failed to clean excluded files for {game_id} path-{i}: {e}"),
+        }
+    }
+
+    println!("[sync] On-demand cleanup complete for {game_id}: {total_deleted} total file(s) deleted");
+    Ok(total_deleted)
 }
 
 // ── Firestore mirror helpers ──────────────────────────────────

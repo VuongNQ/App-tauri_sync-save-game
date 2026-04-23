@@ -109,6 +109,11 @@ export async function pushToCloud(gameId: string): Promise<SyncResult> {
   return invoke<SyncResult>("push_to_cloud", { gameId });
 }
 
+/** Delete all Drive files matching the game's current sync exclusions across all save paths. */
+export async function cleanExcludedDriveFiles(gameId: string): Promise<DashboardData> {
+  return invoke<DashboardData>("clean_excluded_drive_files", { gameId });
+}
+
 // ── Watcher toggles ──────────────────────────────────────────────────────────
 
 export async function toggleTrackChanges(gameId: string, enabled: boolean): Promise<DashboardData> {
