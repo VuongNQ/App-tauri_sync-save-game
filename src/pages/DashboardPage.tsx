@@ -51,8 +51,11 @@ function DashboardSkeleton() {
 
 export function DashboardPage() {
   const dashboardQuery = useDashboardQuery();
+
   const validateQuery = useValidatePathsQuery();
+
   const refreshMutation = useSyncLibraryFromCloudMutation();
+
   const games = dashboardQuery.data?.games ?? [];
 
   const invalidGameIds = new Set((validateQuery.data ?? []).filter((v) => !v.valid).map((v) => v.gameId));
@@ -104,17 +107,14 @@ export function DashboardPage() {
         </p>
       )}
 
-      {/* Stats + Add game */}
-      <div className="grid grid-cols-[1fr_1fr] gap-5 max-[900px]:grid-cols-1">
-        <HeroCard
-          gamesCount={games.length}
-          totalStorageBytes={games.reduce((sum, g) => sum + (g.cloudStorageBytes ?? 0), 0)}
-        />
-        <AddGameCard />
-      </div>
+      {/* Stats*/}
+      <HeroCard gamesCount={games.length} totalStorageBytes={games.reduce((sum, g) => sum + (g.cloudStorageBytes ?? 0), 0)} />
 
       {/* Game list */}
       <GamesList games={games} invalidGameIds={invalidGameIds} missingExeIds={missingExeIds} />
+
+      {/* Add game */}
+      <AddGameCard />
     </>
   );
 }

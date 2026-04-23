@@ -45,12 +45,17 @@ export function AddGameCard() {
     defaultValues: DEFAULT_VALUES,
     resolver: zodResolver(addGameSchema),
   });
+
   const addMutation = useAddGameMutation();
+
   const navigate = useNavigate();
+
   const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
 
   const thumbnail = watch("thumbnail");
+
   const savePath = watch("savePath");
+
   const exePath = watch("exePath");
 
   async function handleBrowseSave() {
@@ -81,6 +86,7 @@ export function AddGameCard() {
 
   async function onSubmit(values: AddGamePayload) {
     setLogoUploadError(null);
+    
     const payload: AddGamePayload = {
       name: values.name.trim(),
       description: norm(values.description),
@@ -90,7 +96,9 @@ export function AddGameCard() {
       pathMode: values.pathMode,
       exePath: norm(values.exePath),
     };
+    
     const data = await addMutation.mutateAsync(payload);
+
     const added = data.games.find((g) => g.name.toLowerCase() === payload.name.toLowerCase());
 
     if (added && payload.thumbnail) {
@@ -124,7 +132,7 @@ export function AddGameCard() {
         <label className={FORM_LABEL}>
           <span className={LABEL_SPAN}>Description (optional)</span>
           <textarea
-            className={`${INPUT_CLS} resize-y min-h-[60px]`}
+            className={`${INPUT_CLS} resize-y min-h-15`}
             {...register("description")}
             maxLength={1000}
             rows={3}

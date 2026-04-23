@@ -63,9 +63,14 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
 
         <div className="grid gap-2 flex-1 min-w-0">
           <p className={EYEBROW}>Game details</p>
-          <h2 className="m-0">{game.name}</h2>
-          <span className={sourceBadge}>{game.source}</span>
-          {game.description && <p className="m-0 text-sm text-[#9aa8c7] max-w-120 whitespace-pre-wrap">{game.description}</p>}
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="m-0">{game.name}</h2>
+            <span className={sourceBadge}>{game.source}</span>
+          </div>
+          <details className="group [&_p]:group-open:line-clamp-none [&_p]:line-clamp-3">
+            <summary className="text-sm text-[#9aa8c7] cursor-pointer pb-2">Click to view description</summary>
+            <p className="m-0 text-sm text-[#9aa8c7] whitespace-pre-wrap">{game.description}</p >
+          </details>
         </div>
 
         {/* Play button */}

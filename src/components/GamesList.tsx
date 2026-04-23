@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { Link } from "react-router";
-
 import { useRemoveGameMutation } from "../queries";
 import { useSyncAndLaunchFlow } from "../queries/detail";
 import type { GameEntry } from "../types/dashboard";
-import { toImgSrc, formatBytes } from "../utils";
+import { formatBytes, toImgSrc } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
-import { BTN, CARD, MUTED, SEC_HDR, SOURCE_BADGE, SOFT_BADGE } from "./styles";
+import { BTN, CARD, MUTED, SEC_HDR, SOFT_BADGE, SOURCE_BADGE } from "./styles";
 
 function LazyThumbnail({ src }: { src: string }) {
   const [loaded, setLoaded] = useState(false);
@@ -39,6 +38,7 @@ interface Props {
 
 export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
   const removeMutation = useRemoveGameMutation();
+
   const [removeTarget, setRemoveTarget] = useState<GameEntry | null>(null);
 
   function handleRemoveClick(e: React.MouseEvent, game: GameEntry) {
@@ -60,9 +60,9 @@ export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
         <span className="text-[0.85rem]">{games.length} entries</span>
       </div>
 
-      <div className="grid gap-[14px]">
+      <div className="grid gap-3.5">
         {games.length === 0 ? (
-          <div className="grid place-items-center min-h-[160px] rounded-[18px] border border-dashed border-[rgba(165,185,255,0.16)] bg-[rgba(8,14,25,0.55)] text-center p-[18px]">
+          <div className="grid place-items-center min-h-40 rounded-[18px] border border-dashed border-[rgba(165,185,255,0.16)] bg-[rgba(8,14,25,0.55)] text-center p-4.5">
             <p className="m-0 text-[1.1rem]">No games yet.</p>
             <span className={MUTED}>Add your first game using the form above.</span>
           </div>
@@ -115,7 +115,6 @@ export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
                         <span>⚠</span> No executable set — process tracking inactive
                       </p>
                     )}
-                    {g.description && <p className={`${MUTED} m-0 text-xs truncate`}>{g.description}</p>}{" "}
                     {g.cloudStorageBytes != null && (
                       <p className="m-0 text-xs text-[#7dc9ff] flex items-center gap-1">
                         <span>☁</span> {formatBytes(g.cloudStorageBytes)} on Drive
@@ -158,6 +157,7 @@ export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
 
 function GamePlayButton({ game, exeMissing }: { game: GameEntry; exeMissing: boolean }) {
   const [error, setError] = useState<string | null>(null);
+
   const [canForce, setCanForce] = useState(false);
 
   const flow = useSyncAndLaunchFlow({

@@ -1,12 +1,12 @@
+import { ConfirmModal } from "@/components/ConfirmModal";
 import { DriveFilesSection } from "@/components/DriveFilesSection";
 import { CARD, PRIMARY_BTN, SECONDARY_BTN } from "@/components/styles";
 import { Toast } from "@/components/Toast";
 import { VersionBackupsSection } from "@/components/VersionBackupsSection";
-import { ConfirmModal } from "@/components/ConfirmModal";
 import { useGetSaveInfoQuery, useSyncGameMutation, useSyncLibraryFromCloudMutation } from "@/queries";
-import { useCleanExcludedDriveFilesMutation } from "@/queries/sync";
 import { DashboardQuery } from "@/queries/dashboard";
 import { useGamePlaying } from "@/queries/detail";
+import { useCleanExcludedDriveFilesMutation } from "@/queries/sync";
 import { expandSavePath } from "@/services/tauri";
 import { msg } from "@/utils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -30,9 +30,11 @@ const TabStatus = () => {
   const game = queryClient.getQueryData(DashboardQuery.queryKey)?.games.find((g) => g.id === id);
 
   const primarySavePath = game?.savePaths[0]?.path ?? null;
+
   const saveInfoQuery = useGetSaveInfoQuery(id ?? "", !!primarySavePath);
 
   const syncLibraryMutation = useSyncLibraryFromCloudMutation();
+
   const cleanExcludedMutation = useCleanExcludedDriveFilesMutation();
 
   const isSyncing = syncMutation.isPending || syncLibraryMutation.isPending || cleanExcludedMutation.isPending;
@@ -56,7 +58,7 @@ const TabStatus = () => {
       <div className={CARD}>
         <h3 className="m-0 mb-4 font-semibold">Actions</h3>
 
-        <div className="grid gap-4 grid-cols-2 max-[900px]:grid-cols-1">
+        <div className="grid gap-4 grid-cols-3 max-[900px]:grid-cols-1">
           <button
             className={SECONDARY_BTN}
             type="button"
@@ -176,7 +178,9 @@ const TabStatus = () => {
       />
 
       {/* Drive file manager */}
-      {game.gdriveFolderId && <DriveFilesSection gameId={game.id} gameFolderId={game.gdriveFolderId} savePaths={game.savePaths} pathMode={game.pathMode} />}
+      {game.gdriveFolderId && (
+        <DriveFilesSection gameId={game.id} gameFolderId={game.gdriveFolderId} savePaths={game.savePaths} pathMode={game.pathMode} />
+      )}
 
       {/* Version backups */}
       {game.gdriveFolderId && <VersionBackupsSection gameId={game.id} />}
@@ -200,10 +204,8 @@ const TabStatus = () => {
         onConfirm={() => {
           setShowCleanConfirm(false);
           cleanExcludedMutation.mutate(id ?? "", {
-            onSuccess: () =>
-              setToast({ message: "Excluded files removed from Drive.", type: "success" }),
-            onError: (err) =>
-              setToast({ message: msg(err, "Failed to clean excluded files."), type: "error" }),
+            onSuccess: () => setToast({ message: "Excluded files removed from Drive.", type: "success" }),
+            onError: (err) => setToast({ message: msg(err, "Failed to clean excluded files."), type: "error" }),
           });
         }}
         onCancel={() => setShowCleanConfirm(false)}
