@@ -110,7 +110,24 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
       {/* Metadata grid */}
       <dl className="grid gap-3.5 grid-cols-2 m-0 max-[720px]:grid-cols-1">
         {[
-          { label: "Save folder", value: game.savePaths.length > 0 ? (game.savePaths[0].path ?? "Not set") : "Not set" },
+          {
+            label: "Save folder",
+            value:
+              game.savePaths.length === 0 ? (
+                "Not set"
+              ) : (
+                <ul className="m-0 p-0 list-none flex flex-col gap-2">
+                  {game.savePaths.map((sp, i) => (
+                    <li key={i} className="flex flex-col gap-0.5">
+                      {game.savePaths.length > 1 && (
+                        <span className="text-[0.78rem] text-[#c7d3f7] font-medium">{sp.label}</span>
+                      )}
+                      <span>{sp.path ?? <em className="not-italic text-[#ff9e9e] text-xs">Not set on this device</em>}</span>
+                    </li>
+                  ))}
+                </ul>
+              ),
+          },
           {
             label: "Google Drive folder",
             value: game.gdriveFolderId ?? "Not synced",
