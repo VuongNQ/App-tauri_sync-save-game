@@ -103,7 +103,7 @@ Each entry in `GameEntry.save_paths`:
 | `label` | `String` | `string` | User-defined label (e.g. `"Memcard"`, `"Save States"`) |
 | `path` | `Option<String>` | `string \| null` | Portable `%VAR%` path, or `None` if device-specific (stored in `path_overrides` / `path_overrides_indexed`) |
 | `gdrive_folder_id` | `Option<String>` | `string \| null` | Drive folder ID for this path. Index 0 uses `GameEntry.gdrive_folder_id` (root); index i≥1 uses `save_paths[i].gdrive_folder_id` (subfolder `path-{i}/`) |
-| `sync_excludes` | `Vec<String>` | `string[]` | Relative paths excluded from Drive sync for this specific path; trailing `/` means folder prefix |
+| `sync_includes` | `Vec<String>` | `string[]` | Inclusion filter for Drive sync. **Empty = sync all files** (default). Non-empty = sync only the listed items. Trailing `/` means folder prefix; otherwise exact file or folder match. |
 
 ### DeviceInfo
 
@@ -123,7 +123,7 @@ Stored in Firestore at `users/{user_id}/devices/{device_id}`. Never stored in th
 | `last_seen_at` | `String` | `string` | ISO 8601 timestamp updated every app startup |
 | `is_current` | `bool` (never stored) | `boolean \| undefined` | Computed locally — `true` on the device returned by the current machine; **never written to Firestore** |
 
-> **Legacy fields** (`save_path: Option<String>`, `sync_excludes: Vec<String>` on `GameEntry`) are kept on the Rust struct with `#[serde(default, skip_serializing_if)]` for migration deserialization only. They are never written by current code.
+> **Legacy fields** (`save_path: Option<String>`, `sync_excludes: Vec<String>` on `GameEntry` and `SavePathEntry`) are kept on the Rust struct with `#[serde(default, skip_serializing_if)]` for migration deserialization only. `sync_excludes` is cleared automatically on first load by migration Pass 4 (`migrate_sync_excludes_to_includes`). They are never written by current code.
 
 ### Serialisation Convention
 
@@ -366,7 +366,7 @@ Save paths are stored with Windows environment-variable tokens instead of hardco
 
 ### Multi-Path Storage Architecture
 
-Each game has **one or more** `SavePathEntry` records in `GameEntry.save_paths`. Each entry has a `label`, `path`, `gdrive_folder_id`, and `sync_excludes`.
+Each game has **one or more** `SavePathEntry` records in `GameEntry.save_paths`. Each entry has a `label`, `path`, `gdrive_folder_id`, and `sync_includes`.
 
 The override map key depends on `GameEntry.path_mode`:
 
@@ -405,7 +405,7 @@ Both `path_overrides` and `path_overrides_indexed` are **local-only** — never 
 - Paths are **displayed to users with tokens (or as-is for device-specific)** — this is intentional.
 
 ### One-time migration
-`migrate_save_paths_to_vec()` runs automatically on every `load_state()` call. Any existing `GameEntry` with no `save_paths` but a legacy `save_path` + `sync_excludes` is converted to `save_paths[0]`. Safe to run repeatedly.
+`migrate_save_paths_to_vec()` runs automatically on every `load_state()` call. Any existing `GameEntry` with no `save_paths` but a legacy `save_path` + `sync_excludes` is converted to `save_paths[0]` with `sync_includes: []`. Safe to run repeatedly.
 
 `migrate_absolute_save_paths()` also runs on load. Any `SavePathEntry.path` without `%` tokens is moved to the appropriate override map.
 

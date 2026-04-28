@@ -25,9 +25,16 @@ pub struct SavePathEntry {
     /// - Index i≥1 → `game_id/path-{i}/` subfolder on Drive.
     #[serde(default)]
     pub gdrive_folder_id: Option<String>,
-    /// Relative paths (forward-slash) excluded from Drive sync **for this path only**.
-    /// A trailing '/' means folder prefix; otherwise it is an exact file match.
+    /// Relative paths (forward-slash) included in Drive sync **for this path only**.
+    /// Empty = sync all files in the folder (default behaviour).
+    /// Non-empty = sync only the listed items.
+    /// A trailing '/' means folder prefix; otherwise it is an exact file or folder match.
     #[serde(default)]
+    pub sync_includes: Vec<String>,
+    /// Legacy exclusion list — kept for migration deserialization only.
+    /// Cleared to empty on first load via `migrate_sync_excludes_to_includes`.
+    /// Never written back once emptied.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sync_excludes: Vec<String>,
 }
 

@@ -39,7 +39,7 @@ const TabStatus = () => {
 
   const isSyncing = syncMutation.isPending || syncLibraryMutation.isPending || cleanExcludedMutation.isPending;
 
-  const hasExcludes = game?.savePaths.some((sp) => sp.syncExcludes.length > 0) ?? false;
+  const hasIncludes = game?.savePaths.some((sp) => sp.syncIncludes.length > 0) ?? false;
 
   const [toast, setToast] = useState<{
     message: string;
@@ -91,11 +91,11 @@ const TabStatus = () => {
           <button
             className={SECONDARY_BTN}
             type="button"
-            disabled={isSyncing || !hasExcludes}
-            title={!hasExcludes ? "No sync exclusions configured for this game" : undefined}
+            disabled={isSyncing || !hasIncludes}
+            title={!hasIncludes ? "No sync filter configured for this game" : undefined}
             onClick={() => setShowCleanConfirm(true)}
           >
-            {cleanExcludedMutation.isPending ? "Cleaning…" : "Clean excluded from Drive"}
+            {cleanExcludedMutation.isPending ? "Cleaning…" : "Remove non-included from Drive"}
           </button>
           <button
             className={`${PRIMARY_BTN} col-span-full inline-flex items-center justify-center gap-2`}

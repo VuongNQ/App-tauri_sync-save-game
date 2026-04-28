@@ -4,7 +4,8 @@ export interface SavePathEntry {
   label: string;
   path: string | null;
   gdriveFolderId: string | null;
-  syncExcludes: string[];
+  /** Inclusion filter — empty = sync all files; non-empty = sync only the listed items. */
+  syncIncludes: string[];
 }
 
 export interface GameEntry {

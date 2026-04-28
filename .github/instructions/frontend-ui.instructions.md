@@ -403,7 +403,7 @@ export interface SavePathEntry {
   label: string;             // user-defined label, e.g. "Memcard", "Save States"
   path: string | null;       // portable %VAR% path, or null if device-specific
   gdriveFolderId: string | null; // Drive folder for this path; index 0 = game root, i≥1 = path-{i}/ subfolder
-  syncExcludes: string[];    // relative paths excluded from Drive sync for this specific path
+  syncIncludes: string[];    // inclusion filter — empty = sync all files (default); non-empty = sync only listed items
 }
 
 export interface PathSaveInfo {
@@ -421,7 +421,7 @@ export interface GameEntry {
   source: GameSource;               // "manual" | "emulator"
   pathMode: "auto" | "per_device";  // "auto" = portable %VAR% paths shared across devices;
                                     // "per_device" = paths stored locally per machine (override key includes device UUID)
-  savePaths: SavePathEntry[];       // ordered list; index 0 is primary. Replaces old savePath + syncExcludes.
+  savePaths: SavePathEntry[];       // ordered list; index 0 is primary. Replaces old savePath + syncExcludes (now uses syncIncludes).
   exeName: string | null;           // game executable filename (e.g. "MyGame.exe"); used by process monitor
   exePath: string | null;           // full exe path with %VAR% tokens (e.g. "%PROGRAMFILES%\\Steam\\game.exe"); used by launch_game
                                     // LOCAL-ONLY — stripped before any Firestore / Drive upload; never synced to cloud

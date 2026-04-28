@@ -67,13 +67,15 @@ export function buildSaveTree(files: SaveFileInfo[]): SaveTreeItem[] {
   return roots;
 }
 
-/** Check whether a relative path is excluded (same logic as Rust is_excluded). */
-function isExcluded(relPath: string, excluded: string[]): boolean {
-  for (const ex of excluded) {
-    if (ex.endsWith("/")) {
-      if (relPath.startsWith(ex)) return true;
+/** Check whether a relative path is included in the sync filter (same logic as Rust is_included).
+ * Empty `included` means sync-all — returns `true` for every path. */
+function isIncluded(relPath: string, included: string[]): boolean {
+  if (included.length === 0) return true;
+  for (const inc of included) {
+    if (inc.endsWith("/")) {
+      if (relPath.startsWith(inc)) return true;
     } else {
-      if (relPath === ex || relPath.startsWith(`${ex}/`)) return true;
+      if (relPath === inc || relPath.startsWith(`${inc}/`)) return true;
     }
   }
   return false;
@@ -85,18 +87,20 @@ interface SaveTreeNodeProps {
   node: SaveTreeItem;
   depth: number;
   checkable: boolean;
-  excluded: string[];
+  included: string[];
   onToggle: (path: string, isFolder: boolean) => void;
-  parentExcluded: boolean;
+  /** True when the parent folder is in the inclusion filter. */
+  parentIncluded: boolean;
 }
 
-function SaveTreeNode({ node, depth, checkable, excluded, onToggle, parentExcluded }: SaveTreeNodeProps) {
+function SaveTreeNode({ node, depth, checkable, included, onToggle, parentIncluded }: SaveTreeNodeProps) {
   const [open, setOpen] = useState(false);
   const indent = depth * 14;
 
   if (node.kind === "file") {
-    const checked = checkable && isExcluded(node.relativePath, excluded);
-    const dimmed = parentExcluded && !checked;
+    const checked = checkable && included.length > 0 && isIncluded(node.relativePath, included);
+    // Dim when a filter is active, this file is not in the filter, and the parent folder is not included
+    const dimmed = included.length > 0 && !isIncluded(node.relativePath, included) && !parentIncluded;
 
     return (
       <li
@@ -110,7 +114,7 @@ function SaveTreeNode({ node, depth, checkable, excluded, onToggle, parentExclud
               className="shrink-0 accent-[#7dc9ff] cursor-pointer"
               checked={checked}
               onChange={() => onToggle(node.relativePath, false)}
-              title={checked ? "Unexclude from sync" : "Exclude from sync"}
+              title={checked ? "Remove from sync filter" : "Include in sync"}
             />
           )}
           {!checkable && <span className="text-[#9aa8c7] shrink-0 select-none">↳</span>}
@@ -124,9 +128,10 @@ function SaveTreeNode({ node, depth, checkable, excluded, onToggle, parentExclud
   }
 
   // Folder
-  const folderExcludePath = node.relativePath + "/";
-  const checked = checkable && isExcluded(folderExcludePath, excluded);
-  const dimmed = parentExcluded && !checked;
+  const folderIncludePath = node.relativePath + "/";
+  const checked = checkable && included.length > 0 && isIncluded(folderIncludePath, included);
+  // Dim when filter is active, this folder is not in the filter, and parent is not included
+  const dimmed = included.length > 0 && !isIncluded(folderIncludePath, included) && !parentIncluded;
 
   return (
     <>
@@ -142,8 +147,8 @@ function SaveTreeNode({ node, depth, checkable, excluded, onToggle, parentExclud
                 type="checkbox"
                 className="shrink-0 accent-[#7dc9ff] cursor-pointer"
                 checked={checked}
-                onChange={() => onToggle(folderExcludePath, true)}
-                title={checked ? "Unexclude folder from sync" : "Exclude entire folder from sync"}
+              onChange={() => onToggle(folderIncludePath, true)}
+              title={checked ? "Remove folder from sync filter" : "Include entire folder in sync"}
               />
               <span
                 className="text-[#9aa8c7] shrink-0 w-3 text-center text-[0.6rem] cursor-pointer"
@@ -171,9 +176,9 @@ function SaveTreeNode({ node, depth, checkable, excluded, onToggle, parentExclud
             node={child}
             depth={depth + 1}
             checkable={checkable}
-            excluded={excluded}
+            included={included}
             onToggle={onToggle}
-            parentExcluded={parentExcluded || checked}
+            parentIncluded={parentIncluded || checked}
           />
         ))}
     </>
@@ -184,15 +189,16 @@ function SaveTreeNode({ node, depth, checkable, excluded, onToggle, parentExclud
 
 interface SaveFileTreeProps {
   info: SaveInfo;
-  /** When true, renders checkboxes for exclude-from-sync selection. */
+  /** When true, renders checkboxes for sync-filter selection. */
   checkable?: boolean;
-  /** Currently excluded relative paths (only relevant when checkable=true). */
-  excluded?: string[];
+  /** Currently included relative paths (only relevant when checkable=true).
+   * Empty array = sync all (no filter active). */
+  included?: string[];
   /** Called when a file or folder checkbox is toggled. */
   onToggle?: (path: string, isFolder: boolean) => void;
 }
 
-export function SaveFileTree({ info, checkable = false, excluded = [], onToggle = () => {} }: SaveFileTreeProps) {
+export function SaveFileTree({ info, checkable = false, included = [], onToggle = () => {} }: SaveFileTreeProps) {
   const [open, setOpen] = useState(false);
   const tree = buildSaveTree(info.files);
 
@@ -222,9 +228,9 @@ export function SaveFileTree({ info, checkable = false, excluded = [], onToggle 
               node={node}
               depth={1}
               checkable={checkable}
-              excluded={excluded}
+              included={included}
               onToggle={onToggle}
-              parentExcluded={false}
+              parentIncluded={false}
             />
           ))}
         </div>

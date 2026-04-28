@@ -67,9 +67,9 @@ fn update_game(
         .ok()
         .and_then(|s| s.games.into_iter().find(|g| g.id == payload.game.id));
 
-    let old_path_excludes: Vec<Vec<String>> = old_game
+    let old_path_includes: Vec<Vec<String>> = old_game
         .as_ref()
-        .map(|g| g.save_paths.iter().map(|e| e.sync_excludes.clone()).collect())
+        .map(|g| g.save_paths.iter().map(|e| e.sync_includes.clone()).collect())
         .unwrap_or_default();
     let old_track_changes = old_game.map(|g| g.track_changes).unwrap_or(false);
 
@@ -87,18 +87,14 @@ fn update_game(
         }
     }
 
-    // Build cleanup tasks: (drive_folder_id, newly_excluded) per path
+    // Build cleanup tasks: (drive_folder_id, new_includes) per path where includes changed.
+    // The cleanup function will remove Drive files not covered by the new inclusion list.
+    // When new_includes is empty (sync-all) the cleanup function is a no-op.
     let mut cleanup_tasks: Vec<(String, Vec<String>)> = Vec::new();
     for (i, path_entry) in new_save_paths.iter().enumerate() {
-        let old_excludes = old_path_excludes.get(i).cloned().unwrap_or_default();
-        let newly_excluded: Vec<String> = path_entry
-            .sync_excludes
-            .iter()
-            .filter(|e| !old_excludes.contains(e))
-            .cloned()
-            .collect();
-        if newly_excluded.is_empty() {
-            continue;
+        let old_includes = old_path_includes.get(i).cloned().unwrap_or_default();
+        if path_entry.sync_includes == old_includes {
+            continue; // No change to this path's filter
         }
         let folder_id = if i == 0 {
             match root_drive_folder_id.clone() {
@@ -111,21 +107,21 @@ fn update_game(
                 None => continue, // Path folder not yet created on Drive
             }
         };
-        cleanup_tasks.push((folder_id, newly_excluded));
+        cleanup_tasks.push((folder_id, path_entry.sync_includes.clone()));
     }
 
     if !cleanup_tasks.is_empty() {
         let app_clone = app.clone();
         let game_id_clone = game_id.clone();
         std::thread::spawn(move || {
-            for (folder_id, excluded) in cleanup_tasks {
-                if let Err(e) = sync::cleanup_excluded_from_cloud(
+            for (folder_id, new_includes) in cleanup_tasks {
+                if let Err(e) = sync::cleanup_not_included_from_cloud(
                     &app_clone,
                     &game_id_clone,
                     &folder_id,
-                    excluded,
+                    new_includes,
                 ) {
-                    eprintln!("[sync] cleanup excluded from cloud failed: {e}");
+                    eprintln!("[sync] cleanup_not_included_from_cloud failed: {e}");
                 }
                 // Return value (deleted count) is intentionally ignored here
             }
@@ -525,7 +521,7 @@ async fn clean_excluded_drive_files(
     game_id: String,
 ) -> Result<DashboardData, String> {
     tokio::task::spawn_blocking(move || {
-        sync::clean_excluded_from_cloud_all_paths(&app, &game_id)?;
+        sync::clean_not_included_from_cloud_all_paths(&app, &game_id)?;
         let mut state = settings::load_state(&app)?;
         settings::apply_path_overrides(&mut state.games, &state.settings);
         Ok(DashboardData { games: state.games })

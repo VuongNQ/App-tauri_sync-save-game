@@ -83,19 +83,26 @@ fn collect_local_files(save_path: &Path) -> Result<Vec<LocalFileInfo>, String> {
 /// Maximum total cloud storage allowed per user across all games (200 MB).
 const STORAGE_LIMIT_BYTES: u64 = 200 * 1024 * 1024;
 
-/// Check whether a relative path matches any exclusion entry.
-/// An entry ending with `/` is treated as a folder prefix; otherwise it is
-/// an exact file match (or a folder where the path starts with `<entry>/`).
-fn is_excluded(rel_path: &str, excludes: &[String]) -> bool {
-    for ex in excludes {
-        if ex.ends_with('/') {
+/// Check whether a relative path should be included in sync based on the inclusion list.
+///
+/// - Empty `includes` → include everything (default: sync all files).
+/// - Non-empty `includes` → only include files that match an entry.
+///
+/// An entry ending with `/` is treated as a folder prefix; otherwise it is an
+/// exact file/folder match (or anything nested under `<entry>/`).
+fn is_included(rel_path: &str, includes: &[String]) -> bool {
+    if includes.is_empty() {
+        return true; // No filter — include all
+    }
+    for inc in includes {
+        if inc.ends_with('/') {
             // Folder prefix — match anything under this directory
-            if rel_path.starts_with(ex.as_str()) {
+            if rel_path.starts_with(inc.as_str()) {
                 return true;
             }
         } else {
-            // Exact file match OR path starts with `<entry>/` (entry is a folder without trailing slash)
-            if rel_path == ex.as_str() || rel_path.starts_with(&format!("{ex}/")) {
+            // Exact file/folder match OR anything nested under `<inc>/`
+            if rel_path == inc.as_str() || rel_path.starts_with(&format!("{inc}/")) {
                 return true;
             }
         }
@@ -291,7 +298,7 @@ fn sync_single_path(
     user_id: &str,
     save_dir: &Path,
     drive_folder_id: &str,
-    sync_excludes: &[String],
+    sync_includes: &[String],
     other_games_bytes: u64,
     current_game_cloud_bytes: u64,
 ) -> Result<PathSyncResult, String> {
@@ -302,11 +309,11 @@ fn sync_single_path(
     // 2. List existing Drive files (for live timestamps + file IDs)
     let mut drive_files = gdrive::list_files(app, drive_folder_id)?;
 
-    // 3. Collect local files — excluding per-path exclusions
+    // 3. Collect local files — applying per-path inclusion filter (empty = sync all)
     let all_local_files = collect_local_files(save_dir)?;
     let local_files: Vec<LocalFileInfo> = all_local_files
         .into_iter()
-        .filter(|f| !is_excluded(&f.relative_path, sync_excludes))
+        .filter(|f| is_included(&f.relative_path, sync_includes))
         .collect();
 
     // ── Storage limit guard ───────────────────────────────────────────────────
@@ -534,7 +541,7 @@ fn sync_single_path(
             last_updated: chrono::Utc::now().to_rfc3339(),
             files: final_files
                 .into_iter()
-                .filter(|f| !is_excluded(&f.relative_path, sync_excludes))
+                .filter(|f| is_included(&f.relative_path, sync_includes))
                 .map(|f| LocalFileRecord {
                     path_file: f.relative_path,
                     size: f.size,
@@ -611,10 +618,10 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
             fid
         };
 
-        let sync_excludes = game
+        let sync_includes = game
             .save_paths
             .get(i)
-            .map(|e| e.sync_excludes.as_slice())
+            .map(|e| e.sync_includes.as_slice())
             .unwrap_or(&[]);
 
         let path_result = sync_single_path(
@@ -624,7 +631,7 @@ fn sync_game_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, String>
             &user_id,
             save_dir,
             &drive_folder_id,
-            sync_excludes,
+            sync_includes,
             other_games_bytes,
             total_cloud_bytes,
         )?;
@@ -719,10 +726,10 @@ pub fn check_sync_structure_diff(
             gdrive::ensure_subfolder(app, &game_folder_id, &format!("path-{i}"))?
         };
 
-        let sync_excludes = game
+        let sync_includes = game
             .save_paths
             .get(i)
-            .map(|e| e.sync_excludes.as_slice())
+            .map(|e| e.sync_includes.as_slice())
             .unwrap_or(&[]);
 
         // 3. Download sync metadata
@@ -739,11 +746,11 @@ pub fn check_sync_structure_diff(
             .filter_map(|f| f.modified_time.as_deref().map(|ts| (f.name.as_str(), ts)))
             .collect();
 
-        // 5. Collect local files (with exclusions)
+        // 5. Collect local files (with inclusion filter)
         let local_files = if save_dir.exists() {
             collect_local_files(save_dir)?
                 .into_iter()
-                .filter(|f| !is_excluded(&f.relative_path, sync_excludes))
+                .filter(|f| is_included(&f.relative_path, sync_includes))
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
@@ -1027,10 +1034,10 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
             fid
         };
 
-        let sync_excludes = game
+        let sync_includes = game
             .save_paths
             .get(i)
-            .map(|e| e.sync_excludes.as_slice())
+            .map(|e| e.sync_includes.as_slice())
             .unwrap_or(&[]);
 
         // 3. Get cloud meta + existing Drive file list
@@ -1042,7 +1049,7 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
         let all_local_files = collect_local_files(save_dir)?;
         let local_files: Vec<LocalFileInfo> = all_local_files
             .into_iter()
-            .filter(|f| !is_excluded(&f.relative_path, sync_excludes))
+            .filter(|f| is_included(&f.relative_path, sync_includes))
             .collect();
 
         // ── Storage limit guard ────────────────────────────────────────────────
@@ -1114,7 +1121,7 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
                 last_updated: chrono::Utc::now().to_rfc3339(),
                 files: final_files
                     .into_iter()
-                    .filter(|f| !is_excluded(&f.relative_path, sync_excludes))
+                    .filter(|f| is_included(&f.relative_path, sync_includes))
                     .map(|f| LocalFileRecord {
                         path_file: f.relative_path,
                         size: f.size,
@@ -1155,20 +1162,25 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
 /// Updates `.sync-meta.json` to remove the deleted entries.
 /// Called in a background thread from the `update_game` command handler.
 /// `drive_folder_id` is the specific Drive folder for the affected save-path entry.
+/// Removes Drive files that are no longer included in sync (i.e. not matched by
+/// `new_includes`). Called in a background thread from the `update_game` command
+/// handler when the sync filter changes.
+/// If `new_includes` is empty all files are included, so nothing needs removal.
 /// Returns the number of Drive files deleted.
-pub fn cleanup_excluded_from_cloud(
+pub fn cleanup_not_included_from_cloud(
     app: &AppHandle,
     game_id: &str,
     drive_folder_id: &str,
-    newly_excluded: Vec<String>,
+    new_includes: Vec<String>,
 ) -> Result<u32, String> {
-    if newly_excluded.is_empty() {
+    if new_includes.is_empty() {
+        // Empty includes = sync all — nothing to remove from Drive.
         return Ok(0);
     }
 
     println!(
-        "[sync] Cleaning up {} newly-excluded path(s) from Drive for game {game_id}",
-        newly_excluded.len()
+        "[sync] Cleaning Drive files not matched by {} inclusion rule(s) for game {game_id}",
+        new_includes.len()
     );
 
     // 1. Download sync metadata
@@ -1181,11 +1193,11 @@ pub fn cleanup_excluded_from_cloud(
         }
     };
 
-    // 2. For each excluded path, delete its Drive file and remove it from meta
+    // 2. For each cloud file not covered by the inclusion list, delete it from Drive
     let keys_to_remove: Vec<String> = cloud_meta
         .files
         .iter()
-        .filter(|f| is_excluded(&f.path_file, &newly_excluded))
+        .filter(|f| !is_included(&f.path_file, &new_includes))
         .map(|f| f.path_file.clone())
         .collect();
 
@@ -1193,7 +1205,7 @@ pub fn cleanup_excluded_from_cloud(
     for rel_path in &keys_to_remove {
         if let Some(file_entry) = cloud_meta.files.iter().find(|f| f.path_file == *rel_path).cloned() {
             if let Some(ref drive_file_id) = file_entry.drive_file_id {
-                println!("[sync] Deleting excluded Drive file '{rel_path}' (id={drive_file_id})");
+                println!("[sync] Removing non-included Drive file '{rel_path}' (id={drive_file_id})");
                 if let Err(e) = gdrive::delete_drive_file(app, drive_file_id) {
                     eprintln!("[sync] Failed to delete Drive file '{rel_path}': {e}");
                 } else {
@@ -1223,20 +1235,19 @@ pub fn cleanup_excluded_from_cloud(
 
 // ── On-demand cleanup for all paths ──────────────────────
 
-/// Delete all Drive files matching the game's current `sync_excludes` for every
-/// configured save path. This is the engine for the on-demand "Clean excluded
-/// from Drive" command — handles files that were already on Drive before an
-/// exclusion rule was added.
+/// Remove from Drive all files not covered by each path's current `sync_includes` filter.
+/// Called by the on-demand "Remove non-included from Drive" command.
+/// Empty `sync_includes` on a path means "sync all" — that path is skipped.
 /// Returns the total number of Drive files deleted across all paths.
-pub fn clean_excluded_from_cloud_all_paths(app: &AppHandle, game_id: &str) -> Result<u32, String> {
+pub fn clean_not_included_from_cloud_all_paths(app: &AppHandle, game_id: &str) -> Result<u32, String> {
     let state = settings::load_state(app)?;
     let game = settings::find_game(&state, game_id)?.clone();
 
     let mut total_deleted: u32 = 0;
 
     for (i, sp) in game.save_paths.iter().enumerate() {
-        if sp.sync_excludes.is_empty() {
-            continue;
+        if sp.sync_includes.is_empty() {
+            continue; // No filter on this path — nothing to remove
         }
 
         let folder_id = if i == 0 {
@@ -1251,10 +1262,10 @@ pub fn clean_excluded_from_cloud_all_paths(app: &AppHandle, game_id: &str) -> Re
             }
         };
 
-        println!("[sync] Cleaning excluded files for {game_id} path-{i} from folder {folder_id}");
-        match cleanup_excluded_from_cloud(app, game_id, &folder_id, sp.sync_excludes.clone()) {
+        println!("[sync] Removing non-included Drive files for {game_id} path-{i} from folder {folder_id}");
+        match cleanup_not_included_from_cloud(app, game_id, &folder_id, sp.sync_includes.clone()) {
             Ok(count) => total_deleted += count,
-            Err(e) => eprintln!("[sync] Failed to clean excluded files for {game_id} path-{i}: {e}"),
+            Err(e) => eprintln!("[sync] Failed to clean non-included files for {game_id} path-{i}: {e}"),
         }
     }
 

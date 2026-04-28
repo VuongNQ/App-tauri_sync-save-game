@@ -254,6 +254,21 @@ pub fn load_state(app: &AppHandle) -> Result<StoredState, String> {
         }
     }
 
+    // One-time migration (pass 4): clear legacy `sync_excludes` from every SavePathEntry.
+    // The new model uses `sync_includes` (empty = sync all); the old exclusion data cannot
+    // be automatically converted so it is discarded here and pushed to Firestore.
+    if migrate_sync_excludes_to_includes(&mut state) {
+        println!("[settings] Cleared legacy sync_excludes — migrated to sync_includes model");
+        if let Err(e) = save_state(app, &state) {
+            eprintln!("[settings] sync_excludes migration save failed: {e}");
+        } else {
+            // Push each updated game to Firestore so the old syncExcludes field is wiped there too.
+            for game in &state.games {
+                spawn_firestore_game_upsert(app, game.clone());
+            }
+        }
+    }
+
     Ok(state)
 }
 
@@ -292,6 +307,7 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
         label: "Save Folder".to_string(),
         path: normalized_save_path,
         gdrive_folder_id: None,
+        sync_includes: vec![],
         sync_excludes: vec![],
     }];
     route_save_paths(&mut save_paths, &id, &mut state.settings, &payload.path_mode);
@@ -803,12 +819,15 @@ fn migrate_save_paths_to_vec(state: &mut StoredState) -> bool {
     let mut migrated = false;
     for game in &mut state.games {
         if game.save_paths.is_empty() {
-            let excludes = std::mem::take(&mut game.sync_excludes);
+            // Discard old sync_excludes — migration Pass 4 will clear them anyway;
+            // they cannot be converted to an equivalent inclusion list without a file scan.
+            let _ = std::mem::take(&mut game.sync_excludes);
             game.save_paths.push(SavePathEntry {
                 label: "Save Folder".to_string(),
                 path: game.save_path.take(),
                 gdrive_folder_id: None,
-                sync_excludes: excludes,
+                sync_includes: vec![],
+                sync_excludes: vec![],
             });
             migrated = true;
         }
@@ -879,6 +898,28 @@ fn migrate_per_device_override_keys(state: &mut StoredState) -> bool {
         }
     }
 
+    migrated
+}
+
+/// One-time migration (pass 4): clear legacy `sync_excludes` from every `SavePathEntry`.
+/// The new inclusion model uses `sync_includes` (empty = sync all).
+/// Old exclusion data cannot be automatically inverted so it is discarded.
+/// Returns `true` when at least one entry was modified.
+fn migrate_sync_excludes_to_includes(state: &mut StoredState) -> bool {
+    let mut migrated = false;
+    for game in &mut state.games {
+        for entry in &mut game.save_paths {
+            if !entry.sync_excludes.is_empty() {
+                entry.sync_excludes.clear();
+                migrated = true;
+            }
+        }
+        // Also clear top-level legacy field
+        if !game.sync_excludes.is_empty() {
+            game.sync_excludes.clear();
+            migrated = true;
+        }
+    }
     migrated
 }
 

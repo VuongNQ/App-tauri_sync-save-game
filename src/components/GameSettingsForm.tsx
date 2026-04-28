@@ -30,7 +30,7 @@ const savePathEntrySchema = z.object({
   label: z.string().min(1, "Label is required"),
   path: z.string(),
   gdriveFolderId: z.string().nullable().optional(),
-  syncExcludes: z.array(z.string()),
+  syncIncludes: z.array(z.string()),
 });
 
 const gameSettingsSchema = z.object({
@@ -136,7 +136,7 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
         label: entry.label,
         path: norm(entry.path),
         gdriveFolderId: entry.gdriveFolderId ?? null,
-        syncExcludes: entry.syncExcludes,
+        syncIncludes: entry.syncIncludes,
       })),
       exeName: values.exeName.trim() || null,
       exePath: norm(values.exePath ?? ""),
@@ -304,7 +304,7 @@ function SavePathsSection({ game, isSyncing, isPathInvalid }: SavePathsSectionPr
   const pathMode = useWatch({ control, name: "pathMode" });
 
   function handleAdd() {
-    append({ label: `Save Folder ${fields.length + 1}`, path: "", gdriveFolderId: null, syncExcludes: [] });
+    append({ label: `Save Folder ${fields.length + 1}`, path: "", gdriveFolderId: null, syncIncludes: [] });
   }
 
   function handleModeChange(newMode: "auto" | "per_device") {
@@ -489,27 +489,26 @@ function SavePathCard({ index, game, pathMode, isSyncing, onRemove, canRemove }:
         )}
       />
 
-      <SavePathExclusionsSection index={index} game={game} />
+      <SavePathInclusionsSection index={index} game={game} />
     </div>
   );
 }
 
-// ── Per-path exclusions (embedded inside SavePathCard) ────────────────────────
+// ── Per-path sync filter (embedded inside SavePathCard) ─────────────────────
 
-interface SavePathExclusionsSectionProps {
+interface SavePathInclusionsSectionProps {
   index: number;
   game: GameEntry;
 }
 
-function SavePathExclusionsSection({ index, game }: SavePathExclusionsSectionProps) {
+function SavePathInclusionsSection({ index, game }: SavePathInclusionsSectionProps) {
   const { setValue, control } = useFormContext<GameSettingsFormValues>();
-  const excluded = useWatch({ control, name: `savePaths.${index}.syncExcludes` }) ?? [];
+  const included = useWatch({ control, name: `savePaths.${index}.syncIncludes` }) ?? [];
   const currentPath = useWatch({ control, name: `savePaths.${index}.path` });
 
   const [saveInfo, setSaveInfo] = useState<SaveInfo | null>(null);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [manualInput, setManualInput] = useState("");
 
   async function handleLoadFiles() {
     setLoadError(null);
@@ -539,61 +538,48 @@ function SavePathExclusionsSection({ index, game }: SavePathExclusionsSectionPro
   }
 
   function handleToggle(path: string, _isFolder: boolean) {
-    const next = excluded.includes(path) ? excluded.filter((e) => e !== path) : [...excluded, path];
-    setValue(`savePaths.${index}.syncExcludes`, next, { shouldDirty: true });
+    const next = included.includes(path) ? included.filter((e) => e !== path) : [...included, path];
+    setValue(`savePaths.${index}.syncIncludes`, next, { shouldDirty: true });
   }
 
   function handleRemove(path: string) {
-    setValue(`savePaths.${index}.syncExcludes`, excluded.filter((e) => e !== path), { shouldDirty: true });
-  }
-
-  function handleManualAdd() {
-    const trimmed = manualInput.trim();
-    if (!trimmed || excluded.includes(trimmed)) {
-      setManualInput("");
-      return;
-    }
-    setValue(`savePaths.${index}.syncExcludes`, [...excluded, trimmed], { shouldDirty: true });
-    setManualInput("");
+    setValue(`savePaths.${index}.syncIncludes`, included.filter((e) => e !== path), { shouldDirty: true });
   }
 
   return (
     <div className="mt-1">
-      <p className="m-0 mb-2 text-xs font-medium text-[#9aa8c7]">Sync exclusions</p>
+      <p className="m-0 mb-2 text-xs font-medium text-[#9aa8c7]">Sync filter <span className="font-normal text-[#6a7a9a]">(optional)</span></p>
 
-      {excluded.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-3">
-          {excluded.map((ex) => (
-            <span
-              key={ex}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-[rgba(255,180,80,0.12)] border border-[rgba(255,180,80,0.25)] text-[#ffd5a0]"
-            >
-              <span className="font-mono truncate max-w-65" title={ex}>{ex}</span>
-              <button
-                type="button"
-                className="shrink-0 text-[#ffd5a0] hover:text-white leading-none"
-                onClick={() => handleRemove(ex)}
-                title="Remove exclusion"
-              >
-                ×
-              </button>
-            </span>
-          ))}
+      {included.length === 0 ? (
+        <div className="mb-3 p-2.5 rounded-xl border border-[rgba(100,180,255,0.2)] bg-[rgba(9,40,80,0.3)] text-[#7dc9ff] text-xs flex items-start gap-2">
+          <span className="mt-0.5 shrink-0">ℹ</span>
+          <span>No filter — all files in this folder will be synced.</span>
         </div>
+      ) : (
+        <>
+          <div className="mb-2 p-2 rounded-xl border border-[rgba(100,180,255,0.15)] bg-[rgba(9,40,80,0.2)] text-[#7dc9ff] text-xs">
+            Only the selected files and folders will be synced.
+          </div>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {included.map((inc) => (
+              <span
+                key={inc}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs bg-[rgba(80,160,255,0.12)] border border-[rgba(80,160,255,0.25)] text-[#a0d4ff]"
+              >
+                <span className="font-mono truncate max-w-65" title={inc}>{inc}</span>
+                <button
+                  type="button"
+                  className="shrink-0 text-[#a0d4ff] hover:text-white leading-none"
+                  onClick={() => handleRemove(inc)}
+                  title="Remove from filter"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        </>
       )}
-
-      <div className={INPUT_ROW + " mb-3"}>
-        <input
-          className={INPUT_CLS}
-          value={manualInput}
-          onChange={(e) => setManualInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleManualAdd())}
-          placeholder="e.g. UserMetaData.sav  or  backup/"
-        />
-        <button type="button" className={SECONDARY_BTN} onClick={handleManualAdd} disabled={!manualInput.trim()}>
-          Add
-        </button>
-      </div>
 
       {!saveInfo && (
         <button
@@ -611,12 +597,12 @@ function SavePathExclusionsSection({ index, game }: SavePathExclusionsSectionPro
       {saveInfo && (
         <>
           <div className="flex items-center justify-between mb-1">
-            <p className="m-0 text-xs text-[#9aa8c7]">Check files or folders to exclude from sync.</p>
+            <p className="m-0 text-xs text-[#9aa8c7]">Check files or folders to include in sync.</p>
             <button type="button" className="text-xs text-[#7dc9ff] hover:underline" onClick={() => setSaveInfo(null)}>
               Hide
             </button>
           </div>
-          <SaveFileTree info={saveInfo} checkable excluded={excluded} onToggle={handleToggle} />
+          <SaveFileTree info={saveInfo} checkable included={included} onToggle={handleToggle} />
         </>
       )}
     </div>

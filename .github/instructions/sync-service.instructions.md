@@ -277,7 +277,7 @@ Public wrapper over `contract_env_vars` (normalises backslashes then tokenises).
 
 ### Two-Tier Save Path Storage (Multi-Path)
 
-Each game has **one or more** `SavePathEntry` records in `GameEntry.save_paths`. Each entry has a `label`, `path`, `gdrive_folder_id`, and `sync_excludes`.
+Each game has **one or more** `SavePathEntry` records in `GameEntry.save_paths`. Each entry has a `label`, `path`, `gdrive_folder_id`, and `sync_includes`.
 
 The key format inside `path_overrides` / `path_overrides_indexed` depends on `GameEntry.path_mode`:
 
@@ -302,8 +302,9 @@ Both `path_overrides` and `path_overrides_indexed` are **local-only** — never 
 
 **One-time migrations** (all run automatically on every `load_state()`):
 - Pass 1 — `migrate_absolute_save_paths()` — moves any `SavePathEntry.path` without `%` tokens into the appropriate override map.
-- Pass 2 — `migrate_save_paths_to_vec()` — converts any `GameEntry` without `save_paths` but with legacy `save_path` + `sync_excludes` into `save_paths[0]`.
+- Pass 2 — `migrate_save_paths_to_vec()` — converts any `GameEntry` without `save_paths` but with legacy `save_path` + `sync_excludes` into `save_paths[0]` with `sync_includes: []` (old excludes are discarded — cannot be automatically inverted).
 - Pass 3 — `migrate_per_device_override_keys()` — for `per_device` games, upgrades old plain-`game_id` override keys (`"game_id"` / `"game_id:i"`) written before the device-ID scheme was introduced to the new `"game_id:device_id"` / `"game_id:device_id:i"` format. Disambiguates by checking whether the part after the colon is a bare integer (old format) vs. a UUID (new format). Returns `true` when at least one key was migrated; triggers a `save_state` call.
+- Pass 4 — `migrate_sync_excludes_to_includes()` — clears all legacy `sync_excludes` fields from every `SavePathEntry` and from `GameEntry`. Old exclusion data cannot be automatically converted to an inclusion list without a full file scan, so it is discarded. Pushes updated games to Firestore so the old `syncExcludes` field is wiped there too.
 
 **`sync_all_games` filter**: Must check `!g.save_paths.is_empty()` to include games with configured paths.
 
