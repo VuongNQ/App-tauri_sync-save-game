@@ -922,16 +922,18 @@ pub fn fetch_settings_from_cloud(app: &AppHandle) -> Result<bool, String> {
 
 // ── Logo upload ───────────────────────────────────────────
 
-const MAX_LOGO_BYTES: usize = 3 * 1024 * 1024; // 3 MB
+const MAX_LOGO_BYTES: usize = 2 * 1024 * 1024; // 2 MB
 
 /// Validate and upload a game logo (local file path or HTTPS URL) to the game's
 /// Drive folder as `logo.<ext>`. Replaces any previously uploaded logo.
 ///
+/// Returns the Google-hosted preview URL on success (`https://lh3.googleusercontent.com/d/{fileId}`).
+///
 /// Returns `Err` if:
 /// - The source cannot be read / downloaded.
-/// - The image exceeds the 3 MB size limit.
+/// - The image exceeds the 2 MB size limit.
 /// - The Drive upload fails.
-pub fn upload_game_logo(app: &AppHandle, game_id: &str, logo_source: &str) -> Result<(), String> {
+pub fn upload_game_logo(app: &AppHandle, game_id: &str, logo_source: &str) -> Result<String, String> {
     // 1. Fetch bytes and determine file extension.
     let (bytes, ext) = if logo_source.starts_with("http://") || logo_source.starts_with("https://") {
         fetch_logo_url_bytes(logo_source)?
@@ -942,7 +944,7 @@ pub fn upload_game_logo(app: &AppHandle, game_id: &str, logo_source: &str) -> Re
     // 2. Validate size.
     if bytes.len() > MAX_LOGO_BYTES {
         return Err(format!(
-            "Logo is {:.1} MB — must be 3 MB or smaller.",
+            "Logo is {:.1} MB — must be 2 MB or smaller.",
             bytes.len() as f64 / 1_048_576.0
         ));
     }
@@ -957,19 +959,71 @@ pub fn upload_game_logo(app: &AppHandle, game_id: &str, logo_source: &str) -> Re
     let logo_name = format!("logo.{ext}");
 
     // If the extension changed (e.g. from png to jpg), delete the old file first.
-    if let Some(old) = existing_logo {
+    let uploaded = if let Some(old) = existing_logo {
         if old.name != logo_name {
             delete_drive_file(app, &old.id)?;
-            upload_bytes_as_file(app, &folder_id, &logo_name, &bytes, None)?;
+            upload_bytes_as_file(app, &folder_id, &logo_name, &bytes, None)?
         } else {
-            upload_bytes_as_file(app, &folder_id, &logo_name, &bytes, Some(&old.id))?;
+            upload_bytes_as_file(app, &folder_id, &logo_name, &bytes, Some(&old.id))?
         }
     } else {
-        upload_bytes_as_file(app, &folder_id, &logo_name, &bytes, None)?;
+        upload_bytes_as_file(app, &folder_id, &logo_name, &bytes, None)?
+    };
+
+    println!("[gdrive] Logo uploaded for game {game_id} as {logo_name} (id: {})", uploaded.id);
+    // Store as drive-file:{id} — the frontend fetches bytes via the get_logo_data_url command.
+    Ok(format!("drive-file:{}", uploaded.id))
+}
+
+/// Download a game logo image from Drive by file ID, using the stored OAuth token.
+/// Returns `(image_bytes, content_type_string)`. Used by the `gdrive-img://` URI
+/// scheme protocol handler in `lib.rs` to serve thumbnails directly in the WebView.
+pub fn download_logo_by_file_id(app: &AppHandle, file_id: &str) -> Result<(Vec<u8>, String), String> {
+    let url = format!("{DRIVE_FILES_URL}/{file_id}?alt=media");
+    let token = gdrive_auth::get_access_token(app)?;
+
+    let resp = http_client::make_agent()
+        .get(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .call()
+        .map_err(|e| format!("Drive logo download request failed: {e}"))?;
+
+    let status = resp.status().as_u16();
+
+    // 401: force a token refresh and retry once
+    if status == 401 {
+        let new_token = gdrive_auth::get_access_token(app)?;
+        let resp2 = http_client::make_agent()
+            .get(&url)
+            .header("Authorization", &format!("Bearer {new_token}"))
+            .call()
+            .map_err(|e| format!("Drive logo download retry failed: {e}"))?;
+        let status2 = resp2.status().as_u16();
+        if status2 != 200 {
+            return Err(format!("Drive logo download unauthorized (HTTP {status2})"));
+        }
+        let content_type = resp2.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("image/png")
+            .to_string();
+        let bytes = resp2.into_body().read_to_vec()
+            .map_err(|e| format!("Read Drive logo body failed: {e}"))?;
+        return Ok((bytes, content_type));
     }
 
-    println!("[gdrive] Logo uploaded for game {game_id} as {logo_name}");
-    Ok(())
+    if status != 200 {
+        return Err(format!("Drive logo download failed (HTTP {status})"));
+    }
+
+    let content_type = resp.headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/png")
+        .to_string();
+    let bytes = resp.into_body().read_to_vec()
+        .map_err(|e| format!("Read Drive logo body failed: {e}"))?;
+    Ok((bytes, content_type))
 }
 
 /// Download image bytes from an HTTP/HTTPS URL (no auth required — public URL).

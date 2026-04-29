@@ -6,9 +6,10 @@ import { useEffect, useState } from "react";
 import { Controller, FormProvider, useFieldArray, useForm, useFormContext, useWatch } from "react-hook-form";
 import { z } from "zod";
 import { DASHBOARD_KEY, useUpdateGameMutation } from "../queries";
-import { contractPath, expandSavePath, getBrowseDefaultPath, getSaveInfo, uploadGameLogo } from "../services/tauri";
+import { contractPath, expandSavePath, getBrowseDefaultPath, getFileSize, getSaveInfo, uploadGameLogo } from "../services/tauri";
 import type { DashboardData, GameEntry, SaveInfo } from "../types/dashboard";
-import { msg, norm, toImgSrc } from "../utils";
+import { msg, norm } from "../utils";
+import { GameThumbnail } from "./GameThumbnail";
 import { SaveFileTree } from "./SaveFileTree";
 import {
   CARD,
@@ -37,7 +38,13 @@ const gameSettingsSchema = z.object({
   thumbnail: z
     .string()
     .refine(
-      (v) => !v || v.startsWith("https://") || v.startsWith("http://") || /^[A-Za-z]:[\\/]/.test(v),
+      (v) =>
+        !v ||
+        v.startsWith("https://") ||
+        v.startsWith("http://") ||
+        v.startsWith("drive-file:") ||
+        v.startsWith("gdrive-img://") ||
+        /^[A-Za-z]:[\\/]/.test(v),
       "Enter a valid image URL (https://…) or browse a local file."
     ),
   description: z.string().max(1000, "Description must be 1000 characters or fewer."),  pathMode: z.enum(["auto", "per_device"]),  savePaths: z.array(savePathEntrySchema),
@@ -63,6 +70,8 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
   const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
+
+  const [thumbnailSizeError, setThumbnailSizeError] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -106,6 +115,7 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
   }, [gameSettings, reset]);
 
   async function onSaveSettings(values: GameSettingsFormValues) {
+    if (thumbnailSizeError) return;
     setLogoUploadError(null);
     const src = norm(values.thumbnail);
 
@@ -114,22 +124,32 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
       return;
     }
 
-    if (methods.formState.dirtyFields.thumbnail && src) {
+    // Determine what thumbnail value to persist after save.
+    // - Local file (from Browse): upload to Drive, use returned URL on success.
+    //   On upload failure: continue saving other fields with the previous thumbnail.
+    // - HTTP/HTTPS URL or cleared: store as-is, no upload needed.
+    const isLocalFile = src && !/^https?:\/\//.test(src);
+    const thumbnailChanged = methods.formState.dirtyFields.thumbnail;
+
+    let thumbnailToSave: string | null = src;
+
+    if (thumbnailChanged && isLocalFile) {
       setIsUploadingLogo(true);
       try {
-        await uploadGameLogo(gameSettings.id, src);
+        const driveUrl = await uploadGameLogo(gameSettings.id, src);
+        thumbnailToSave = driveUrl;
       } catch (err) {
-        setLogoUploadError(msg(err, "Logo upload failed."));
+        setLogoUploadError(msg(err, "Logo upload failed. Other settings were saved."));
+        thumbnailToSave = gameSettings.thumbnail ?? null; // keep previous thumbnail
+      } finally {
         setIsUploadingLogo(false);
-        return;
       }
-      setIsUploadingLogo(false);
     }
 
     const trimmed = values.description.trim().slice(0, 1000);
     await updateMutation.mutateAsync({
       ...gameSettings,
-      thumbnail: src || null,
+      thumbnail: thumbnailToSave,
       description: trimmed || null,
       pathMode: values.pathMode,
       savePaths: values.savePaths.map((entry) => ({
@@ -146,7 +166,7 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
   }
 
   const isSaving = isUploadingLogo || updateMutation.isPending;
-  const saveError = logoUploadError ?? (updateMutation.isError ? msg(updateMutation.error, "Unable to save.") : null);
+  const saveError = updateMutation.isError ? msg(updateMutation.error, "Unable to save.") : null;
 
   return (
     <FormProvider {...methods}>
@@ -176,7 +196,12 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
 
         {isOpen && gameSettings && (
           <div className="flex flex-col gap-5 pt-4">
-            <ThumbnailSection isSyncing={isSyncing} />
+            <ThumbnailSection
+              isSyncing={isSyncing}
+              sizeError={thumbnailSizeError}
+              uploadError={logoUploadError}
+              onSizeError={setThumbnailSizeError}
+            />
             <DescriptionSection />
             <SavePathsSection game={gameSettings} isSyncing={isSyncing} isPathInvalid={isPathInvalid} />
             <GameExecutableSection game={gameSettings} exePathValid={exePathValid} />
@@ -194,9 +219,12 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
 
 interface ThumbnailSectionProps {
   isSyncing: boolean;
+  sizeError: string | null;
+  uploadError: string | null;
+  onSizeError: (err: string | null) => void;
 }
 
-function ThumbnailSection({ isSyncing }: ThumbnailSectionProps) {
+function ThumbnailSection({ isSyncing, sizeError, uploadError, onSizeError }: ThumbnailSectionProps) {
   const {
     control,
     setValue,
@@ -213,6 +241,15 @@ function ThumbnailSection({ isSyncing }: ThumbnailSectionProps) {
     });
     if (typeof p === "string") {
       setValue("thumbnail", p, { shouldValidate: true, shouldDirty: true });
+      onSizeError(null);
+      try {
+        const bytes = await getFileSize(p);
+        if (bytes > 2 * 1024 * 1024) {
+          onSizeError(`Image is ${(bytes / 1_048_576).toFixed(1)} MB — must be 2 MB or smaller.`);
+        }
+      } catch {
+        // size check failed silently — backend will enforce the limit on upload
+      }
     }
   }
 
@@ -221,15 +258,12 @@ function ThumbnailSection({ isSyncing }: ThumbnailSectionProps) {
       <h3 className="m-0 mb-4 font-semibold">Logo / Thumbnail</h3>
 
       <div className={FORM_GRID}>
-        {thumbnailValue && (
+        {thumbnailValue && !sizeError && (
           <div className="w-20 h-20 rounded-2xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
-            <img
-              src={toImgSrc(thumbnailValue)}
+            <GameThumbnail
+              src={thumbnailValue}
               alt="Thumbnail preview"
               className="w-full h-full object-cover"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = "none";
-              }}
             />
           </div>
         )}
@@ -247,6 +281,8 @@ function ThumbnailSection({ isSyncing }: ThumbnailSectionProps) {
                 </button>
               </div>
               {errors.thumbnail && <span className={FIELD_ERROR}>{errors.thumbnail.message}</span>}
+              {sizeError && <span className={FIELD_ERROR}>{sizeError}</span>}
+              {uploadError && <span className={FIELD_ERROR}>{uploadError}</span>}
             </label>
           )}
         />

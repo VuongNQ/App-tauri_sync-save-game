@@ -3,30 +3,18 @@ import { Link } from "react-router";
 import { useRemoveGameMutation } from "../queries";
 import { useSyncAndLaunchFlow } from "../queries/detail";
 import type { GameEntry } from "../types/dashboard";
-import { formatBytes, toImgSrc } from "../utils";
+import { formatBytes } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
+import { GameThumbnail } from "./GameThumbnail";
 import { BTN, CARD, MUTED, SEC_HDR, SOFT_BADGE, SOURCE_BADGE } from "./styles";
 
 function LazyThumbnail({ src }: { src: string }) {
-  const [loaded, setLoaded] = useState(false);
-  const [errored, setErrored] = useState(false);
-
-  if (errored) {
-    return <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-lg">🎮</div>;
-  }
-
   return (
-    <div className="relative w-full h-full">
-      {!loaded && <div className="absolute inset-0 animate-pulse bg-[rgba(165,185,255,0.08)]" />}
-      <img
-        src={toImgSrc(src)}
-        alt=""
-        loading="lazy"
-        className={`w-full h-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
-        onLoad={() => setLoaded(true)}
-        onError={() => setErrored(true)}
-      />
-    </div>
+    <GameThumbnail
+      src={src}
+      className="w-full h-full object-cover"
+      fallback={<div className="grid place-items-center w-full h-full text-[#9aa8c7] text-lg">🎮</div>}
+    />
   );
 }
 

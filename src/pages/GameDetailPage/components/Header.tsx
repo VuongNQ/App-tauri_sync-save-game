@@ -1,7 +1,8 @@
 import { CARD, EYEBROW, GHOST_BTN, PRIMARY_BTN, SOFT_BADGE, SOURCE_BADGE } from "@/components/styles";
+import { GameThumbnail } from "@/components/GameThumbnail";
 import { DashboardQuery, ValidatePathsQuery } from "@/queries/dashboard";
 import { useSyncAndLaunchFlow } from "@/queries/detail";
-import { formatBytes, formatLocalTime, toImgSrc } from "@/utils";
+import { formatBytes, formatLocalTime } from "@/utils";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "react-router";
@@ -55,7 +56,7 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
         {/* Thumbnail */}
         <div className="w-24 h-24 shrink-0 rounded-2xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
           {game.thumbnail ? (
-            <img src={toImgSrc(game.thumbnail)} alt={game.name} className="w-full h-full object-cover" />
+            <GameThumbnail src={game.thumbnail} alt={game.name} className="w-full h-full object-cover" />
           ) : (
             <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-3xl">🎮</div>
           )}

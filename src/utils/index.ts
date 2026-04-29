@@ -3,6 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 /**
  * Convert a thumbnail path or URL to a safe <img src> value for both dev and release builds.
  * - http/https URLs → returned as-is
+ * - drive-file: / gdrive-img:// → return undefined (fetched async by GameThumbnail via getLogoDataUrl)
  * - Local file paths → converted to asset:// protocol via convertFileSrc()
  *   (raw file paths fail in Tauri release builds; asset:// works in both modes)
  */
@@ -10,7 +11,15 @@ export function toImgSrc(thumbnail: string | null | undefined): string | undefin
   if (!thumbnail) return undefined;
   const src = thumbnail.trim();
   if (src.startsWith("http://") || src.startsWith("https://")) return src;
+  // Drive thumbnails are fetched async via getLogoDataUrl — not renderable directly
+  if (src.startsWith("drive-file:") || src.startsWith("gdrive-img://")) return undefined;
   return convertFileSrc(src);
+}
+
+/** Returns true when the value is a local Windows file path (e.g. C:\...). */
+export function isLocalFilePath(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return /^[A-Za-z]:[\\/]/.test(value.trim());
 }
 
 /** Trim a string; return null if empty. */

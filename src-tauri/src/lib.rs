@@ -320,17 +320,53 @@ fn get_save_info(app: tauri::AppHandle, game_id: String) -> Result<SaveInfo, Str
 
 // ── Sync commands ─────────────────────────────────────────
 
-/// Validate a game logo (file ≤ 3 MB; URL download ≤ 3 MB) and upload it to the
-/// game's Google Drive folder as `logo.<ext>`.
+/// Validate a game logo (file ≤ 2 MB; URL download ≤ 2 MB), upload it to the
+/// game's Google Drive folder as `logo.<ext>`, and return the hosted preview URL.
 #[tauri::command]
 async fn upload_game_logo(
     app: tauri::AppHandle,
     game_id: String,
     logo_source: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     tokio::task::spawn_blocking(move || gdrive::upload_game_logo(&app, &game_id, &logo_source))
         .await
         .map_err(|e| format!("Logo upload task failed: {e}"))?
+}
+
+/// Return the byte size of a local file path. Used by the frontend to validate
+/// thumbnail image size before upload.
+#[tauri::command]
+fn get_file_size(path: String) -> Result<u64, String> {
+    std::fs::metadata(&path)
+        .map(|m| m.len())
+        .map_err(|e| format!("Could not read file metadata: {e}"))
+}
+
+/// Download a Drive logo by thumbnail identifier and return it as a base64 data URL.
+/// Accepts `drive-file:{fileId}` (current) and legacy `gdrive-img://` format.
+#[tauri::command]
+async fn get_logo_data_url(
+    app: tauri::AppHandle,
+    thumbnail: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let file_id = if let Some(id) = thumbnail.strip_prefix("drive-file:") {
+            id.to_string()
+        } else if let Some(id) = thumbnail.strip_prefix("gdrive-img://localhost/") {
+            id.to_string()
+        } else if let Some(id) = thumbnail.strip_prefix("gdrive-img://") {
+            id.to_string()
+        } else {
+            return Err(format!("Not a Drive thumbnail: {thumbnail}"));
+        };
+
+        let (bytes, content_type) = gdrive::download_logo_by_file_id(&app, &file_id)?;
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        Ok(format!("data:{content_type};base64,{b64}"))
+    })
+    .await
+    .map_err(|e| format!("Logo fetch task failed: {e}"))?
 }
 
 // ── Drive file management commands ────────────────────────
@@ -692,6 +728,8 @@ pub fn run() {
             expand_save_path,
             contract_path,
             upload_game_logo,
+            get_file_size,
+            get_logo_data_url,
             list_game_drive_files_flat,
             list_game_drive_files,
             rename_game_drive_file,

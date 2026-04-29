@@ -149,12 +149,29 @@ export async function contractPath(path: string): Promise<string> {
 // ── Logo upload ───────────────────────────────────────────────────────────────
 
 /**
- * Validate a game logo (≤ 3 MB) and upload it to the game's Google Drive folder.
- * `logoSource` is a local file path or an HTTPS image URL.
- * Throws if the logo exceeds 3 MB or if the Drive upload fails.
+ * Validate a game logo (≤ 2 MB) and upload it to the game's Google Drive folder.
+ * `logoSource` must be a local file path (not an http/https URL).
+ * Returns the `gdrive-img://{fileId}` URI served by Tauri's custom protocol handler.
+ * Throws if the logo exceeds 2 MB or if the Drive upload fails.
  */
-export async function uploadGameLogo(gameId: string, logoSource: string): Promise<void> {
-  return invoke<void>("upload_game_logo", { gameId, logoSource });
+export async function uploadGameLogo(gameId: string, logoSource: string): Promise<string> {
+  return invoke<string>("upload_game_logo", { gameId, logoSource });
+}
+
+/**
+ * Return the byte size of a local file. Used for client-side thumbnail size
+ * validation (must be ≤ 2 MB) before allowing upload.
+ */
+export async function getFileSize(path: string): Promise<number> {
+  return invoke<number>("get_file_size", { path });
+}
+
+/**
+ * Download a Drive logo by thumbnail identifier (`drive-file:{id}` or legacy `gdrive-img://...`)
+ * and return it as a base64 data URL suitable for use in an `<img src>`.
+ */
+export async function getLogoDataUrl(thumbnail: string): Promise<string> {
+  return invoke<string>("get_logo_data_url", { thumbnail });
 }
 
 // ── Drive file management ─────────────────────────────────────────────────────
