@@ -81,7 +81,7 @@ src-tauri/src/
 | `id` | `String` | `string` | Stable key: `manual-{slug}` with collision suffix |
 | `name` | `String` | `string` | Display name |
 | `description` | `Option<String>` | `string \| null` | User-provided description |
-| `thumbnail` | `Option<String>` | `string \| null` | Local file path **or** remote URL for logo/thumbnail |
+| `thumbnail` | `Option<String>` | `string \| null` | Game logo/thumbnail: `https://...` URL, `drive-file:{fileId}` (Drive-hosted, fetched via `get_logo_data_url`), local file path, or `null`. Drive images are downloaded on-demand as base64 data URLs by the `GameThumbnail` component. |
 | `source` | `String` | `string` | One of: `"manual"`, `"emulator"` |
 | `path_mode` | `String` | `string` | `"auto"` (default) or `"per_device"`. Controls how save-path override keys are keyed: `"auto"` uses plain `game_id`; `"per_device"` uses `"{game_id}:{device_id}"`. Old records without this field deserialize as `"auto"` via `#[serde(default)]`. |
 | `save_paths` | `Vec<SavePathEntry>` | `SavePathEntry[]` | Ordered list of save-game folder entries. Primary path is index 0. Users can add multiple paths (e.g. memcards + save states). See `SavePathEntry` below. |
@@ -167,7 +167,7 @@ tauri::generate_handler![
     // Game launcher
     launch_game,
     // Logo
-    upload_game_logo,
+    upload_game_logo, get_logo_data_url,
     // Drive file management
     list_game_drive_files, list_game_drive_files_flat,
     rename_game_drive_file, move_game_drive_file, delete_game_drive_file,
@@ -340,6 +340,22 @@ The frontend uses **React Router** for navigation. The app shell includes a pers
 ### Auth Guard
 
 A route wrapper or layout component checks `isAuthenticated` (from Tauri command). Unauthenticated requests redirect to `/login`.
+
+### Logo/Thumbnail Handling
+
+Thumbnails use a two-tier loading strategy:
+- **Local files & HTTP/HTTPS URLs** — rendered directly via `toImgSrc()` utility (returns asset:// URIs for local files)
+- **Drive-hosted images** (`drive-file:{fileId}`) — fetched async via `GameThumbnail` React component
+
+**`GameThumbnail` component** (`src/components/GameThumbnail.tsx`):
+- Accepts `src` prop (can be local file path, http/https URL, or `drive-file:{fileId}`)
+- For local + HTTP sources: renders immediately via `toImgSrc()`
+- For Drive sources: uses `useQuery` to fetch the image from Drive via the `get_logo_data_url` Tauri command
+- While fetching Drive images: shows a pulse skeleton animation (`animate-pulse`)
+- On image error: falls back to a game controller emoji (🎮) or custom fallback prop
+- Cache time: 1 hour (`staleTime: 1000 * 60 * 60`) — logos rarely change
+
+**Usage**: Replace all `<img src={toImgSrc(thumbnail)}>` with `<GameThumbnail src={thumbnail} />` in display components. Used in `GamesList`, `GameDetailPage/Header`, `GameSettingsForm` preview.
 
 ---
 
@@ -550,6 +566,43 @@ npm run tauri -- build
 ```
 
 > cargo is installed via rustup at `%USERPROFILE%\.cargo\bin`. If a new terminal doesn't find `cargo`, prepend that directory as shown above.
+
+---
+
+## Game Logo Upload & Display Flow
+
+### Upload (Add/Edit Game)
+
+1. **Frontend**: User selects local image or enters HTTPS URL in `AddGameCard.tsx` or `GameSettingsForm.tsx`
+2. **Validation**: `getFileSize()` command checks file size ≤ 2 MB (frontend + backend enforce limit)
+3. **Upload** (local files only): `uploadGameLogo(gameId, logoSource)` Tauri command:
+   - Backend (`gdrive.rs`): downloads URL bytes or reads local file, validates 2 MB, uploads to Drive `games/{gameId}/logo.<ext>`
+   - Returns `drive-file:{fileId}` (not a URL, but a Drive file reference)
+4. **Persist**: Game saved with thumbnail = `drive-file:{fileId}` (for local files) or original HTTPS URL (for external URLs)
+5. **On failure**: Error shown inline; game fields saved anyway (except thumbnail remains unchanged)
+
+### Display (Dashboard, Detail Page, Settings Preview)
+
+1. **Render flow**:
+   - GamesList: `<GameThumbnail src={game.thumbnail} />`
+   - GameDetailPage/Header: `<GameThumbnail src={game.thumbnail} />`
+   - GameSettingsForm preview: `<GameThumbnail src={thumbnailValue} />`
+
+2. **`GameThumbnail` component logic**:
+   - Local files (e.g. `C:\path\to\image.png`): `toImgSrc()` converts to `asset://` protocol
+   - HTTPS URLs: rendered directly
+   - `drive-file:{fileId}`: async fetch via `getLogoDataUrl(thumbnail)` → `data:image/...;base64,...`
+   - While loading Drive images: pulse skeleton animation
+   - On error: fallback to game controller emoji (🎮)
+   - Query cache: 1 hour
+
+### Tauri Commands
+
+| Command | Signature | Returns | Purpose |
+|---------|-----------|---------|---------|
+| `upload_game_logo` | `(gameId, logoSource)` | `String` | Upload local image or HTTPS URL to Drive; return `drive-file:{fileId}` |
+| `get_logo_data_url` | `(thumbnail)` | `String` | Fetch `drive-file:{fileId}` from Drive; return base64 data URL (`data:image/...;base64,...`) |
+| `get_file_size` | `(path)` | `u64` | Get byte size of local file for pre-upload validation |
 
 ---
 

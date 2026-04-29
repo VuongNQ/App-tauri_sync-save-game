@@ -50,6 +50,7 @@ src/
     styles.ts          # Shared Tailwind class-string constants
     AppLayout.tsx      # Sidebar + <Outlet /> shell
     AuthGuard.tsx      # Route protection (layout route)
+    GameThumbnail.tsx  # Async Drive logo loader with fallback (uses useQuery)
     DriveFilesSection.tsx  # Collapsible Drive file manager (rename, move, delete)
     VersionBackupsSection.tsx  # Collapsible version backup manager (create, restore, delete)
     ...
@@ -208,6 +209,69 @@ export async function launchGame(gameId: string): Promise<void> {
 - No error handling inside service functions — let errors bubble to React Query / component
 - Argument name must exactly match the Rust `#[tauri::command]` parameter names
 - Return type matches the Rust command's `Result<T, String>` success type
+
+---
+
+## Game Logo & Thumbnail Handling
+
+### Thumbnail Storage Formats
+
+Thumbnails are stored in the `GameEntry.thumbnail` field with one of three formats:
+1. **Local file path** — e.g. `C:\path\to\image.png` — rendered directly via `asset://` protocol
+2. **HTTPS URL** — e.g. `https://example.com/logo.png` — rendered directly (external image)
+3. **Drive-hosted** — e.g. `drive-file:{fileId}` — fetched async via `get_logo_data_url` Tauri command, converted to base64 data URL
+
+### `GameThumbnail` Component (`src/components/GameThumbnail.tsx`)
+
+Shared component for all logo/thumbnail rendering. Handles all three formats transparently:
+
+```tsx
+interface Props {
+  src?: string | null;
+  alt?: string;
+  className?: string;
+  fallback?: React.ReactNode; // Custom fallback; default is game-controller emoji
+}
+
+export function GameThumbnail({ src, alt = "thumbnail", className = "", fallback }: Props) {
+  // Returns immediately for local files and HTTPS URLs
+  if (!isDriveThumbnail(src)) {
+    return <img src={toImgSrc(src)} alt={alt} className={className} onError={...} />;
+  }
+
+  // For drive-file:* URLs, fetch async via React Query
+  const { data: dataUrl, isLoading, isError } = useQuery({
+    queryKey: ["logo-data-url", src],
+    queryFn: () => getLogoDataUrl(src!),
+    staleTime: 1000 * 60 * 60, // 1 hour cache
+    retry: 1,
+  });
+
+  if (isLoading) return <div className="animate-pulse bg-[rgba(165,185,255,0.08)]" />;
+  if (isError || !dataUrl) return fallback || <div className="text-lg">🎮</div>;
+
+  return <img src={dataUrl} alt={alt} className={className} onError={...} />;
+}
+
+function isDriveThumbnail(src?: string | null): boolean {
+  return !!src && (src.startsWith("drive-file:") || src.startsWith("gdrive-img://"));
+}
+```
+
+**Usage in all display locations:**
+- Replace `<img src={toImgSrc(thumbnail)}>` with `<GameThumbnail src={thumbnail} />`
+- Used in: `GamesList`, `GameDetailPage/Header`, `GameSettingsForm` preview
+- Component handles loading skeleton, error fallback, and caching automatically
+
+### Logo Upload Flow
+
+When user selects a logo (local file or HTTPS URL) in `AddGameCard` or `GameSettingsForm`:
+
+1. **Validation** → `getFileSize()` checks ≤ 2 MB
+2. **Upload** (local files) → `uploadGameLogo(gameId, filePath)` → Rust uploads to Drive → returns `drive-file:{fileId}`
+3. **External URLs** → Pass through unchanged (e.g. `https://...`)
+4. **Persist** → Game saved with new thumbnail value
+5. **Display** → Next render of `GameThumbnail` fetches Drive image, caches for 1 hour
 
 ---
 
