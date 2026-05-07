@@ -135,6 +135,8 @@ export interface AdminConfig {
   driveQuotaBytes: number;
 }
 
+export const DEFAULT_DRIVE_QUOTA_BYTES = 200 * 1024 * 1024;
+
 // ── Save Info ─────────────────────────────────────────────
 
 export interface SaveFileInfo {

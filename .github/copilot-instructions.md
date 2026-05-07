@@ -304,7 +304,7 @@ export interface AppSettings {
    - If `i == 0`: use `GameEntry.gdrive_folder_id` as the Drive folder (existing root).
    - If `i >= 1`: call `gdrive::ensure_subfolder(app, root_folder_id, "path-{i}")` → cache the returned ID in `save_paths[i].gdrive_folder_id`.
 3. Fetch `.sync-meta.json` from that path's Drive folder.
-4. **Storage quota check** (pre-upload): sum projected bytes for this game + `cloud_storage_bytes` from all other games. Reject if total exceeds **200 MB per user**.
+4. **Storage quota check** (pre-upload): sum projected bytes for this game + `cloud_storage_bytes` from all other games. Reject if total exceeds `adminConfig/global.driveQuotaBytes` (fallback default: 200 MB).
 5. **Compare**: if local is newer → upload local saves to Drive. If Drive is newer → download Drive saves to local. If equal → no-op.
 6. After sync, update `.sync-meta.json` on Drive and `last_local_modified` / `last_cloud_modified` / `cloud_storage_bytes` (sum across all paths) in local state.
 

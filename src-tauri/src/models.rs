@@ -189,8 +189,10 @@ pub struct AdminConfig {
     pub drive_quota_bytes: u64,
 }
 
+pub const DEFAULT_DRIVE_QUOTA_BYTES: u64 = 200 * 1024 * 1024;
+
 fn default_drive_quota_bytes() -> u64 {
-    200 * 1024 * 1024
+    DEFAULT_DRIVE_QUOTA_BYTES
 }
 
 // ── Devices ───────────────────────────────────────────────

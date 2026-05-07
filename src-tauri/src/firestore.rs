@@ -3,7 +3,10 @@ use tauri::AppHandle;
 
 use crate::{
     http_client,
-    models::{AdminConfig, AppSettings, DeviceInfo, GameEntry, GoogleUserInfo, SyncMeta, UserProfile, UserRole},
+    models::{
+        AdminConfig, AppSettings, DeviceInfo, GameEntry, GoogleUserInfo, SyncMeta,
+        UserProfile, UserRole, DEFAULT_DRIVE_QUOTA_BYTES,
+    },
 };
 
 const PROJECT_ID: &str = match option_env!("GOOGLE_CLOUD_PROJECT_ID") {
@@ -117,8 +120,6 @@ fn extract_doc_fields(doc: &Value) -> Value {
 // ── Game CRUD ─────────────────────────────────────────────
 
 // ── User directory / admin config ─────────────────────────
-
-const DEFAULT_DRIVE_QUOTA_BYTES: u64 = 200 * 1024 * 1024;
 
 /// Ensure the current user's profile exists in the global directory collection.
 /// The first authenticated user on a fresh install becomes admin automatically.

@@ -1038,14 +1038,14 @@ pub struct StoredState {
 Enforced in `sync_game_inner()` before any upload occurs:
 
 ```rust
-const DEFAULT_STORAGE_LIMIT_BYTES: u64 = 200 * 1024 * 1024;
+pub const DEFAULT_DRIVE_QUOTA_BYTES: u64 = 200 * 1024 * 1024;
 ```
 
 ### Enforcement Algorithm
 
 1. Call `projected_game_cloud_bytes(&local_files, &cloud_meta)` — computes projected bytes for the current game (local file sizes + cloud-only file sizes).
 2. Sum `cloud_storage_bytes` from all **other** games in local state (no Drive API call needed — fast).
-3. Load `adminConfig/global`; if unavailable, fall back to `DEFAULT_STORAGE_LIMIT_BYTES`.
+3. Load `adminConfig/global`; if unavailable, fall back to `DEFAULT_DRIVE_QUOTA_BYTES`.
 4. If `other_games_bytes + projected_this_game > storage_limit_bytes` → return `Err(...)` with a human-readable message before any upload.
 4. On successful sync, update `GameEntry.cloud_storage_bytes` to the actual sum of all file sizes in the new `SyncMeta`.
 

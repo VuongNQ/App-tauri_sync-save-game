@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { useAdminConfigQuery, useAdminUsersQuery, useUpdateAdminConfigMutation, useUpdateUserRoleMutation } from "../queries";
+import { DEFAULT_DRIVE_QUOTA_BYTES } from "../types/dashboard";
 import type { UserProfile, UserRole } from "../types/dashboard";
 import { BTN, CARD, EYEBROW, MUTED } from "../components/styles";
 import { formatLocalTime } from "../utils";
@@ -30,7 +31,7 @@ export function AdminPage() {
         ) : (
           <QuotaEditor
             key={configQuery.data?.driveQuotaBytes ?? "quota"}
-            driveQuotaBytes={configQuery.data?.driveQuotaBytes ?? 200 * 1024 * 1024}
+            driveQuotaBytes={configQuery.data?.driveQuotaBytes ?? DEFAULT_DRIVE_QUOTA_BYTES}
             isSaving={updateConfig.isPending}
             onSave={(driveQuotaBytes) => updateConfig.mutate({ driveQuotaBytes })}
           />

@@ -126,7 +126,7 @@ export function useFooMutation() {
 - All API calls use `ureq` with `Bearer {access_token}` header.
 - Folder structure: `appDataFolder/game-processing-sync/games/{game_id}/`.
 - `.sync-meta.json` tracks timestamps + file hashes per game.
-- Pre-upload quota check: reject if projected total > 200 MB.
+- Pre-upload quota check: reject if projected total exceeds `adminConfig/global.driveQuotaBytes` (fallback default: 200 MB).
 - Conflict resolution: compare `last_modified` timestamps — newest wins.
 - Cloud library sync (`sync_library_to_cloud`) always runs in a background thread after local save.
 

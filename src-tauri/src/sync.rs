@@ -12,7 +12,7 @@ use crate::{
     firestore, gdrive, gdrive_auth,
     models::{
         LocalFileRecord, LocalSyncState, PathSaveInfo, SaveFileInfo, SaveInfo, SyncFileEntry,
-        SyncMeta, SyncResult, SyncStructureDiff,
+        SyncMeta, SyncResult, SyncStructureDiff, DEFAULT_DRIVE_QUOTA_BYTES,
     },
     settings,
 };
@@ -80,8 +80,20 @@ fn collect_local_files(save_path: &Path) -> Result<Vec<LocalFileInfo>, String> {
 
 // ── Public functions ──────────────────────────────────────
 
-/// Default maximum total cloud storage allowed when Firestore config is unavailable.
-const DEFAULT_STORAGE_LIMIT_BYTES: u64 = 200 * 1024 * 1024;
+/// Resolve the effective global storage limit from Firestore admin config.
+/// Falls back to the built-in default when config is unavailable.
+fn resolve_storage_limit_bytes(app: &AppHandle) -> u64 {
+    match firestore::load_admin_config(app) {
+        Ok(cfg) => cfg.drive_quota_bytes,
+        Err(e) => {
+            eprintln!(
+                "[sync] Failed to load adminConfig/global quota, using default {} bytes: {e}",
+                DEFAULT_DRIVE_QUOTA_BYTES
+            );
+            DEFAULT_DRIVE_QUOTA_BYTES
+        }
+    }
+}
 
 /// Check whether a relative path should be included in sync based on the inclusion list.
 ///
@@ -305,9 +317,7 @@ fn sync_single_path(
     // 1. Get cloud sync metadata
     let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, drive_folder_id)?;
     let cloud_meta = cloud_meta_opt.unwrap_or_default();
-    let storage_limit_bytes = firestore::load_admin_config(app)
-        .map(|cfg| cfg.drive_quota_bytes)
-        .unwrap_or(DEFAULT_STORAGE_LIMIT_BYTES);
+    let storage_limit_bytes = resolve_storage_limit_bytes(app);
 
     // 2. List existing Drive files (for live timestamps + file IDs)
     let mut drive_files = gdrive::list_files(app, drive_folder_id)?;
@@ -1011,9 +1021,7 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
         .filter(|g| g.id != game_id)
         .map(|g| g.cloud_storage_bytes.unwrap_or(0))
         .sum();
-    let storage_limit_bytes = firestore::load_admin_config(app)
-        .map(|cfg| cfg.drive_quota_bytes)
-        .unwrap_or(DEFAULT_STORAGE_LIMIT_BYTES);
+    let storage_limit_bytes = resolve_storage_limit_bytes(app);
 
     let mut total_uploaded = 0u32;
     let mut total_skipped = 0u32;

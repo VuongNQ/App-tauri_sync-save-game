@@ -58,7 +58,7 @@ usePushToCloudMutation()
    - `i == 0` → use `GameEntry.gdrive_folder_id` (cache it on first run via `ensure_game_folder`).
    - `i >= 1` → `gdrive::ensure_subfolder(app, root_folder_id, "path-{i}")` → cache in `save_paths[i].gdrive_folder_id`.
 3. Fetch `.sync-meta.json` from that path's Drive folder.
-4. **Storage quota check** (pre-upload): projected bytes + bytes from other games ≤ 200 MB.
+4. **Storage quota check** (pre-upload): projected bytes + bytes from other games ≤ `adminConfig/global.driveQuotaBytes` (fallback default: 200 MB).
 5. **Compare** `local_mtime` vs `cloud_mtime`:
    - Local newer → upload local files to Drive.
    - Cloud newer → download Drive files to local.
