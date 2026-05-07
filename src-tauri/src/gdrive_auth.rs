@@ -8,6 +8,7 @@ use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
+    firestore,
     http_client,
     models::{AuthStatus, GoogleUserInfo, OAuthTokens, SaveTokensPayload},
 };
@@ -62,27 +63,63 @@ pub fn check_auth_status(app: &AppHandle) -> Result<AuthStatus, String> {
 
     let tokens = match load_tokens(app) {
         Some(t) => t,
-        None => return Ok(AuthStatus { authenticated: false }),
+        None => {
+            return Ok(AuthStatus {
+                authenticated: false,
+                role: crate::models::UserRole::User,
+            })
+        }
     };
 
     if now_secs() < tokens.expires_at {
-        return Ok(AuthStatus { authenticated: true });
+        sync_current_user_profile(app);
+        return Ok(AuthStatus {
+            authenticated: true,
+            role: firestore::current_user_role(app),
+        });
     }
 
     // Token expired — try silent refresh
     match refresh_access_token(app, &tokens) {
-        Ok(_) => Ok(AuthStatus { authenticated: true }),
+        Ok(_) => {
+            sync_current_user_profile(app);
+            Ok(AuthStatus {
+                authenticated: true,
+                role: firestore::current_user_role(app),
+            })
+        }
         Err(_) => {
             delete_tokens(app)?;
-            Ok(AuthStatus { authenticated: false })
+            Ok(AuthStatus {
+                authenticated: false,
+                role: crate::models::UserRole::User,
+            })
         }
+    }
+}
+
+fn sync_current_user_profile(app: &AppHandle) {
+    let user_id = match get_current_user_id(app) {
+        Some(id) => id,
+        None => return,
+    };
+    match get_google_user_info(app) {
+        Ok(info) => {
+            if let Err(e) = firestore::ensure_current_user_profile(app, &user_id, &info) {
+                eprintln!("[firestore] Failed to sync current user profile: {e}");
+            }
+        }
+        Err(e) => eprintln!("[gdrive_auth] Could not refresh current user profile: {e}"),
     }
 }
 
 /// Delete local tokens and return to unauthenticated state.
 pub fn logout(app: &AppHandle) -> Result<AuthStatus, String> {
     delete_tokens(app)?;
-    let status = AuthStatus { authenticated: false };
+    let status = AuthStatus {
+        authenticated: false,
+        role: crate::models::UserRole::User,
+    };
     let _ = app.emit("auth-status-changed", &status);
     println!("[gdrive_auth] Logged out — tokens deleted");
     Ok(status)
@@ -121,11 +158,16 @@ pub fn save_tokens_from_plugin(app: &AppHandle, payload: SaveTokensPayload) -> R
     // Fetch the stable Google account ID and persist it alongside the tokens.
     match fetch_user_info_with_token(&access_token) {
         Ok(info) => {
-            tokens.user_id = info.id;
+            let user_id = info.id.clone();
+            tokens.user_id = user_id.clone();
             if let Err(e) = save_tokens(app, &tokens) {
                 eprintln!("[gdrive_auth] Failed to persist user_id in token file: {e}");
             } else {
                 println!("[gdrive_auth] user_id captured: {}", tokens.user_id);
+            }
+
+            if let Err(e) = firestore::ensure_current_user_profile(app, &user_id, &info) {
+                eprintln!("[firestore] Failed to ensure current user profile: {e}");
             }
         }
         Err(e) => {
@@ -134,7 +176,10 @@ pub fn save_tokens_from_plugin(app: &AppHandle, payload: SaveTokensPayload) -> R
         }
     }
 
-    let status = AuthStatus { authenticated: true };
+    let status = AuthStatus {
+        authenticated: true,
+        role: firestore::current_user_role(app),
+    };
     let _ = app.emit("auth-status-changed", &status);
     println!("[gdrive_auth] Tokens saved from plugin sign-in");
     Ok(status)

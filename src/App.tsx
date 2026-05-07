@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { HashRouter, Routes, Route, Navigate } from "react-router";
 
 import { AppLayout } from "./components/AppLayout";
+import { AdminGuard } from "./components/AdminGuard";
 import { AuthGuard } from "./components/AuthGuard";
 import { AUTH_STATUS_KEY, DASHBOARD_KEY, DEVICES_KEY, gamePlayingKey } from "./queries/keys";
 import { useAuthStatusQuery, useSyncLibraryFromCloudMutation } from "./queries";
@@ -11,6 +12,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { DevicesPage } from "./pages/DevicesPage";
 import { GameDetailPage } from "./pages/GameDetailPage";
 import { LoginPage } from "./pages/LoginPage";
+import { AdminPage } from "./pages/AdminPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import type { AuthStatus } from "./types/dashboard";
 import "./App.css";
@@ -29,6 +31,9 @@ export function App() {
             <Route path="game/:id" element={<GameDetailPage />} />
             <Route path="devices" element={<DevicesPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route element={<AdminGuard />}>
+              <Route path="admin" element={<AdminPage />} />
+            </Route>
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

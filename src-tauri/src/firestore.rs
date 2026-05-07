@@ -3,7 +3,7 @@ use tauri::AppHandle;
 
 use crate::{
     http_client,
-    models::{AppSettings, DeviceInfo, GameEntry, SyncMeta},
+    models::{AdminConfig, AppSettings, DeviceInfo, GameEntry, GoogleUserInfo, SyncMeta, UserProfile, UserRole},
 };
 
 const PROJECT_ID: &str = match option_env!("GOOGLE_CLOUD_PROJECT_ID") {
@@ -116,6 +116,180 @@ fn extract_doc_fields(doc: &Value) -> Value {
 
 // ── Game CRUD ─────────────────────────────────────────────
 
+// ── User directory / admin config ─────────────────────────
+
+const DEFAULT_DRIVE_QUOTA_BYTES: u64 = 200 * 1024 * 1024;
+
+/// Ensure the current user's profile exists in the global directory collection.
+/// The first authenticated user on a fresh install becomes admin automatically.
+pub fn ensure_current_user_profile(
+    app: &AppHandle,
+    user_id: &str,
+    info: &GoogleUserInfo,
+) -> Result<UserProfile, String> {
+    if let Some(existing) = load_user_profile(app, user_id)? {
+        let updated = UserProfile {
+            user_id: user_id.to_string(),
+            email: info.email.clone(),
+            name: info.name.clone(),
+            picture: info.picture.clone(),
+            role: existing.role,
+            registered_at: existing.registered_at,
+            last_seen_at: chrono::Utc::now().to_rfc3339(),
+        };
+        save_user_profile(app, &updated)?;
+        return Ok(updated);
+    }
+
+    let existing_users = load_all_user_profiles(app)?;
+    let role = if existing_users.is_empty() {
+        UserRole::Admin
+    } else {
+        UserRole::User
+    };
+    let now = chrono::Utc::now().to_rfc3339();
+    let profile = UserProfile {
+        user_id: user_id.to_string(),
+        email: info.email.clone(),
+        name: info.name.clone(),
+        picture: info.picture.clone(),
+        role,
+        registered_at: now.clone(),
+        last_seen_at: now,
+    };
+    save_user_profile(app, &profile)?;
+    Ok(profile)
+}
+
+/// Load the current user's role if a profile exists; defaults to `user` on error.
+pub fn current_user_role(app: &AppHandle) -> UserRole {
+    let user_id = match crate::gdrive_auth::get_current_user_id(app) {
+        Some(id) => id,
+        None => return UserRole::User,
+    };
+    load_user_profile(app, &user_id)
+        .ok()
+        .flatten()
+        .map(|p| p.role)
+        .unwrap_or(UserRole::User)
+}
+
+/// Write (upsert) a user profile to the global directory collection.
+pub fn save_user_profile(app: &AppHandle, profile: &UserProfile) -> Result<(), String> {
+    let profile_val = serde_json::to_value(profile)
+        .map_err(|e| format!("Serialize UserProfile: {e}"))?;
+    let fields = match profile_val {
+        Value::Object(map) => map
+            .into_iter()
+            .map(|(k, v)| (k, json_to_firestore(&v)))
+            .collect::<serde_json::Map<_, _>>(),
+        _ => return Err("UserProfile did not serialize to object".into()),
+    };
+    let body = json!({ "fields": fields }).to_string();
+    let url = format!("{}/userProfiles/{}", base_url(), profile.user_id);
+    let (status, resp_body) = http_client::authed_patch_json(app, &url, &body)?;
+    if status != 200 && status != 201 {
+        return Err(format!("[firestore] save_user_profile HTTP {status}: {resp_body}"));
+    }
+    println!("[firestore] Saved user profile '{}'", profile.user_id);
+    Ok(())
+}
+
+/// Load a single user profile from the global directory collection.
+pub fn load_user_profile(
+    app: &AppHandle,
+    user_id: &str,
+) -> Result<Option<UserProfile>, String> {
+    let url = format!("{}/userProfiles/{user_id}", base_url());
+    let (status, body) = http_client::authed_get(app, &url)?;
+    if status == 404 {
+        return Ok(None);
+    }
+    if status != 200 {
+        return Err(format!("[firestore] load_user_profile HTTP {status}: {body}"));
+    }
+    let doc: Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Parse Firestore user profile doc: {e}"))?;
+    let plain = extract_doc_fields(&doc);
+    let profile = serde_json::from_value::<UserProfile>(plain)
+        .map_err(|e| format!("Deserialize UserProfile from Firestore: {e}"))?;
+    Ok(Some(profile))
+}
+
+/// Load all user profiles for the admin user-management page.
+pub fn load_all_user_profiles(app: &AppHandle) -> Result<Vec<UserProfile>, String> {
+    let url = format!("{}/userProfiles", base_url());
+    let (status, body) = http_client::authed_get(app, &url)?;
+    if status == 404 {
+        return Ok(vec![]);
+    }
+    if status != 200 {
+        return Err(format!("[firestore] load_all_user_profiles HTTP {status}: {body}"));
+    }
+
+    let resp: Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Parse Firestore user profile list: {e}"))?;
+    let docs = match resp.get("documents").and_then(Value::as_array) {
+        Some(a) => a,
+        None => return Ok(vec![]),
+    };
+
+    let mut profiles = Vec::with_capacity(docs.len());
+    for doc in docs {
+        let plain = extract_doc_fields(doc);
+        match serde_json::from_value::<UserProfile>(plain) {
+            Ok(p) => profiles.push(p),
+            Err(e) => eprintln!("[firestore] Skipping malformed user profile doc: {e}"),
+        }
+    }
+    profiles.sort_by(|a, b| b.last_seen_at.cmp(&a.last_seen_at));
+    println!("[firestore] Loaded {} user profiles", profiles.len());
+    Ok(profiles)
+}
+
+/// Load the admin-managed global Drive quota.
+pub fn load_admin_config(app: &AppHandle) -> Result<AdminConfig, String> {
+    let url = format!("{}/adminConfig/global", base_url());
+    let (status, body) = http_client::authed_get(app, &url)?;
+    if status == 404 {
+        return Ok(AdminConfig {
+            drive_quota_bytes: DEFAULT_DRIVE_QUOTA_BYTES,
+        });
+    }
+    if status != 200 {
+        return Err(format!("[firestore] load_admin_config HTTP {status}: {body}"));
+    }
+
+    let doc: Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Parse Firestore admin config doc: {e}"))?;
+    let plain = extract_doc_fields(&doc);
+    let config = serde_json::from_value::<AdminConfig>(plain)
+        .map_err(|e| format!("Deserialize AdminConfig from Firestore: {e}"))?;
+    Ok(config)
+}
+
+/// Save the admin-managed global Drive quota.
+pub fn save_admin_config(app: &AppHandle, config: &AdminConfig) -> Result<(), String> {
+    let config_val = serde_json::to_value(config)
+        .map_err(|e| format!("Serialize AdminConfig: {e}"))?;
+    let fields = match config_val {
+        Value::Object(map) => map
+            .into_iter()
+            .map(|(k, v)| (k, json_to_firestore(&v)))
+            .collect::<serde_json::Map<_, _>>(),
+        _ => return Err("AdminConfig did not serialize to object".into()),
+    };
+
+    let body = json!({ "fields": fields }).to_string();
+    let url = format!("{}/adminConfig/global", base_url());
+    let (status, resp_body) = http_client::authed_patch_json(app, &url, &body)?;
+    if status != 200 && status != 201 {
+        return Err(format!("[firestore] save_admin_config HTTP {status}: {resp_body}"));
+    }
+    println!("[firestore] Saved global admin config");
+    Ok(())
+}
+
 /// Write (upsert) a `GameEntry` to Firestore at `users/{user_id}/games/{game_id}`.
 /// `exe_path` is intentionally stripped — it is local-only (differs per device).
 pub fn save_game(app: &AppHandle, user_id: &str, game: &GameEntry) -> Result<(), String> {
@@ -207,7 +381,7 @@ pub fn save_settings(app: &AppHandle, user_id: &str, settings: &AppSettings) -> 
     let fields = match settings_val {
         Value::Object(map) => map
             .into_iter()
-            .filter(|(k, _)| k != "pathOverrides") // local-only, never synced to Firestore
+            .filter(|(k, _)| k != "pathOverrides" && k != "pathOverridesIndexed")
             .map(|(k, v)| (k, json_to_firestore(&v)))
             .collect::<serde_json::Map<_, _>>(),
         _ => return Err("AppSettings did not serialize to object".into()),

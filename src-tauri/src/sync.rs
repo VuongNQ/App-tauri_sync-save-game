@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use walkdir::WalkDir;
 
 use crate::{
-    gdrive, gdrive_auth,
+    firestore, gdrive, gdrive_auth,
     models::{
         LocalFileRecord, LocalSyncState, PathSaveInfo, SaveFileInfo, SaveInfo, SyncFileEntry,
         SyncMeta, SyncResult, SyncStructureDiff,
@@ -80,8 +80,8 @@ fn collect_local_files(save_path: &Path) -> Result<Vec<LocalFileInfo>, String> {
 
 // ── Public functions ──────────────────────────────────────
 
-/// Maximum total cloud storage allowed per user across all games (200 MB).
-const STORAGE_LIMIT_BYTES: u64 = 200 * 1024 * 1024;
+/// Default maximum total cloud storage allowed when Firestore config is unavailable.
+const DEFAULT_STORAGE_LIMIT_BYTES: u64 = 200 * 1024 * 1024;
 
 /// Check whether a relative path should be included in sync based on the inclusion list.
 ///
@@ -305,6 +305,9 @@ fn sync_single_path(
     // 1. Get cloud sync metadata
     let (cloud_meta_opt, meta_file_id) = gdrive::download_sync_meta(app, drive_folder_id)?;
     let cloud_meta = cloud_meta_opt.unwrap_or_default();
+    let storage_limit_bytes = firestore::load_admin_config(app)
+        .map(|cfg| cfg.drive_quota_bytes)
+        .unwrap_or(DEFAULT_STORAGE_LIMIT_BYTES);
 
     // 2. List existing Drive files (for live timestamps + file IDs)
     let mut drive_files = gdrive::list_files(app, drive_folder_id)?;
@@ -319,17 +322,18 @@ fn sync_single_path(
     // ── Storage limit guard ───────────────────────────────────────────────────
     let projected_this_path = projected_game_cloud_bytes(&local_files, &cloud_meta);
     let projected_total = other_games_bytes + current_game_cloud_bytes + projected_this_path;
-    if projected_total > STORAGE_LIMIT_BYTES {
+    if projected_total > storage_limit_bytes {
         return Err(format!(
-            "Storage limit exceeded: this sync would use {:.1} MB but the 200 MB per-user limit would be reached. \
+            "Storage limit exceeded: this sync would use {:.1} MB but the {:.1} MB limit would be reached. \
              Free up space by removing games or reducing save file sizes.",
-            projected_total as f64 / 1_048_576.0
+            projected_total as f64 / 1_048_576.0,
+            storage_limit_bytes as f64 / 1_048_576.0
         ));
     }
     println!(
         "[sync] Storage check passed for {game_id}: {:.1} MB / {:.1} MB used",
         projected_total as f64 / 1_048_576.0,
-        STORAGE_LIMIT_BYTES as f64 / 1_048_576.0
+        storage_limit_bytes as f64 / 1_048_576.0
     );
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -1007,6 +1011,9 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
         .filter(|g| g.id != game_id)
         .map(|g| g.cloud_storage_bytes.unwrap_or(0))
         .sum();
+    let storage_limit_bytes = firestore::load_admin_config(app)
+        .map(|cfg| cfg.drive_quota_bytes)
+        .unwrap_or(DEFAULT_STORAGE_LIMIT_BYTES);
 
     let mut total_uploaded = 0u32;
     let mut total_skipped = 0u32;
@@ -1055,10 +1062,11 @@ fn push_to_cloud_inner(app: &AppHandle, game_id: &str) -> Result<SyncResult, Str
         // ── Storage limit guard ────────────────────────────────────────────────
         let projected_this_path = projected_game_cloud_bytes(&local_files, &cloud_meta);
         let projected_total = other_games_bytes + total_cloud_bytes + projected_this_path;
-        if projected_total > STORAGE_LIMIT_BYTES {
+        if projected_total > storage_limit_bytes {
             return Err(format!(
-                "Storage limit exceeded: this push would use {:.1} MB but the 200 MB per-user limit would be reached.",
-                projected_total as f64 / 1_048_576.0
+                "Storage limit exceeded: this push would use {:.1} MB but the {:.1} MB limit would be reached.",
+                projected_total as f64 / 1_048_576.0,
+                storage_limit_bytes as f64 / 1_048_576.0
             ));
         }
         // ──────────────────────────────────────────────────────────────────────

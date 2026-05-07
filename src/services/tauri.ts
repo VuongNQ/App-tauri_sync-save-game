@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   AddGamePayload,
+  AdminConfig,
   AppSettings,
   AuthStatus,
   DashboardData,
@@ -18,6 +19,8 @@ import type {
   SyncResult,
   SyncStructureDiff,
   UpdateGamePayload,
+  UserProfile,
+  UserRole,
 } from "../types/dashboard";
 
 export async function loadDashboard(): Promise<DashboardData> {
@@ -61,6 +64,22 @@ export async function logout(): Promise<AuthStatus> {
 
 export async function getGoogleUserInfo(): Promise<GoogleUserInfo> {
   return invoke<GoogleUserInfo>("get_google_user_info");
+}
+
+export async function getAdminConfig(): Promise<AdminConfig> {
+  return invoke<AdminConfig>("get_admin_config");
+}
+
+export async function updateAdminConfig(config: AdminConfig): Promise<AdminConfig> {
+  return invoke<AdminConfig>("update_admin_config", { config });
+}
+
+export async function listUsers(): Promise<UserProfile[]> {
+  return invoke<UserProfile[]>("list_users");
+}
+
+export async function updateUserRole(userId: string, role: UserRole): Promise<UserProfile[]> {
+  return invoke<UserProfile[]>("update_user_role", { userId, role });
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────

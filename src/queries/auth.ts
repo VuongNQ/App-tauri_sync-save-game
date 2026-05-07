@@ -4,6 +4,7 @@ import { signIn, signOut } from "@choochmeque/tauri-plugin-google-auth-api";
 import { checkAuthStatus, getGoogleUserInfo, getOAuthCredentials, logout, saveAuthTokens } from "../services/tauri";
 import type { AuthStatus } from "../types/dashboard";
 import { AUTH_STATUS_KEY, GOOGLE_USER_INFO_KEY } from "./keys";
+import { ADMIN_CONFIG_KEY, ADMIN_USERS_KEY } from "./admin";
 
 const SCOPES = [
   "openid",
@@ -105,6 +106,8 @@ export function useLogoutMutation() {
     onSuccess: (data: AuthStatus) => {
       queryClient.setQueryData<AuthStatus>(AUTH_STATUS_KEY, data);
       queryClient.removeQueries({ queryKey: GOOGLE_USER_INFO_KEY });
+      queryClient.removeQueries({ queryKey: ADMIN_USERS_KEY });
+      queryClient.removeQueries({ queryKey: ADMIN_CONFIG_KEY });
     },
   });
 }

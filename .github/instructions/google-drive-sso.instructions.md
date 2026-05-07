@@ -25,8 +25,9 @@ Authentication uses `tauri-plugin-google-auth` (Rust crate: `tauri-plugin-google
 4. **Frontend** sends tokens to Rust via `saveAuthTokens(SaveTokensPayload)`.
 5. **Rust** persists `OAuthTokens { access_token, refresh_token, expires_at, user_id: "" }` to `TOKEN_FILE_NAME` first.
 6. **Rust** calls `/oauth2/v2/userinfo` with the access token to get the stable `id`; re-saves tokens with `user_id` populated.
-7. **Rust** calls `settings::fetch_all_from_firestore()` — loads game library + settings from Firestore, falls back to Drive `library.json` migration if Firestore has no data. This replaces the old separate `fetch_library_from_cloud` + `fetch_settings_from_cloud` calls.
-8. **Rust** emits `"auth-status-changed"` event and returns `AuthStatus { authenticated: true }`.
+7. **Rust** ensures the current Google account has a Firestore `userProfiles/{user_id}` document and auto-promotes the first authenticated account to `admin`.
+8. **Rust** calls `settings::fetch_all_from_firestore()` — loads game library + settings from Firestore, falls back to Drive `library.json` migration if Firestore has no data. This replaces the old separate `fetch_library_from_cloud` + `fetch_settings_from_cloud` calls.
+9. **Rust** emits `"auth-status-changed"` event and returns `AuthStatus { authenticated: true, role }`.
 
 ### Plugin Registration
 
@@ -52,9 +53,10 @@ pub fn get_access_token(app: &AppHandle) -> Result<String, String> { ... }
 ```
 
 - `expires_at` is a Unix timestamp (seconds). Refresh when `now_secs() >= expires_at`.
-- On refresh failure in `check_auth_status`: delete stored tokens, return `AuthStatus { authenticated: false }`.
+- On refresh failure in `check_auth_status`: delete stored tokens, return `AuthStatus { authenticated: false, role: "user" }`.
 - Token file path: `app.path().app_data_dir()? / TOKEN_FILE_NAME` (currently `oauth-tokens.json`).
 - Token refresh uses `POST https://oauth2.googleapis.com/token` with `grant_type=refresh_token`.
+- If the refresh token is invalid, expired, or revoked (for example `invalid_grant`): treat the user as signed out, delete stored tokens, return `authenticated: false`, and require re-authentication.
 - **Future**: migrate storage to OS keyring (`keyring` crate) — keep `load_tokens`/`save_tokens`/`delete_tokens` as the only I/O boundary so callers don't change.
 
 ### Token Persistence Functions
@@ -74,11 +76,12 @@ pub fn get_access_token(app: &AppHandle) -> Result<String, String> { ... }
 1. Build `OAuthTokens` with `user_id: String::new()` and `save_tokens()` immediately — makes `get_access_token()` functional.
 2. Call `fetch_user_info_with_token(&access_token)` (uses the payload token directly, no circular dependency).
 3. Set `tokens.user_id = info.id` and `save_tokens()` again — one extra disk write at login, never again unless re-login.
-4. If step 2 fails (network error) → log a warning, proceed; library falls back to legacy shared path until next login.
+4. Ensure a Firestore user profile exists for the current Google account and auto-promote the first account to admin.
+5. If step 2 fails (network error) → log a warning, proceed; library falls back to legacy shared path until next login.
 
 #### `user_id` propagation rules
 
-- Always copy `old.user_id` when constructing `new_tokens` in `refresh_access_token()` — **never reset it on refresh**.
+- Refresh construction rule: in `refresh_access_token()`, always copy `old.user_id` when constructing `new_tokens`; never reset `user_id` during refresh.
 - `OAuthTokens.user_id` has `#[serde(default)]` so old token files (without the field) deserialize as empty string without error.
 
 ## OAuth Scopes
@@ -311,11 +314,12 @@ export async function getGoogleUserInfo(): Promise<GoogleUserInfo> {
   On success, sets `AUTH_STATUS_KEY` cache to the returned `AuthStatus`.
 - `useLogoutMutation()` — calls plugin `signOut()` then Rust `logout()`; clears `AUTH_STATUS_KEY` and `GOOGLE_USER_INFO_KEY` caches.
 - `useGoogleUserInfoQuery()` — `useQuery` on `GOOGLE_USER_INFO_KEY`; enabled only when `authenticated === true`.
+- `useAdminUsersQuery()` / `useAdminConfigQuery()` belong in `queries/admin.ts` and should only run when the current user role is `admin`.
 - Never call `checkAuthStatus` directly in components — always go through the query hook.
 
 ### Auth Guard (`src/components/AuthGuard.tsx`)
 
-Layout route component using `<Outlet />`. Checks `useAuthStatusQuery().data?.authenticated`. If `false`, renders `<Navigate to="/login" replace />`. All dashboard routes are children of this layout. The `/login` page is the only unauthenticated route.
+Layout route component using `<Outlet />`. Checks `useAuthStatusQuery().data?.authenticated`. If `false`, renders `<Navigate to="/login" replace />`. Admin-only pages should use a second guard that checks `authStatus?.role === "admin"`. All dashboard routes are children of this layout. The `/login` page is the only unauthenticated route.
 
 ### Listening to Rust Events
 
@@ -335,7 +339,7 @@ useEffect(() => {
 ### Rust (`models.rs`) — all use `#[serde(rename_all = "camelCase")]`
 
 ```rust
-pub struct AuthStatus { pub authenticated: bool }
+pub struct AuthStatus { pub authenticated: bool, pub role: UserRole }
 
 pub struct OAuthTokens {        // internal, not sent to frontend
     pub access_token: String,
@@ -362,15 +366,20 @@ pub struct GoogleUserInfo {     // user profile from Google API
     pub name: Option<String>,
     pub picture: Option<String>,
 }
+
+pub struct UserProfile { /* userId, email, name, picture, role, registeredAt, lastSeenAt */ }
+pub struct AdminConfig { pub driveQuotaBytes: u64 }
 ```
 
 ### TypeScript (`src/types/dashboard.ts`) — canonical field names
 
 ```ts
-interface AuthStatus { authenticated: boolean }
+interface AuthStatus { authenticated: boolean; role: "admin" | "user" }
 interface SaveTokensPayload { accessToken: string; refreshToken: string | null; expiresAt: number | null }
 interface OAuthCredentials { clientId: string; clientSecret: string }
 interface GoogleUserInfo { id: string; email: string; name: string | null; picture: string | null }
+interface UserProfile { userId: string; email: string; name: string | null; picture: string | null; role: "admin" | "user"; registeredAt: string; lastSeenAt: string }
+interface AdminConfig { driveQuotaBytes: number }
 ```
 
 ### Serde Mapping
@@ -378,6 +387,7 @@ interface GoogleUserInfo { id: string; email: string; name: string | null; pictu
 | Rust field | TypeScript field |
 |------------|-----------------|
 | `authenticated` | `authenticated` |
+| `role` | `role` |
 | `access_token` | `accessToken` |
 | `refresh_token` | `refreshToken` |
 | `expires_at` | `expiresAt` |
@@ -403,7 +413,7 @@ style-src 'self' 'unsafe-inline'
 - Return `Err(String)` with a human-readable message from all Tauri commands — the frontend surfaces it directly.
 - On HTTP 401 from Drive API: force `get_access_token` to trigger a silent refresh and retry once before propagating the error.
 - Log Rust-side with `println!("[module] message")` (structured prefix for grep-ability).
-- On refresh failure: `check_auth_status` deletes stored tokens and returns `{ authenticated: false }`.
+- On refresh failure: `check_auth_status` deletes stored tokens and returns `{ authenticated: false, role: "user" }`.
 
 ## Security Checklist
 

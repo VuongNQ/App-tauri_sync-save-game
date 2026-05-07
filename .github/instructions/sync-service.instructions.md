@@ -112,6 +112,8 @@ users/{user_id}/
   settings/app          → AppSettings fields (Firestore typed values, flat document)
   syncMeta/{game_id}    → { data: stringValue (JSON blob of SyncMeta), gameId: stringValue }
   devices/{device_id}   → DeviceInfo fields (Firestore typed values, flat document)
+adminConfig/global      → AdminConfig with the global Drive quota
+userProfiles/{user_id}  → user profile + role metadata for auth/admin UI
 ```
 
 - **`games/{game_id}`**: Each `GameEntry` is a separate Firestore document. Field keys match camelCase TypeScript names.
@@ -139,6 +141,11 @@ const PROJECT_ID: &str = match option_env!("GOOGLE_CLOUD_PROJECT_ID") {
 | `load_all_games(app, user_id)` | GET collection | `users/{uid}/games` → `Vec<GameEntry>` |
 | `save_settings(app, user_id, settings)` | PATCH (upsert) | `users/{uid}/settings/app` |
 | `load_settings(app, user_id)` | GET | `users/{uid}/settings/app` → `Option<AppSettings>` |
+| `load_admin_config(app)` | GET | `adminConfig/global` → `AdminConfig` |
+| `save_admin_config(app, config)` | PATCH (upsert) | `adminConfig/global` |
+| `load_all_user_profiles(app)` | GET collection | `userProfiles` → `Vec<UserProfile>` |
+| `load_user_profile(app, user_id)` | GET | `userProfiles/{user_id}` → `Option<UserProfile>` |
+| `save_user_profile(app, profile)` | PATCH (upsert) | `userProfiles/{user_id}` |
 | `save_sync_meta(app, user_id, game_id, meta)` | PATCH (upsert) | `users/{uid}/syncMeta/{game_id}` |
 | `load_sync_meta(app, user_id, game_id)` | GET | `users/{uid}/syncMeta/{game_id}` → `Option<SyncMeta>` || `save_device(app, user_id, device)` | PATCH (upsert) | `users/{uid}/devices/{device_id}` — strips `is_current` before write |
 | `load_device(app, user_id, device_id)` | GET | `users/{uid}/devices/{device_id}` → `Option<DeviceInfo>` |
@@ -146,6 +153,7 @@ const PROJECT_ID: &str = match option_env!("GOOGLE_CLOUD_PROJECT_ID") {
 | `delete_device(app, user_id, device_id)` | DELETE (idempotent on 404) | `users/{uid}/devices/{device_id}` |
 > `load_sync_meta` is marked `#[allow(dead_code)]` — retained for future cross-device read path. Drive `.sync-meta.json` remains the exclusive read source today.
 > **`save_settings` strips local-only fields**: When serialising `AppSettings` to Firestore, **both `pathOverrides` and `pathOverridesIndexed`** fields are **always filtered out** before the write. They are local-only device-specific values and must never be stored in Firestore.
+> **Admin bootstrap**: the first authenticated Google account gets `role = admin` automatically and is stored in `userProfiles/{user_id}` along with profile metadata.
 ### 401 Retry Pattern (same as gdrive.rs)
 
 Every Firestore call wraps the request: on HTTP 401, force a token refresh via `gdrive_auth::get_access_token()` and retry once.
@@ -1025,19 +1033,20 @@ pub struct StoredState {
 
 ## Storage Quota (Per-User, Per-Sync)
 
-**Hard limit: 200 MB total cloud storage per user** across all games.
+**Admin-managed global quota**: Drive storage is capped by `adminConfig/global.driveQuotaBytes` (default 200 MB).
 
 Enforced in `sync_game_inner()` before any upload occurs:
 
 ```rust
-const STORAGE_LIMIT_BYTES: u64 = 200 * 1024 * 1024;
+const DEFAULT_STORAGE_LIMIT_BYTES: u64 = 200 * 1024 * 1024;
 ```
 
 ### Enforcement Algorithm
 
 1. Call `projected_game_cloud_bytes(&local_files, &cloud_meta)` — computes projected bytes for the current game (local file sizes + cloud-only file sizes).
 2. Sum `cloud_storage_bytes` from all **other** games in local state (no Drive API call needed — fast).
-3. If `other_games_bytes + projected_this_game > STORAGE_LIMIT_BYTES` → return `Err(...)` with a human-readable message before any upload.
+3. Load `adminConfig/global`; if unavailable, fall back to `DEFAULT_STORAGE_LIMIT_BYTES`.
+4. If `other_games_bytes + projected_this_game > storage_limit_bytes` → return `Err(...)` with a human-readable message before any upload.
 4. On successful sync, update `GameEntry.cloud_storage_bytes` to the actual sum of all file sizes in the new `SyncMeta`.
 
 ### `GameEntry.cloud_storage_bytes`

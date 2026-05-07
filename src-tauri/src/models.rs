@@ -2,6 +2,16 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+// ── Access control ────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum UserRole {
+    #[default]
+    User,
+    Admin,
+}
+
 // ── Dashboard ─────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -115,6 +125,8 @@ pub struct UpdateGamePayload {
 #[serde(rename_all = "camelCase")]
 pub struct AuthStatus {
     pub authenticated: bool,
+    #[serde(default)]
+    pub role: UserRole,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,6 +165,32 @@ pub struct GoogleUserInfo {
     pub email: String,
     pub name: Option<String>,
     pub picture: Option<String>,
+}
+
+// ── User directory / admin management ─────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserProfile {
+    pub user_id: String,
+    pub email: String,
+    pub name: Option<String>,
+    pub picture: Option<String>,
+    #[serde(default)]
+    pub role: UserRole,
+    pub registered_at: String,
+    pub last_seen_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminConfig {
+    #[serde(default = "default_drive_quota_bytes")]
+    pub drive_quota_bytes: u64,
+}
+
+fn default_drive_quota_bytes() -> u64 {
+    200 * 1024 * 1024
 }
 
 // ── Devices ───────────────────────────────────────────────

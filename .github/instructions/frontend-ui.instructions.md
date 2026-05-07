@@ -1,7 +1,7 @@
 ﻿---
 applyTo: "src/**/*.{ts,tsx}"
 description: >
-  Use when: creating or editing any React component, page, hook, query hook, mutation hook, service function, route, form, layout, or Tailwind style in this Tauri app. Covers the full frontend architecture: component conventions, React Query patterns, service layer, routing, TypeScript, form validation, Tauri event integration, and device management UI (DevicesPage, useDevicesQuery, useRenameDeviceMutation, useRemoveDeviceMutation).
+  Use when: creating or editing frontend code in this Tauri app (components, pages, hooks, queries, services, routes, forms, and Tailwind styles). Coverage groups: (1) structure and naming, (2) React Query and service-layer patterns, (3) routing and guards, (4) forms and validation, (5) Tauri event and device-management UI integration.
 ---
 
 # Frontend UI — Structure & Workflow
@@ -34,6 +34,7 @@ src/
   queries/
     keys.ts            # Query key constants
     auth.ts            # Auth query/mutation hooks
+    admin.ts           # Admin-only user/limit query hooks
     dashboard.ts       # Game library query/mutation hooks
     detail.ts          # Per-game hooks: useSyncAndLaunchFlow (phase state machine)
     sync.ts            # Sync mutation hooks
@@ -46,10 +47,12 @@ src/
     GameDetailPage/      # folder: index.tsx + hooks.ts + components/
     SettingsPage.tsx
     DevicesPage.tsx
+    AdminPage.tsx
   components/          # Reusable UI building blocks
     styles.ts          # Shared Tailwind class-string constants
     AppLayout.tsx      # Sidebar + <Outlet /> shell
     AuthGuard.tsx      # Route protection (layout route)
+    AdminGuard.tsx    # Admin-only layout route protection
     GameThumbnail.tsx  # Async Drive logo loader with fallback (uses useQuery)
     DriveFilesSection.tsx  # Collapsible Drive file manager (rename, move, delete)
     VersionBackupsSection.tsx  # Collapsible version backup manager (create, restore, delete)
@@ -137,6 +140,9 @@ import { HashRouter, Routes, Route, Navigate } from "react-router";
         <Route path="game/:id" element={<GameDetailPage />} />
         <Route path="devices" element={<DevicesPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route element={<AdminGuard />}>
+          <Route path="admin" element={<AdminPage />} />
+        </Route>
       </Route>
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
@@ -159,6 +165,10 @@ export function AuthGuard() {
 }
 ```
 
+### Admin Guard
+
+Wrap admin-only pages in a second layout guard that checks `authStatus?.role === "admin"` and redirects everyone else back to `/`.
+
 ### Navigation
 
 - `useNavigate()` for programmatic navigation
@@ -174,7 +184,7 @@ export function AuthGuard() {
 
 ```ts
 import { invoke } from "@tauri-apps/api/core";
-import type { DashboardData, AddGamePayload, SyncResult } from "../types/dashboard";
+import type { AdminConfig, AddGamePayload, DashboardData, SyncResult, UserProfile, UserRole } from "../types/dashboard";
 
 // One function per Tauri command, typed with return type
 export async function loadDashboard(): Promise<DashboardData> {
@@ -203,12 +213,29 @@ export async function contractPath(path: string): Promise<string> {
 export async function launchGame(gameId: string): Promise<void> {
   return invoke<void>("launch_game", { gameId });
 }
+
+export async function getAdminConfig(): Promise<AdminConfig> {
+  return invoke<AdminConfig>("get_admin_config");
+}
+
+export async function updateAdminConfig(config: AdminConfig): Promise<AdminConfig> {
+  return invoke<AdminConfig>("update_admin_config", { config });
+}
+
+export async function listUsers(): Promise<UserProfile[]> {
+  return invoke<UserProfile[]>("list_users");
+}
+
+export async function updateUserRole(userId: string, role: UserRole): Promise<UserProfile[]> {
+  return invoke<UserProfile[]>("update_user_role", { userId, role });
+}
 ```
 
 **Rules:**
 - No error handling inside service functions — let errors bubble to React Query / component
-- Argument name must exactly match the Rust `#[tauri::command]` parameter names
+- For every function that calls a Tauri command via `invoke`, all argument names must exactly match the Rust `#[tauri::command]` parameter names
 - Return type matches the Rust command's `Result<T, String>` success type
+- Handle unexpected Tauri command failures in the query/mutation or component layer by surfacing a clear user-facing error state and logging enough context for troubleshooting
 
 ---
 
@@ -301,6 +328,8 @@ export const SETTINGS_KEY = ["settings"] as const;
 export const GOOGLE_USER_INFO_KEY = ["google-user-info"] as const;
 export const SAVE_INFO_KEY = ["save-info"] as const;
 export const DEVICES_KEY = ["devices"] as const;
+export const ADMIN_USERS_KEY = ["admin-users"] as const;
+export const ADMIN_CONFIG_KEY = ["admin-config"] as const;
 // Per-game dynamic keys — factory functions:
 /** Prefix key — use for invalidating all cached folder queries of a game. */
 export const driveFilesKey = (gameId: string) => ["drive-files", gameId] as const;
@@ -323,6 +352,8 @@ export function useDashboardQuery() {
   });
 }
 ```
+
+- Admin-only data should use dedicated hooks such as `useAdminUsersQuery()` and `useAdminConfigQuery()` behind `AdminGuard`; do not fetch it from generic dashboard hooks.
 
 ### Mutation Hook Pattern — Full Dashboard State Update
 

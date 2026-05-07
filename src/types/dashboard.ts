@@ -1,4 +1,5 @@
 export type GameSource = "emulator" | "manual";
+export type UserRole = "admin" | "user";
 
 export interface SavePathEntry {
   label: string;
@@ -58,6 +59,7 @@ export interface UpdateGamePayload {
 
 export interface AuthStatus {
   authenticated: boolean;
+  role: UserRole;
 }
 
 export interface SaveTokensPayload {
@@ -77,6 +79,16 @@ export interface GoogleUserInfo {
   email: string;
   name: string | null;
   picture: string | null;
+}
+
+export interface UserProfile {
+  userId: string;
+  email: string;
+  name: string | null;
+  picture: string | null;
+  role: UserRole;
+  registeredAt: string;
+  lastSeenAt: string;
 }
 
 // ── Devices ───────────────────────────────────────────────
@@ -117,6 +129,10 @@ export interface AppSettings {
   pathOverrides: Record<string, string>;
   /** Device-specific save-path overrides for extra paths keyed by "{gameId}:{index}". Local-only. */
   pathOverridesIndexed: Record<string, string>;
+}
+
+export interface AdminConfig {
+  driveQuotaBytes: number;
 }
 
 // ── Save Info ─────────────────────────────────────────────

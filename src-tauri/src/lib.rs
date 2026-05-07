@@ -1,3 +1,4 @@
+mod admin;
 mod devices;
 mod drive_mgmt;
 mod firestore;
@@ -15,9 +16,10 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 use models::{
-    AddGamePayload, AppSettings, AuthStatus, DashboardData, DeviceInfo, DriveFileFlatItem,
-    DriveFileItem, DriveVersionBackup, GoogleUserInfo, OAuthCredentials, PathValidation, SaveInfo,
-    SaveTokensPayload, SyncResult, SyncStructureDiff, UpdateGamePayload,
+    AddGamePayload, AdminConfig, AppSettings, AuthStatus, DashboardData, DeviceInfo,
+    DriveFileFlatItem, DriveFileItem, DriveVersionBackup, GoogleUserInfo, OAuthCredentials,
+    PathValidation, SaveInfo, SaveTokensPayload, SyncResult, SyncStructureDiff, UpdateGamePayload,
+    UserProfile, UserRole,
 };
 
 #[tauri::command]
@@ -272,6 +274,30 @@ fn logout(app: tauri::AppHandle) -> Result<AuthStatus, String> {
 #[tauri::command]
 fn get_google_user_info(app: tauri::AppHandle) -> Result<GoogleUserInfo, String> {
     gdrive_auth::get_google_user_info(&app)
+}
+
+#[tauri::command]
+fn get_admin_config(app: tauri::AppHandle) -> Result<AdminConfig, String> {
+    admin::get_admin_config_cmd(&app)
+}
+
+#[tauri::command]
+fn update_admin_config(app: tauri::AppHandle, config: AdminConfig) -> Result<AdminConfig, String> {
+    admin::update_admin_config_cmd(&app, config)
+}
+
+#[tauri::command]
+fn list_users(app: tauri::AppHandle) -> Result<Vec<UserProfile>, String> {
+    admin::list_users_cmd(&app)
+}
+
+#[tauri::command]
+fn update_user_role(
+    app: tauri::AppHandle,
+    user_id: String,
+    role: UserRole,
+) -> Result<Vec<UserProfile>, String> {
+    admin::update_user_role_cmd(&app, user_id, role)
 }
 
 // ── Settings commands ─────────────────────────────────────
@@ -710,6 +736,10 @@ pub fn run() {
             get_oauth_credentials,
             logout,
             get_google_user_info,
+            get_admin_config,
+            update_admin_config,
+            list_users,
+            update_user_role,
             get_settings,
             update_settings,
             get_save_info,
