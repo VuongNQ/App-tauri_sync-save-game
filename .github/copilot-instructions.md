@@ -8,8 +8,8 @@ This is a **Windows desktop tool** built with Tauri 2 that tracks and syncs save
 
 1. **Game Library** — Users manually add games with: name, description, logo/thumbnail (local file or URL), source (Manual, Emulator), and save-game folder location.
 2. **Google Drive Sync** — All game save data is synced to Google Drive via the Google Drive API. OAuth 2.0 authentication is required before the app is usable.
-3. **Background Tracking** — The app runs in the background (system tray) on Windows startup. Per-game **process tracking** monitors whether the game executable is running; syncs save files when the process exits (**default: off**, user must opt-in per game and set the game's executable name `exeName`).
-4. **Auto-Sync** — When enabled, automatically backs up local save files to Google Drive whenever changes are detected.
+3. **Background Tracking** — The app runs in the background (system tray) on Windows startup. Per-game **process tracking** monitors whether the game executable is running; syncs save files when the process exits using bidirectional newest-wins sync (upload or download as needed) (**default: off**, user must opt-in per game and set the game's executable name `exeName`).
+4. **Auto-Sync** — When enabled, automatically syncs saves with Google Drive whenever changes are detected (downloads newer Drive files and uploads newer local files).
 5. **Conflict Resolution** — On each sync, compare the local file's last-modified timestamp with the Google Drive version's timestamp; always pick the **newest** save.
 6. **Device Management** — Each Windows machine that signs in is automatically registered in Firestore with a deterministic UUID (SHA-256 of `MachineGuid`), hostname, OS, CPU, and RAM info. Users can rename or remove devices from the `/devices` page.
 

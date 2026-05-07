@@ -171,6 +171,7 @@ pub fn start_poll_thread(app: AppHandle) {
                         // Decide whether to auto-sync.
                         // Contract: process-exit sync depends on tracked exe_name + auto_sync flag.
                         // It does not depend on exe_path being configured.
+                        // Direction is handled by sync::sync_game (newest wins: upload or download).
                         let mut should_auto_sync = false;
                         match settings::load_state(&app) {
                             Ok(state) => {
@@ -200,7 +201,7 @@ pub fn start_poll_thread(app: AppHandle) {
                         if should_auto_sync {
                             if let Ok(_guard) = sync_lock.try_lock() {
                                 println!(
-                                    "[watcher] Auto-sync triggered for '{game_id}' after process exit"
+                                    "[watcher] Auto-sync triggered for '{game_id}' after process exit (bidirectional: upload/download by newest timestamp)"
                                 );
                                 let _ = sync::sync_game(&app, game_id);
                             } else {

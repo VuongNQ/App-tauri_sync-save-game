@@ -32,6 +32,7 @@ Apply these rules when implementing or reviewing process tracking and auto-sync-
 - On process start: emit `game-status-changed` with `status: "playing"`.
 - On process exit: emit `game-status-changed` with `status: "idle"` before sync decision.
 - If `auto_sync=true`, attempt `sync::sync_game` with per-game lock.
+- Auto-sync on exit is bidirectional: download newer Drive saves and upload newer local saves (newest timestamp wins per file/path).
 - If lock is busy, skip duplicate sync and log reason.
 - If `auto_sync=false`, emit `game-sync-pending`.
 

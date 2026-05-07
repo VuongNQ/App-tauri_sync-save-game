@@ -518,8 +518,9 @@ let running_exes: HashSet<String> = HashSet::new();
 2. Emit `"game-status-changed"` with `status: "idle"`.
 3. Check `game.auto_sync` from `settings::load_state`.
 4. If true → `try_lock()` per-game sync lock (non-blocking) → `sync::sync_game()`.
-5. If lock unavailable → skip (sync already in progress).
-6. If auto_sync disabled → emit `"game-sync-pending"` for frontend notification.
+5. `sync::sync_game()` is bidirectional for each path/file: download newer Drive data and upload newer local data (newest timestamp wins).
+6. If lock unavailable → skip (sync already in progress).
+7. If auto_sync disabled → emit `"game-sync-pending"` for frontend notification.
 
 ### Sync Locks
 

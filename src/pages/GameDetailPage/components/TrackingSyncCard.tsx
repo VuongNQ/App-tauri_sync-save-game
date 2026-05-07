@@ -84,8 +84,8 @@ function TrackingSyncCard({ gameId, savePath, trackChanges, autoSync, isSyncing,
         {/* Auto-sync */}
         <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-2xl border border-[rgba(165,185,255,0.08)] bg-[rgba(9,14,28,0.55)]">
           <div className="grid gap-0.5">
-            <span className="font-semibold text-sm text-[#c7d3f7]">Auto-sync to Google Drive</span>
-            <span className="text-xs text-[#9aa8c7]">Automatically back up saves when the tracked process exits</span>
+            <span className="font-semibold text-sm text-[#c7d3f7]">Auto-sync</span>
+            <span className="text-xs text-[#9aa8c7]">Automatically sync saves on process exit: download newer files from Drive and upload newer local changes.</span>
           </div>
           <button
             type="button"

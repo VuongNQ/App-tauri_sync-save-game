@@ -353,6 +353,13 @@ export function useDashboardQuery() {
 }
 ```
 
+### Tracking Auto-Sync Copy Rule
+
+For tracking UI copy (such as `TrackingSyncCard`), describe process-exit auto-sync as bidirectional sync, not upload-only backup.
+
+- Correct intent: on tracked process exit, auto-sync downloads newer files from Drive and uploads newer local changes.
+- Avoid wording that implies local-to-cloud only backup for this toggle.
+
 - Admin-only data should use dedicated hooks such as `useAdminUsersQuery()` and `useAdminConfigQuery()` behind `AdminGuard`; do not fetch it from generic dashboard hooks.
 
 ### Mutation Hook Pattern — Full Dashboard State Update
