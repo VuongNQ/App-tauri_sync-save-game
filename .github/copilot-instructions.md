@@ -641,9 +641,9 @@ The Rust backend emits these events that the frontend can listen to:
 | `"auth-status-changed"` | — | `gdrive_auth.rs` on login/logout |
 | `"library-restored"` | — | `lib.rs` when first-login cloud library restore succeeds |
 | `"post-login-sync-completed"` | — | `lib.rs` after post-login sync-all-from-Drive finishes (success or error) |
-| `"sync-started"` | `{ gameId }` | `sync.rs` before sync begins |
-| `"sync-completed"` | `SyncResult` | `sync.rs` after successful sync |
-| `"sync-error"` | `{ gameId, error }` | `sync.rs` on sync failure |
+| `"sync-started"` | `gameId: string` | `sync.rs` before sync begins — frontend sets `gameSyncingKey(gameId)` to `true` |
+| `"sync-completed"` | `SyncResult` | `sync.rs` after successful sync — frontend sets `gameSyncingKey` to `false`, persists `SyncResult` in `gameSyncResultKey`, invalidates `DASHBOARD_KEY` |
+| `"sync-error"` | `SyncResult` (with `error` field) | `sync.rs` on sync failure — frontend sets `gameSyncingKey` to `false`, persists error `SyncResult` in `gameSyncResultKey` |
 | `"game-sync-pending"` | `{ gameId }` | `watcher.rs` when game exits but auto-sync disabled |
 | `"game-status-changed"` | `{ gameId, status: "playing" \| "idle" }` | `watcher.rs` on game process start/exit |
 

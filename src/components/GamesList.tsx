@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { useRemoveGameMutation } from "../queries";
+import { useGameSyncingQuery } from "../queries/sync";
 import { useSyncAndLaunchFlow } from "../queries/detail";
 import type { GameEntry } from "../types/dashboard";
 import { formatBytes } from "../utils";
@@ -29,11 +30,6 @@ export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
 
   const [removeTarget, setRemoveTarget] = useState<GameEntry | null>(null);
 
-  function handleRemoveClick(e: React.MouseEvent, game: GameEntry) {
-    e.preventDefault();
-    setRemoveTarget(game);
-  }
-
   function handleConfirmRemove() {
     if (removeTarget) {
       removeMutation.mutate(removeTarget.id);
@@ -55,77 +51,15 @@ export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
             <span className={MUTED}>Add your first game using the form above.</span>
           </div>
         ) : (
-          games.map((g) => {
-            const badge = SOURCE_BADGE[g.source] ?? SOFT_BADGE;
-            const isInvalid = invalidGameIds?.has(g.id) ?? false;
-            const isExeMissing = missingExeIds?.has(g.id) ?? false;
-            return (
-              <div
+        games.map((g) => (
+              <GameCard
                 key={g.id}
-                className={`relative flex items-center gap-4 p-4 rounded-2xl bg-[rgba(10,16,31,0.72)] border transition-colors ${
-                  isInvalid || isExeMissing
-                    ? "border-[rgba(255,100,100,0.4)] hover:border-[rgba(255,100,100,0.6)]"
-                    : "border-[rgba(154,177,255,0.08)] hover:border-[rgba(111,171,255,0.4)]"
-                }`}
-              >
-                <Link to={`/game/${g.id}`} className="flex items-center gap-4 flex-1 min-w-0 text-inherit no-underline">
-                  {/* Thumbnail */}
-                  <div className="w-12 h-12 shrink-0 rounded-xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
-                    {g.thumbnail ? (
-                      <LazyThumbnail src={g.thumbnail} />
-                    ) : (
-                      <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-lg">🎮</div>
-                    )}
-                  </div>
-
-                  <div className="grid gap-1 min-w-0">
-                    <strong className="truncate">{g.name}</strong>
-                    <div className="flex items-center gap-2">
-                      <span className={badge}>{g.source}</span>
-                      {g.savePaths.length > 0 && g.savePaths[0].path && (
-                        <span className={`${MUTED} text-xs truncate`}>
-                          {g.savePaths.length > 1 ? `${g.savePaths[0].path} (+${g.savePaths.length - 1} more)` : g.savePaths[0].path}
-                        </span>
-                      )}
-                    </div>
-                    {isInvalid && (
-                      <p className="m-0 text-xs text-[#ff9e9e] flex items-center gap-1">
-                        <span>⚠</span> Save path not found
-                      </p>
-                    )}
-                    {isExeMissing && (
-                      <p className="m-0 text-xs text-[#ff9e9e] flex items-center gap-1">
-                        <span>⚠</span> Executable not found on this device
-                      </p>
-                    )}
-                    {g.trackChanges && !g.exeName && (
-                      <p className="m-0 text-xs text-[#ffd5a0] flex items-center gap-1">
-                        <span>⚠</span> No executable set — process tracking inactive
-                      </p>
-                    )}
-                    {g.cloudStorageBytes != null && (
-                      <p className="m-0 text-xs text-[#7dc9ff] flex items-center gap-1">
-                        <span>☁</span> {formatBytes(g.cloudStorageBytes)} on Drive
-                      </p>
-                    )}{" "}
-                  </div>
-                </Link>
-
-                {/* Play button */}
-                <GamePlayButton game={g} exeMissing={isExeMissing} />
-
-                {/* Remove button */}
-                <button
-                  type="button"
-                  title="Remove game"
-                  className="shrink-0 w-9 h-9 grid place-items-center rounded-xl border border-transparent text-[#9aa8c7] hover:text-[#ff9e9e] hover:bg-[rgba(255,80,80,0.12)] hover:border-[rgba(255,100,100,0.3)] transition-colors cursor-pointer bg-transparent"
-                  onClick={(e) => handleRemoveClick(e, g)}
-                >
-                  ✕
-                </button>
-              </div>
-            );
-          })
+                game={g}
+                isInvalid={invalidGameIds?.has(g.id) ?? false}
+                isExeMissing={missingExeIds?.has(g.id) ?? false}
+                onRemove={() => setRemoveTarget(g)}
+              />
+            ))
         )}
       </div>
 
@@ -138,6 +72,108 @@ export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
         onCancel={() => setRemoveTarget(null)}
       />
     </section>
+  );
+}
+
+// ── GameCard ──────────────────────────────────────────────────────────────────
+
+function GameCard({
+  game: g,
+  isInvalid,
+  isExeMissing,
+  onRemove,
+}: {
+  game: GameEntry;
+  isInvalid: boolean;
+  isExeMissing: boolean;
+  onRemove: () => void;
+}) {
+  const isSyncing = useGameSyncingQuery(g.id);
+  const badge = SOURCE_BADGE[g.source] ?? SOFT_BADGE;
+
+  return (
+    <div
+      className={`relative flex items-center gap-4 p-4 rounded-2xl bg-[rgba(10,16,31,0.72)] border transition-colors ${
+        isInvalid || isExeMissing
+          ? "border-[rgba(255,100,100,0.4)] hover:border-[rgba(255,100,100,0.6)]"
+          : "border-[rgba(154,177,255,0.08)] hover:border-[rgba(111,171,255,0.4)]"
+      }`}
+    >
+      <Link to={`/game/${g.id}`} className="flex items-center gap-4 flex-1 min-w-0 text-inherit no-underline">
+        {/* Thumbnail with syncing overlay */}
+        <div className="w-12 h-12 shrink-0 rounded-xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden relative">
+          {g.thumbnail ? (
+            <LazyThumbnail src={g.thumbnail} />
+          ) : (
+            <div className="grid place-items-center w-full h-full text-[#9aa8c7] text-lg">🎮</div>
+          )}
+          {isSyncing && (
+            <div className="absolute inset-0 flex items-center justify-center bg-[rgba(9,14,28,0.72)] rounded-xl">
+              <svg
+                className="animate-spin w-5 h-5 text-[#7dc9ff]"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a10 10 0 100 10l-1.41-1.41A8 8 0 014 12z" />
+              </svg>
+            </div>
+          )}
+        </div>
+
+        <div className="grid gap-1 min-w-0">
+          <strong className="truncate">{g.name}</strong>
+          <div className="flex items-center gap-2">
+            <span className={badge}>{g.source}</span>
+            {g.savePaths.length > 0 && g.savePaths[0].path && (
+              <span className={`${MUTED} text-xs truncate`}>
+                {g.savePaths.length > 1 ? `${g.savePaths[0].path} (+${g.savePaths.length - 1} more)` : g.savePaths[0].path}
+              </span>
+            )}
+          </div>
+          {isInvalid && (
+            <p className="m-0 text-xs text-[#ff9e9e] flex items-center gap-1">
+              <span>⚠</span> Save path not found
+            </p>
+          )}
+          {isExeMissing && (
+            <p className="m-0 text-xs text-[#ff9e9e] flex items-center gap-1">
+              <span>⚠</span> Executable not found on this device
+            </p>
+          )}
+          {g.trackChanges && !g.exeName && (
+            <p className="m-0 text-xs text-[#ffd5a0] flex items-center gap-1">
+              <span>⚠</span> No executable set — process tracking inactive
+            </p>
+          )}
+          {isSyncing ? (
+            <p className="m-0 text-xs text-[#7dc9ff] animate-pulse flex items-center gap-1">
+              <span>↕</span> Syncing…
+            </p>
+          ) : (
+            g.cloudStorageBytes != null && (
+              <p className="m-0 text-xs text-[#7dc9ff] flex items-center gap-1">
+                <span>☁</span> {formatBytes(g.cloudStorageBytes)} on Drive
+              </p>
+            )
+          )}
+        </div>
+      </Link>
+
+      {/* Play button */}
+      <GamePlayButton game={g} exeMissing={isExeMissing} />
+
+      {/* Remove button */}
+      <button
+        type="button"
+        title="Remove game"
+        className="shrink-0 w-9 h-9 grid place-items-center rounded-xl border border-transparent text-[#9aa8c7] hover:text-[#ff9e9e] hover:bg-[rgba(255,80,80,0.12)] hover:border-[rgba(255,100,100,0.3)] transition-colors cursor-pointer bg-transparent"
+        onClick={(e) => { e.preventDefault(); onRemove(); }}
+      >
+        ✕
+      </button>
+    </div>
   );
 }
 

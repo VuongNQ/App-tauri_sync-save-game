@@ -33,3 +33,9 @@ export type DevicesKey = typeof DEVICES_KEY;
 
 /** Playing state set by the game-status-changed Tauri event. */
 export const gamePlayingKey = (gameId: string) => ["game-playing", gameId] as const;
+
+/** Live syncing indicator set by the sync-started / sync-completed / sync-error Tauri events. */
+export const gameSyncingKey = (gameId: string) => ["game-syncing", gameId] as const;
+
+/** Last SyncResult for a game — set by sync-completed and sync-error Tauri events. */
+export const gameSyncResultKey = (gameId: string) => ["game-sync-result", gameId] as const;

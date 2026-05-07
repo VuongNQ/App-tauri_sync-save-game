@@ -21,13 +21,15 @@ import {
   toggleAutoSync,
   toggleTrackChanges,
 } from "../services/tauri";
-import type { DashboardData } from "../types/dashboard";
+import type { DashboardData, SyncResult } from "../types/dashboard";
 import {
   DASHBOARD_KEY,
   VALIDATE_PATHS_KEY,
   driveFilesKey,
   driveFilesFlatKey,
   driveFilesFolderKey,
+  gameSyncingKey,
+  gameSyncResultKey,
   saveInfoKey,
   versionBackupsKey,
 } from "./keys";
@@ -245,4 +247,28 @@ export function useDeleteVersionBackupMutation() {
     mutationFn: ({ gameId, backupFolderId }: { gameId: string; backupFolderId: string }) => deleteVersionBackup(gameId, backupFolderId),
     onSuccess: (_data, { gameId }) => queryClient.invalidateQueries({ queryKey: versionBackupsKey(gameId) }),
   });
+}
+
+// ── Sync status hooks (driven by Tauri events, no network calls) ──────────────
+
+/** Returns `true` while Rust is syncing the given game. Driven by sync-started / sync-completed / sync-error events. */
+export function useGameSyncingQuery(gameId: string): boolean {
+  const { data } = useQuery<boolean>({
+    queryKey: gameSyncingKey(gameId),
+    queryFn: () => false,
+    enabled: false,
+    staleTime: Infinity,
+  });
+  return data ?? false;
+}
+
+/** Returns the most recent `SyncResult` for the given game, or `null` if never synced this session. */
+export function useGameSyncResultQuery(gameId: string): SyncResult | null {
+  const { data } = useQuery<SyncResult | null>({
+    queryKey: gameSyncResultKey(gameId),
+    queryFn: () => null,
+    enabled: false,
+    staleTime: Infinity,
+  });
+  return data ?? null;
 }

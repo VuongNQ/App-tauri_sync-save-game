@@ -590,9 +590,9 @@ fn toggle_track_changes(app: tauri::AppHandle, game_id: String, enabled: bool) -
 
 | Event Name | Payload | Emitted From |
 |------------|---------|--------------|
-| `"sync-started"` | `game_id: &str` | `sync.rs` — before sync begins |
-| `"sync-completed"` | `SyncResult` | `sync.rs` — on success |
-| `"sync-error"` | `SyncResult` (with `error` field) | `sync.rs` — on failure |
+| `"sync-started"` | `game_id: &str` | `sync.rs` — before sync begins; frontend: `setQueryData(gameSyncingKey(gameId), true)` |
+| `"sync-completed"` | `SyncResult` | `sync.rs` — on success; frontend: clears `gameSyncingKey`, stores in `gameSyncResultKey`, invalidates dashboard |
+| `"sync-error"` | `SyncResult` (with `error` field) | `sync.rs` — on failure; frontend: clears `gameSyncingKey`, stores error result in `gameSyncResultKey` |
 | `"game-sync-pending"` | `game_id: &str` (raw string) | `watcher.rs` — process exited but auto-sync disabled |
 | `"game-status-changed"` | `{ gameId, status: "playing" \| "idle" }` | `watcher.rs` — emitted each time game process starts or stops |
 | `"library-restored"` | — | `lib.rs` — first-login cloud library restore succeeded |
@@ -668,6 +668,8 @@ export async function deleteVersionBackup(gameId: string, backupFolderId: string
 - `useDriveFilesQuery(gameId, folderId, enabled?)` — lazy; only fetches when `enabled: true`. Key: `driveFilesFolderKey(gameId, folderId)`.
 - `useDriveFilesFlatQuery(gameId, enabled?)` — lazy; fetches full recursive flat listing. Key: `driveFilesFlatKey(gameId)`. `staleTime: Infinity`.
 - `useRenameDriveFileMutation()` — invalidates `driveFilesKey(gameId)` **and `driveFilesFlatKey(gameId)`** on success.
+- `useGameSyncingQuery(gameId)` — returns `boolean` from in-memory cache key `gameSyncingKey(gameId)`. Driven by Tauri events; `enabled: false` (no network call).
+- `useGameSyncResultQuery(gameId)` — returns `SyncResult | null` from `gameSyncResultKey(gameId)`. Persists last sync result until next sync starts.
 - `useMoveDriveFileMutation()` — invalidates `driveFilesKey(gameId)` **and `driveFilesFlatKey(gameId)`** on success.
 - `useDeleteDriveFileMutation()` — invalidates `driveFilesKey(gameId)` **and `driveFilesFlatKey(gameId)`** on success.
 - `useVersionBackupsQuery(gameId, enabled?)` — lazy. Key: `versionBackupsKey(gameId)`.

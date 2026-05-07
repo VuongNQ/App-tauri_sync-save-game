@@ -6,7 +6,8 @@ import { HashRouter, Routes, Route, Navigate } from "react-router";
 import { AppLayout } from "./components/AppLayout";
 import { AdminGuard } from "./components/AdminGuard";
 import { AuthGuard } from "./components/AuthGuard";
-import { AUTH_STATUS_KEY, DASHBOARD_KEY, DEVICES_KEY, gamePlayingKey } from "./queries/keys";
+import { AUTH_STATUS_KEY, DASHBOARD_KEY, DEVICES_KEY, gamePlayingKey, gameSyncingKey, gameSyncResultKey } from "./queries/keys";
+import type { SyncResult } from "./types/dashboard";
 import { useAuthStatusQuery, useSyncLibraryFromCloudMutation } from "./queries";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DevicesPage } from "./pages/DevicesPage";
@@ -73,9 +74,23 @@ function useAuthStatusCallbacks() {
       void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
     });
 
+    // Track per-game syncing state — set true when sync starts.
+    const unlistenSyncStartedPromise = listen<string>("sync-started", ({ payload: gameId }) => {
+      queryClient.setQueryData(gameSyncingKey(gameId), true);
+    });
+
     // Refresh dashboard after any background or watcher-triggered sync completes.
-    const unlistenSyncCompletedPromise = listen("sync-completed", () => {
+    // Also update per-game syncing state and persist the last SyncResult.
+    const unlistenSyncCompletedPromise = listen<SyncResult>("sync-completed", ({ payload }) => {
+      queryClient.setQueryData(gameSyncingKey(payload.gameId), false);
+      queryClient.setQueryData(gameSyncResultKey(payload.gameId), payload);
       void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
+    });
+
+    // On sync error, clear the syncing flag and store the error result.
+    const unlistenSyncErrorPromise = listen<SyncResult>("sync-error", ({ payload }) => {
+      queryClient.setQueryData(gameSyncingKey(payload.gameId), false);
+      queryClient.setQueryData(gameSyncResultKey(payload.gameId), payload);
     });
 
     const syncAuthStatus = () => {
@@ -98,7 +113,9 @@ function useAuthStatusCallbacks() {
       void unlistenRestorePromise.then((unlisten) => unlisten());
       void unlistenPostLoginSyncPromise.then((unlisten) => unlisten());
       void unlistenSyncPendingPromise.then((unlisten) => unlisten());
+      void unlistenSyncStartedPromise.then((unlisten) => unlisten());
       void unlistenSyncCompletedPromise.then((unlisten) => unlisten());
+      void unlistenSyncErrorPromise.then((unlisten) => unlisten());
       void unlistenGameStatusPromise.then((unlisten) => unlisten());
     };
   }, [queryClient]);

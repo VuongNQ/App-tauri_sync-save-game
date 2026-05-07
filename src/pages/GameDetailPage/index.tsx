@@ -1,8 +1,10 @@
 import { CARD } from "@/components/styles";
 import { useDashboardQuery } from "@/queries";
-import { useState } from "react";
+import { useGameSyncingQuery, useGameSyncResultQuery } from "@/queries/sync";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import Header from "./components/Header";
+import { SyncProgressModal } from "./components/SyncProgressModal";
 import TabSettings from "./components/Tabs/Settings";
 import TabStatus from "./components/Tabs/Status";
 
@@ -14,6 +16,16 @@ export function GameDetailPage() {
   const { data: dashboard, isLoading: isDashboardLoading } = useDashboardQuery();
 
   const [activeTab, setActiveTab] = useState<TabId>("status");
+
+  // Per-game sync state driven by Tauri events (sync-started / sync-completed / sync-error).
+  const isSyncing = useGameSyncingQuery(id ?? "");
+  const syncResult = useGameSyncResultQuery(id ?? "");
+
+  // Show the progress modal whenever a sync begins; let the modal handle close.
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  useEffect(() => {
+    if (isSyncing) setShowSyncModal(true);
+  }, [isSyncing]);
 
   const game = dashboard?.games.find((g) => g.id === id) ?? null;
 
@@ -72,6 +84,15 @@ export function GameDetailPage() {
 
       {/* ── Tab 2: Configuration ── */}
       {activeTab === "config" && <TabSettings />}
+
+      {/* ── Sync progress modal ── */}
+      {showSyncModal && (
+        <SyncProgressModal
+          isSyncing={isSyncing}
+          result={syncResult}
+          onClose={() => setShowSyncModal(false)}
+        />
+      )}
     </>
   );
 }

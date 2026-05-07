@@ -57,6 +57,10 @@ src/
     DriveFilesSection.tsx  # Collapsible Drive file manager (rename, move, delete)
     VersionBackupsSection.tsx  # Collapsible version backup manager (create, restore, delete)
     ...
+  pages/
+    GameDetailPage/
+      components/
+        SyncProgressModal.tsx  # Modal shown during/after sync on GameDetailPage (spinner → counts → error)
   utils/
     index.ts           # Pure helpers: norm(), msg(), formatLocalTime()
 ```
@@ -340,6 +344,10 @@ export const driveFilesFlatKey = (gameId: string) => ["drive-files-flat", gameId
 export const versionBackupsKey = (gameId: string) => ["version-backups", gameId] as const;
 /** Reactive process-playing state for a single game — pushed by "game-status-changed" event from App.tsx. */
 export const gamePlayingKey = (gameId: string) => ["game-playing", gameId] as const;
+/** Live syncing indicator — set true by "sync-started" event, false by "sync-completed"/"sync-error". enabled:false (in-memory only). */
+export const gameSyncingKey = (gameId: string) => ["game-syncing", gameId] as const;
+/** Last SyncResult — set by "sync-completed" and "sync-error" events. enabled:false (in-memory only). */
+export const gameSyncResultKey = (gameId: string) => ["game-sync-result", gameId] as const;
 ```
 
 ### Query Hook Pattern
