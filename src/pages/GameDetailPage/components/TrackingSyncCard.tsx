@@ -56,10 +56,10 @@ function TrackingSyncCard({ gameId, savePath, trackChanges, autoSync, isSyncing,
         <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-2xl border border-[rgba(165,185,255,0.08)] bg-[rgba(9,14,28,0.55)]">
           <div className="grid gap-0.5">
             <span className="font-semibold text-sm text-[#c7d3f7]">Track process</span>
-            <span className="text-xs text-[#9aa8c7]">Detect when the game process exits and trigger sync</span>
+            <span className="text-xs text-[#9aa8c7]">Detect process exit by executable name and trigger sync. Executable path is optional.</span>
             {trackChanges && !exeName && (
               <span className="text-xs text-[#ffd5a0] mt-1">
-                Open settings and enter the game’s .exe name to activate process tracking.
+                Open settings and enter the game&apos;s .exe name to activate process tracking.
               </span>
             )}
           </div>
@@ -85,7 +85,7 @@ function TrackingSyncCard({ gameId, savePath, trackChanges, autoSync, isSyncing,
         <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-2xl border border-[rgba(165,185,255,0.08)] bg-[rgba(9,14,28,0.55)]">
           <div className="grid gap-0.5">
             <span className="font-semibold text-sm text-[#c7d3f7]">Auto-sync to Google Drive</span>
-            <span className="text-xs text-[#9aa8c7]">Automatically back up saves when the game process exits</span>
+            <span className="text-xs text-[#9aa8c7]">Automatically back up saves when the tracked process exits</span>
           </div>
           <button
             type="button"

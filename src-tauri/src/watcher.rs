@@ -169,15 +169,33 @@ pub fn start_poll_thread(app: AppHandle) {
                         );
 
                         // Decide whether to auto-sync.
-                        let should_auto_sync = settings::load_state(&app)
-                            .ok()
-                            .and_then(|s| {
-                                s.games
-                                    .iter()
-                                    .find(|g| g.id == *game_id)
-                                    .map(|g| g.auto_sync)
-                            })
-                            .unwrap_or(false);
+                        // Contract: process-exit sync depends on tracked exe_name + auto_sync flag.
+                        // It does not depend on exe_path being configured.
+                        let mut should_auto_sync = false;
+                        match settings::load_state(&app) {
+                            Ok(state) => {
+                                match state.games.iter().find(|g| g.id == *game_id) {
+                                    Some(game) => {
+                                        should_auto_sync = game.auto_sync;
+                                        if !should_auto_sync {
+                                            println!(
+                                                "[watcher] Auto-sync disabled for '{game_id}', emitting pending-sync event"
+                                            );
+                                        }
+                                    }
+                                    None => {
+                                        println!(
+                                            "[watcher] Auto-sync skipped for '{game_id}': game not found in state"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                println!(
+                                    "[watcher] Auto-sync skipped for '{game_id}': failed to load state: {err}"
+                                );
+                            }
+                        }
 
                         if should_auto_sync {
                             if let Ok(_guard) = sync_lock.try_lock() {
@@ -187,7 +205,7 @@ pub fn start_poll_thread(app: AppHandle) {
                                 let _ = sync::sync_game(&app, game_id);
                             } else {
                                 println!(
-                                    "[watcher] Sync already in progress for '{game_id}', skipping"
+                                    "[watcher] Auto-sync skipped for '{game_id}': sync already in progress"
                                 );
                             }
                         } else {
@@ -240,6 +258,7 @@ pub fn init_watchers(app: &AppHandle) {
             if game.track_changes {
                 // If a valid exe_path is set for this machine, skip ambient startup registration.
                 // The watcher will be armed on-demand when the user clicks Play instead.
+                // If exe_path is missing/invalid but exe_name exists, startup tracking still proceeds.
                 if let Some(raw_path) = &game.exe_path {
                     let expanded = settings::expand_env_vars(raw_path);
                     if std::path::Path::new(&expanded).is_file() {
