@@ -31,14 +31,20 @@ AuthGuard → redirect /login           ↑ unauthenticated
 
 ## Key Constraints
 
-- **Credentials never in frontend**: `CLIENT_ID` / `CLIENT_SECRET` live only in Rust via `option_env!()`.  
-  Always fetch via `getOAuthCredentials()` before calling `signIn()`.
-- **No Rust-side OAuth flow**: No local HTTP server, no PKCE code in Rust. Rust only receives tokens via `save_auth_tokens`.
-- **`save_tokens_from_plugin` write order**: save with empty `user_id` first → fetch userinfo → re-save with `user_id`. This keeps `get_access_token()` functional even if the userinfo step fails.
-- **Token refresh**: happens inside `get_access_token()` automatically when `now_secs() >= expires_at`. On failure → delete tokens → return `authenticated: false`.
-- **`user_id` flows everywhere**: token file → `settings_path()` (per-user library file) → Firestore collection path. Never assume `user_id` is available; use `get_current_user_id()` which returns `Option<String>`.
-- **Scopes required**: `openid email profile drive.file drive.appdata datastore`. Re-login needed when adding scopes.
-- **`require_client_id()`** must be called at the top of every public OAuth function.
+- **Credentials**:
+  `CLIENT_ID` / `CLIENT_SECRET` live only in Rust via `option_env!()`. In all frontend OAuth flows, fetch via `getOAuthCredentials()` before calling `signIn()`. If `getOAuthCredentials()` returns missing or invalid credentials, surface a clear error and stop the login flow.
+- **OAuth flow boundary**:
+  No local HTTP server and no PKCE code in Rust. Rust only receives tokens via `save_auth_tokens`.
+- **Token persistence order**:
+  `save_tokens_from_plugin` must save with empty `user_id` first, then fetch userinfo, then re-save with `user_id`. This keeps `get_access_token()` functional even if the userinfo step fails.
+- **Token refresh behavior**:
+  Refresh occurs in `get_access_token()` when `now_secs() >= expires_at`. On refresh failure, delete tokens and return `authenticated: false`.
+- **User ID flow**:
+  `user_id` must flow through token file → `settings_path()` (per-user library file) → Firestore collection path. Never assume `user_id` is present; use `get_current_user_id()` returning `Option<String>`.
+- **OAuth scopes**:
+  Required scopes are `openid email profile drive.file drive.appdata datastore`. Re-login is required when scopes are added.
+- **Client ID guard**:
+  `require_client_id()` must be called at the top of every public OAuth function.
 
 ## Token File (`oauth-tokens.json`)
 
