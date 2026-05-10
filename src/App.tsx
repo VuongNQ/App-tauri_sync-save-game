@@ -93,22 +93,7 @@ function useAuthStatusCallbacks() {
       queryClient.setQueryData(gameSyncResultKey(payload.gameId), payload);
     });
 
-    const syncAuthStatus = () => {
-      void queryClient.invalidateQueries({ queryKey: AUTH_STATUS_KEY });
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        syncAuthStatus();
-      }
-    };
-
-    window.addEventListener("focus", syncAuthStatus);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
     return () => {
-      window.removeEventListener("focus", syncAuthStatus);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
       void unlistenPromise.then((unlisten) => unlisten());
       void unlistenRestorePromise.then((unlisten) => unlisten());
       void unlistenPostLoginSyncPromise.then((unlisten) => unlisten());

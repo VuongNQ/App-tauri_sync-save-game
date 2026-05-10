@@ -72,7 +72,7 @@ pub fn check_auth_status(app: &AppHandle) -> Result<AuthStatus, String> {
     };
 
     if now_secs() < tokens.expires_at {
-        sync_current_user_profile(app);
+        spawn_profile_sync(app);
         return Ok(AuthStatus {
             authenticated: true,
             role: firestore::current_user_role(app),
@@ -82,7 +82,7 @@ pub fn check_auth_status(app: &AppHandle) -> Result<AuthStatus, String> {
     // Token expired — try silent refresh
     match refresh_access_token(app, &tokens) {
         Ok(_) => {
-            sync_current_user_profile(app);
+            spawn_profile_sync(app);
             Ok(AuthStatus {
                 authenticated: true,
                 role: firestore::current_user_role(app),
@@ -96,6 +96,13 @@ pub fn check_auth_status(app: &AppHandle) -> Result<AuthStatus, String> {
             })
         }
     }
+}
+
+fn spawn_profile_sync(app: &AppHandle) {
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        sync_current_user_profile(&app_clone);
+    });
 }
 
 fn sync_current_user_profile(app: &AppHandle) {

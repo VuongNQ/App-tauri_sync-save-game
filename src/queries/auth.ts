@@ -21,7 +21,7 @@ export function useAuthStatusQuery() {
     queryFn: checkAuthStatus,
     staleTime: 0,
     refetchOnMount: "always",
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
   });
 }
 

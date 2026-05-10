@@ -169,6 +169,13 @@ export function AuthGuard() {
 }
 ```
 
+### Auth Query Performance Rule
+
+- In this desktop app, avoid focus-driven auth refresh loops.
+- Do not add manual `window.addEventListener("focus", ...)` / `visibilitychange` handlers that invalidate `AUTH_STATUS_KEY`.
+- Keep `useAuthStatusQuery` with `refetchOnWindowFocus: false` unless backend auth checks are proven non-blocking.
+- Prefer auth freshness from explicit backend events (`"auth-status-changed"`) plus mount-time checks.
+
 ### Admin Guard
 
 Wrap admin-only pages in a second layout guard that checks `authStatus?.role === "admin"` and redirects everyone else back to `/`.

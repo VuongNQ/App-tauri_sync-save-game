@@ -241,6 +241,7 @@ Because `ureq` is **blocking**, Firestore sync must never block the UI:
 - UI data always reads from `games-library-{user_id}.json` on disk (fast). Falls back to `games-library.json` when unauthenticated or on old token files without `user_id`.
 - After `settings::save_state()` completes, `spawn_firestore_game_upsert` / `spawn_firestore_game_delete` fire in background threads.
 - Mirror the `WatcherManager` background-thread pattern: use a dedicated thread, not the main Tauri thread.
+- Auth checks follow the same rule: avoid focus-triggered auth invalidation in the frontend, and keep backend `check_auth_status` non-blocking (use `spawn_blocking` + background profile sync) so window drag/focus interactions stay responsive.
 
 ### Stored State Shape (extended)
 

@@ -193,8 +193,10 @@ fn clear_all_drive_data(app: tauri::AppHandle) -> Result<DashboardData, String> 
 }
 
 #[tauri::command]
-fn check_auth_status(app: tauri::AppHandle) -> Result<AuthStatus, String> {
-    gdrive_auth::check_auth_status(&app)
+async fn check_auth_status(app: tauri::AppHandle) -> Result<AuthStatus, String> {
+    tokio::task::spawn_blocking(move || gdrive_auth::check_auth_status(&app))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Receive tokens from the frontend after tauri-plugin-google-auth sign-in.

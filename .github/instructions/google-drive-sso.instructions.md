@@ -59,6 +59,14 @@ pub fn get_access_token(app: &AppHandle) -> Result<String, String> { ... }
 - If the refresh token is invalid, expired, or revoked (for example `invalid_grant`): treat the user as signed out, delete stored tokens, return `authenticated: false`, and require re-authentication.
 - **Future**: migrate storage to OS keyring (`keyring` crate) — keep `load_tokens`/`save_tokens`/`delete_tokens` as the only I/O boundary so callers don't change.
 
+### Performance Guardrails (Auth Status)
+
+- `check_auth_status` must remain a fast path: validate local tokens and return quickly.
+- Do not perform profile-sync network I/O inline in the immediate auth-status response path.
+- Any profile refresh/write-back work (for example `ensure_current_user_profile`) must run in a background thread/task.
+- If a command may hit blocking HTTP (`ureq`), expose it as `async fn` in `lib.rs` and wrap with `tokio::task::spawn_blocking`.
+- Goal: auth-status checks must never degrade native window responsiveness (focus, drag, move).
+
 ### Token Persistence Functions
 
 | Function | Purpose |
