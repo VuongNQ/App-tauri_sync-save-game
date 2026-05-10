@@ -27,7 +27,6 @@ export {
   useRestoreVersionBackupMutation,
   useSyncAllMutation,
   useSyncGameMutation,
-  useSyncLibraryFromCloudMutation,
   useToggleAutoSyncMutation,
   useToggleTrackChangesMutation,
   useVersionBackupsQuery,

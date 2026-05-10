@@ -3,7 +3,6 @@ import { GamesList } from "../components/GamesList";
 import { HeroCard } from "../components/HeroCard";
 import { BTN, CARD, EYEBROW } from "../components/styles";
 import { useDashboardQuery, useValidatePathsQuery } from "../queries";
-import { useSyncLibraryFromCloudMutation } from "../queries/sync";
 import { msg } from "../utils";
 
 function DashboardSkeleton() {
@@ -54,8 +53,6 @@ export function DashboardPage() {
 
   const validateQuery = useValidatePathsQuery();
 
-  const refreshMutation = useSyncLibraryFromCloudMutation();
-
   const games = dashboardQuery.data?.games ?? [];
 
   const invalidGameIds = new Set((validateQuery.data ?? []).filter((v) => !v.valid).map((v) => v.gameId));
@@ -77,9 +74,9 @@ export function DashboardPage() {
         </div>
         <button
           className={`${BTN} mt-1 p-2 rounded-xl text-[#9aa8c7] hover:text-[#c7d3f7] hover:bg-[rgba(165,185,255,0.08)]`}
-          title="Refresh from cloud"
-          disabled={refreshMutation.isPending}
-          onClick={() => refreshMutation.mutate()}
+          title="Refresh dashboard"
+          disabled={dashboardQuery.isFetching}
+          onClick={() => void dashboardQuery.refetch()}
         >
           <svg
             width="18"
@@ -90,7 +87,7 @@ export function DashboardPage() {
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
-            className={refreshMutation.isPending ? "animate-spin" : undefined}
+            className={dashboardQuery.isFetching ? "animate-spin" : undefined}
           >
             <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
             <path d="M3 3v5h5" />

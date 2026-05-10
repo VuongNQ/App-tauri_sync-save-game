@@ -3,7 +3,7 @@ import { DriveFilesSection } from "@/components/DriveFilesSection";
 import { CARD, PRIMARY_BTN, SECONDARY_BTN } from "@/components/styles";
 import { Toast } from "@/components/Toast";
 import { VersionBackupsSection } from "@/components/VersionBackupsSection";
-import { useGetSaveInfoQuery, useSyncGameMutation, useSyncLibraryFromCloudMutation } from "@/queries";
+import { useGetSaveInfoQuery, useSyncGameMutation } from "@/queries";
 import { DashboardQuery } from "@/queries/dashboard";
 import { useGamePlaying } from "@/queries/detail";
 import { useCleanExcludedDriveFilesMutation } from "@/queries/sync";
@@ -33,11 +33,9 @@ const TabStatus = () => {
 
   const saveInfoQuery = useGetSaveInfoQuery(id ?? "", !!primarySavePath);
 
-  const syncLibraryMutation = useSyncLibraryFromCloudMutation();
-
   const cleanExcludedMutation = useCleanExcludedDriveFilesMutation();
 
-  const isSyncing = syncMutation.isPending || syncLibraryMutation.isPending || cleanExcludedMutation.isPending;
+  const isSyncing = syncMutation.isPending || cleanExcludedMutation.isPending;
 
   const hasIncludes = game?.savePaths.some((sp) => sp.syncIncludes.length > 0) ?? false;
 
@@ -58,28 +56,7 @@ const TabStatus = () => {
       <div className={CARD}>
         <h3 className="m-0 mb-4 font-semibold">Actions</h3>
 
-        <div className="grid gap-4 grid-cols-3 max-[900px]:grid-cols-1">
-          <button
-            className={SECONDARY_BTN}
-            type="button"
-            disabled={isSyncing}
-            onClick={() =>
-              syncLibraryMutation.mutate(undefined, {
-                onSuccess: () =>
-                  setToast({
-                    message: "Game settings refreshed from Drive.",
-                    type: "success",
-                  }),
-                onError: (err) =>
-                  setToast({
-                    message: msg(err, "Failed to sync settings from Drive."),
-                    type: "error",
-                  }),
-              })
-            }
-          >
-            {syncLibraryMutation.isPending ? "Syncing…" : "Download settings from Drive"}
-          </button>
+        <div className="grid gap-4 grid-cols-2 max-[900px]:grid-cols-1">
           <button
             className={SECONDARY_BTN}
             type="button"

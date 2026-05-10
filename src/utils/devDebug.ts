@@ -38,7 +38,6 @@ import {
   restoreVersionBackup,
   syncGame,
   syncAllGames,
-  syncLibraryFromCloud,
   validateSavePaths,
 } from "../services/tauri";
 
@@ -85,7 +84,6 @@ interface GoogleDebugNamespace {
   syncAll: () => Promise<unknown>;
 
   // Forced-direction sync
-  syncLibrary: () => Promise<unknown>;
   restoreCloud: (gameId: string) => Promise<unknown>;
   pushCloud: (gameId: string) => Promise<unknown>;
 
@@ -150,7 +148,6 @@ export const devDebug: GoogleDebugNamespace = {
       { command: "sync(gameId)", description: "syncGame() — trigger sync for one game" },
       { command: "syncAll()", description: "syncAllGames() — trigger sync for all games" },
       // Forced-direction sync
-      { command: "syncLibrary()", description: "syncLibraryFromCloud() — pull library from Drive → overwrite local" },
       { command: "restoreCloud(gameId)", description: "restoreFromCloud() — force-download Drive saves (skip newest-wins)" },
       { command: "pushCloud(gameId)", description: "pushToCloud() — force-upload local saves (skip newest-wins)" },
       // Backup management
@@ -209,8 +206,6 @@ export const devDebug: GoogleDebugNamespace = {
   syncAll: () => call("syncAllGames()", syncAllGames),
 
   // ── Forced-direction sync ────────────────────────────────
-
-  syncLibrary: () => call("syncLibraryFromCloud()", syncLibraryFromCloud),
 
   restoreCloud: (gameId) => call(`restoreFromCloud("${gameId}")`, () => restoreFromCloud(gameId)),
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { HashRouter, Routes, Route, Navigate } from "react-router";
@@ -8,7 +8,6 @@ import { AdminGuard } from "./components/AdminGuard";
 import { AuthGuard } from "./components/AuthGuard";
 import { AUTH_STATUS_KEY, DASHBOARD_KEY, DEVICES_KEY, gamePlayingKey, gameSyncingKey, gameSyncResultKey } from "./queries/keys";
 import type { SyncResult } from "./types/dashboard";
-import { useAuthStatusQuery, useSyncLibraryFromCloudMutation } from "./queries";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DevicesPage } from "./pages/DevicesPage";
 import { GameDetailPage } from "./pages/GameDetailPage";
@@ -20,7 +19,6 @@ import "./App.css";
 
 export function App() {
   useAuthStatusCallbacks();
-  useStartupFirestoreSync();
 
   return (
     <HashRouter>
@@ -104,19 +102,4 @@ function useAuthStatusCallbacks() {
       void unlistenGameStatusPromise.then((unlisten) => unlisten());
     };
   }, [queryClient]);
-}
-
-function useStartupFirestoreSync() {
-  const { data: authStatus } = useAuthStatusQuery();
-  const { mutate } = useSyncLibraryFromCloudMutation();
-  const hasRun = useRef(false);
-
-  useEffect(() => {
-    if (authStatus?.authenticated && !hasRun.current) {
-      hasRun.current = true;
-      mutate();
-    }
-    // mutate is stable; hasRun is a ref — omit from deps intentionally
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authStatus?.authenticated]);
 }
