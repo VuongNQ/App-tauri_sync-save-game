@@ -56,43 +56,45 @@ export function GameDetailPage() {
       {/* Header */}
       <Header setActiveTab={setActiveTab} />
 
-      {/* Tabs */}
-      <div className="flex gap-1 p-1 rounded-2xl bg-[rgba(9,14,28,0.6)] border border-white/[0.07] cursor-pointer">
-        {(
-          [
-            { id: "status", label: "Status & Sync" },
-            { id: "config", label: "Configuration" },
-          ] as { id: TabId; label: string }[]
-        ).map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-            className={
-              activeTab === tab.id
-                ? "flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-linear-to-br from-[#6d7dff] to-[#55c5ff] transition-colors"
-                : "flex-1 py-2.5 rounded-xl text-sm font-semibold text-[#9aa8c7] hover:text-white hover:bg-white/6 transition-colors"
-            }
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="relative">
+        {/* Tabs */}
+        <div className="flex gap-1 p-1 rounded-2xl bg-[rgba(9,14,28,0.6)] border border-white/[0.07] cursor-pointer">
+          {(
+            [
+              { id: "status", label: "Status & Sync" },
+              { id: "config", label: "Configuration" },
+            ] as { id: TabId; label: string }[]
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={
+                activeTab === tab.id
+                  ? "flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-linear-to-br from-[#6d7dff] to-[#55c5ff] transition-colors"
+                  : "flex-1 py-2.5 rounded-xl text-sm font-semibold text-[#9aa8c7] hover:text-white hover:bg-white/6 transition-colors"
+              }
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Tab 1: Status & Sync ── */}
+        {activeTab === "status" && <TabStatus />}
+
+        {/* ── Tab 2: Configuration ── */}
+        {activeTab === "config" && <TabSettings />}
+
+        {/* ── Sync progress modal ── */}
+        {showSyncModal && (
+          <SyncProgressModal
+            isSyncing={isSyncing}
+            result={syncResult}
+            onClose={() => setShowSyncModal(false)}
+          />
+        )}
       </div>
-
-      {/* ── Tab 1: Status & Sync ── */}
-      {activeTab === "status" && <TabStatus />}
-
-      {/* ── Tab 2: Configuration ── */}
-      {activeTab === "config" && <TabSettings />}
-
-      {/* ── Sync progress modal ── */}
-      {showSyncModal && (
-        <SyncProgressModal
-          isSyncing={isSyncing}
-          result={syncResult}
-          onClose={() => setShowSyncModal(false)}
-        />
-      )}
     </>
   );
 }
