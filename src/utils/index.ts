@@ -53,3 +53,18 @@ export function formatBytes(bytes: number | null | undefined): string {
   const value = bytes / Math.pow(1024, clamped);
   return `${value % 1 === 0 ? value : value.toFixed(1)} ${units[clamped]}`;
 }
+
+/** Format a duration in seconds into a compact human-readable string. */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null) return "—";
+  const total = Math.max(0, Math.floor(seconds));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${secs}s`;
+  return `${secs}s`;
+}

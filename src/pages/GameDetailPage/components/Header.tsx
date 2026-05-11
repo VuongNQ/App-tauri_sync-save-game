@@ -2,7 +2,7 @@ import { CARD, EYEBROW, GHOST_BTN, PRIMARY_BTN, SOFT_BADGE, SOURCE_BADGE } from 
 import { GameThumbnail } from "@/components/GameThumbnail";
 import { DashboardQuery, ValidatePathsQuery } from "@/queries/dashboard";
 import { useSyncAndLaunchFlow } from "@/queries/detail";
-import { formatBytes, formatLocalTime } from "@/utils";
+import { formatBytes, formatDuration, formatLocalTime } from "@/utils";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "react-router";
@@ -136,6 +136,10 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
           {
             label: "Last cloud save",
             value: formatLocalTime(game.lastCloudModified),
+          },
+          {
+            label: "Total play time",
+            value: formatDuration(game.totalPlayTimeSeconds),
           },
           {
             label: "Drive storage used",

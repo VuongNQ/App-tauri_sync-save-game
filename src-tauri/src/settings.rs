@@ -312,25 +312,26 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
     }];
     route_save_paths(&mut save_paths, &id, &mut state.settings, &payload.path_mode);
 
-    let game = GameEntry {
-        id,
-        name: name.to_string(),
-        description,
-        thumbnail: payload.thumbnail,
+        let game = GameEntry {
+            id,
+            name: name.to_string(),
+            description,
+            thumbnail: payload.thumbnail,
         source: payload.source,
         save_paths,
         save_path: None,
         exe_name: None,
         exe_path: payload.exe_path,
-        track_changes: false,
-        auto_sync: false,
-        last_local_modified: None,
-        last_cloud_modified: None,
-        gdrive_folder_id: None,
-        cloud_storage_bytes: None,
-        path_mode: payload.path_mode,
-        sync_excludes: vec![],
-    };
+            track_changes: false,
+            auto_sync: false,
+            last_local_modified: None,
+            last_cloud_modified: None,
+            gdrive_folder_id: None,
+            total_play_time_seconds: 0,
+            cloud_storage_bytes: None,
+            path_mode: payload.path_mode,
+            sync_excludes: vec![],
+        };
 
     state.games.push(game.clone());
     save_state(app, &state)?;

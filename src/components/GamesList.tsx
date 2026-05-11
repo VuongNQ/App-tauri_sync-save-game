@@ -4,7 +4,7 @@ import { useRemoveGameMutation } from "../queries";
 import { useGameSyncingQuery } from "../queries/sync";
 import { useSyncAndLaunchFlow } from "../queries/detail";
 import type { GameEntry } from "../types/dashboard";
-import { formatBytes } from "../utils";
+import { formatBytes, formatDuration } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
 import { GameThumbnail } from "./GameThumbnail";
 import { BTN, CARD, MUTED, SEC_HDR, SOFT_BADGE, SOURCE_BADGE } from "./styles";
@@ -152,11 +152,16 @@ function GameCard({
               <span>↕</span> Syncing…
             </p>
           ) : (
-            g.cloudStorageBytes != null && (
-              <p className="m-0 text-xs text-[#7dc9ff] flex items-center gap-1">
-                <span>☁</span> {formatBytes(g.cloudStorageBytes)} on Drive
+            <div className="grid gap-0.5">
+              {g.cloudStorageBytes != null && (
+                <p className="m-0 text-xs text-[#7dc9ff] flex items-center gap-1">
+                  <span>☁</span> {formatBytes(g.cloudStorageBytes)} on Drive
+                </p>
+              )}
+              <p className="m-0 text-xs text-[#9aa8c7] flex items-center gap-1">
+                <span>⏱</span> {formatDuration(g.totalPlayTimeSeconds)} played
               </p>
-            )
+            </div>
           )}
         </div>
       </Link>

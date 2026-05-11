@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -17,6 +17,8 @@ pub struct WatcherManager {
     sync_locks: HashMap<String, Arc<Mutex<()>>>,
     /// Per-game: whether the game process was running on the last poll tick.
     playing_games: HashMap<String, bool>,
+    /// Per-game: when the current play session started.
+    playing_since: HashMap<String, Instant>,
 }
 
 impl WatcherManager {
@@ -25,6 +27,7 @@ impl WatcherManager {
             tracked_games: HashMap::new(),
             sync_locks: HashMap::new(),
             playing_games: HashMap::new(),
+            playing_since: HashMap::new(),
         }
     }
 
@@ -41,6 +44,7 @@ impl WatcherManager {
             .entry(key.clone())
             .or_insert_with(|| Arc::new(Mutex::new(())));
         self.playing_games.insert(key, false);
+        self.playing_since.remove(game_id);
 
         println!("[watcher] Tracking process for game '{game_id}': {exe_name}");
     }
@@ -49,29 +53,52 @@ impl WatcherManager {
     pub fn stop_tracking(&mut self, game_id: &str) {
         if self.tracked_games.remove(game_id).is_some() {
             self.playing_games.remove(game_id);
+            self.playing_since.remove(game_id);
             println!("[watcher] Stopped tracking '{game_id}'");
         }
     }
 
     /// Snapshot of currently tracked games for the poll thread (avoids holding the lock during I/O).
-    fn snapshot(&self) -> Vec<(String, String, bool, Arc<Mutex<()>>)> {
+    fn snapshot(&self) -> Vec<(String, String, bool, Option<Instant>, Arc<Mutex<()>>)> {
         self.tracked_games
             .iter()
             .map(|(id, exe)| {
                 let was_playing = *self.playing_games.get(id).unwrap_or(&false);
+                let started_at = self.playing_since.get(id).copied();
                 let lock = self
                     .sync_locks
                     .get(id)
                     .cloned()
                     .unwrap_or_else(|| Arc::new(Mutex::new(())));
-                (id.clone(), exe.clone(), was_playing, lock)
+                (id.clone(), exe.clone(), was_playing, started_at, lock)
             })
             .collect()
     }
 
     /// Bulk-update playing state after a poll tick.
-    fn update_playing(&mut self, id: &str, is_playing: bool) {
+    fn update_playing(&mut self, id: &str, is_playing: bool, started_at: Option<Instant>) {
         self.playing_games.insert(id.to_string(), is_playing);
+        match started_at {
+            Some(instant) => {
+                self.playing_since.insert(id.to_string(), instant);
+            }
+            None => {
+                self.playing_since.remove(id);
+            }
+        }
+    }
+}
+
+fn add_play_time(app: &AppHandle, game_id: &str, seconds: u64) {
+    if seconds == 0 {
+        return;
+    }
+
+    match settings::update_game_field(app, game_id, |game| {
+        game.total_play_time_seconds = game.total_play_time_seconds.saturating_add(seconds);
+    }) {
+        Ok(_) => println!("[watcher] Added {seconds}s playtime to '{game_id}'"),
+        Err(e) => eprintln!("[watcher] Failed to add playtime for '{game_id}': {e}"),
     }
 }
 
@@ -104,7 +131,7 @@ pub fn start_poll_thread(app: AppHandle) {
             println!(
                 "[watcher] Poll tick: checking {} game(s): {:?}",
                 snapshot.len(),
-                snapshot.iter().map(|(id, exe, _, _)| format!("{id}={exe}")).collect::<Vec<_>>()
+                snapshot.iter().map(|(id, exe, _, _, _)| format!("{id}={exe}")).collect::<Vec<_>>()
             );
 
             // 2. Check which exe_names are currently running (Windows-only).
@@ -120,7 +147,7 @@ pub fn start_poll_thread(app: AppHandle) {
                     .collect();
 
                 // Log any process name that partially matches a tracked exe (helps spot name mismatches).
-                for (_, exe_lower, _, _) in &snapshot {
+                for (_, exe_lower, _, _, _) in &snapshot {
                     let stem = exe_lower.trim_end_matches(".exe");
                     let matches: Vec<&String> = all
                         .iter()
@@ -141,9 +168,9 @@ pub fn start_poll_thread(app: AppHandle) {
                 std::collections::HashSet::new();
 
             // 3. Determine state changes and collect actions.
-            let mut state_updates: Vec<(String, bool)> = Vec::new();
+            let mut state_updates: Vec<(String, bool, Option<Instant>)> = Vec::new();
 
-            for (game_id, exe_name_lower, was_playing, sync_lock) in &snapshot {
+            for (game_id, exe_name_lower, was_playing, started_at, sync_lock) in &snapshot {
                 let is_now_playing = running_exes.contains(exe_name_lower.as_str());
 
                 println!(
@@ -158,7 +185,7 @@ pub fn start_poll_thread(app: AppHandle) {
                             "game-status-changed",
                             serde_json::json!({ "gameId": game_id, "status": "playing" }),
                         );
-                        state_updates.push((game_id.clone(), true));
+                        state_updates.push((game_id.clone(), true, Some(Instant::now())));
                     }
                     // Just exited
                     (true, false) => {
@@ -167,6 +194,12 @@ pub fn start_poll_thread(app: AppHandle) {
                             "game-status-changed",
                             serde_json::json!({ "gameId": game_id, "status": "idle" }),
                         );
+
+                        if let Some(started) = started_at {
+                            add_play_time(&app, game_id, started.elapsed().as_secs());
+                        } else {
+                            println!("[watcher] No play start timestamp for '{game_id}', skipping playtime update");
+                        }
 
                         // Decide whether to auto-sync.
                         // Contract: process-exit sync depends on tracked exe_name + auto_sync flag.
@@ -213,7 +246,7 @@ pub fn start_poll_thread(app: AppHandle) {
                             let _ = app.emit("game-sync-pending", game_id);
                         }
 
-                        state_updates.push((game_id.clone(), false));
+                        state_updates.push((game_id.clone(), false, None));
                     }
                     // No change
                     _ => {}
@@ -223,8 +256,8 @@ pub fn start_poll_thread(app: AppHandle) {
             // 4. Persist state updates (re-acquire lock briefly).
             if !state_updates.is_empty() {
                 if let Ok(mut m) = manager_state.lock() {
-                    for (id, playing) in state_updates {
-                        m.update_playing(&id, playing);
+                    for (id, playing, started_at) in state_updates {
+                        m.update_playing(&id, playing, started_at);
                     }
                 }
             }
@@ -337,4 +370,33 @@ pub fn arm_on_launch(app: &AppHandle, game_id: &str, exe_name: &str) {
     };
     manager.start_tracking(game_id, exe_name);
     println!("[watcher] Armed '{game_id}' for exit tracking (launched via Play)");
+}
+
+/// Flush any active play sessions, used before quitting so the last running game
+/// still contributes to total play time.
+pub fn flush_active_playtime(app: &AppHandle) {
+    let manager_state = app.state::<Arc<Mutex<WatcherManager>>>();
+    let snapshot = match manager_state.lock() {
+        Ok(m) => m
+            .tracked_games
+            .keys()
+            .map(|game_id| {
+                let started_at = m.playing_since.get(game_id).copied();
+                let is_playing = *m.playing_games.get(game_id).unwrap_or(&false);
+                (game_id.clone(), is_playing, started_at)
+            })
+            .collect::<Vec<_>>(),
+        Err(e) => {
+            eprintln!("[watcher] Failed to lock WatcherManager for flush_active_playtime: {e}");
+            return;
+        }
+    };
+
+    for (game_id, is_playing, started_at) in snapshot {
+        if is_playing {
+            if let Some(started) = started_at {
+                add_play_time(app, &game_id, started.elapsed().as_secs());
+            }
+        }
+    }
 }

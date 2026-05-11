@@ -26,6 +26,8 @@ export interface GameEntry {
   lastLocalModified: string | null;
   lastCloudModified: string | null;
   gdriveFolderId: string | null;
+  /** Total play time accumulated for this game, in seconds. */
+  totalPlayTimeSeconds: number;
   /** Total bytes stored in Google Drive for this game's save files. */
   cloudStorageBytes: number | null;
   /**

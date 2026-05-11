@@ -39,6 +39,7 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 "quit" => {
+                    crate::watcher::flush_active_playtime(app_handle);
                     app_handle.exit(0);
                 }
                 _ => {}

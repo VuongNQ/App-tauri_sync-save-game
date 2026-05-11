@@ -82,6 +82,9 @@ pub struct GameEntry {
     pub last_local_modified: Option<String>,
     pub last_cloud_modified: Option<String>,
     pub gdrive_folder_id: Option<String>,
+    /// Total time the game has been played, in seconds.
+    #[serde(default)]
+    pub total_play_time_seconds: u64,
     /// Total bytes currently stored in Google Drive for this game's save files.
     /// Updated after each successful sync. Used to enforce per-user storage quotas.
     #[serde(default)]

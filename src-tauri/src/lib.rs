@@ -181,6 +181,7 @@ fn clear_all_drive_data(app: tauri::AppHandle) -> Result<DashboardData, String> 
 
     for game in state.games.iter_mut() {
         game.gdrive_folder_id = None;
+        game.total_play_time_seconds = 0;
         game.cloud_storage_bytes = None;
         game.last_cloud_modified = None;
     }
