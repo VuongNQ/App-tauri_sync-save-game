@@ -502,13 +502,18 @@ pub fn save_device(app: &AppHandle, user_id: &str, device: &DeviceInfo) -> Resul
     let device_val = serde_json::to_value(&cloud_device)
         .map_err(|e| format!("Serialize DeviceInfo: {e}"))?;
 
-    let fields = match device_val {
+    let mut fields = match device_val {
         Value::Object(map) => map
             .into_iter()
             .map(|(k, v)| (k, json_to_firestore(&v)))
             .collect::<serde_json::Map<_, _>>(),
         _ => return Err("DeviceInfo did not serialize to object".into()),
     };
+
+    // Keep device path overrides out of the generic device upsert to avoid clobbering
+    // values that are managed by `save_device_path_overrides` with an updateMask PATCH.
+    fields.remove("pathOverrides");
+    fields.remove("pathOverridesIndexed");
 
     let body = json!({ "fields": fields }).to_string();
     let url = format!("{}/users/{user_id}/devices/{}", base_url(), device.id);
@@ -556,6 +561,49 @@ pub fn save_device_path_overrides(
     }
     println!("[firestore] Saved path overrides for device '{device_id}' (user {user_id})");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn save_device_payload_excludes_path_override_fields() {
+        let device = DeviceInfo {
+            id: "device-1".to_string(),
+            name: "My PC".to_string(),
+            hostname: "my-host".to_string(),
+            os_name: "Windows".to_string(),
+            os_version: "11".to_string(),
+            cpu_name: "CPU".to_string(),
+            cpu_cores: 8,
+            total_ram_mb: 16384,
+            registered_at: "2026-01-01T00:00:00Z".to_string(),
+            last_seen_at: "2026-01-01T00:00:00Z".to_string(),
+            is_current: false,
+            path_overrides: HashMap::from([("game-a:dev".to_string(), "D:\\Saves".to_string())]),
+            path_overrides_indexed: HashMap::from([(
+                "game-a:dev:1".to_string(),
+                "D:\\Saves\\Extra".to_string(),
+            )]),
+        };
+
+        let device_val = serde_json::to_value(&device).expect("serialize device");
+        let mut fields = match device_val {
+            Value::Object(map) => map
+                .into_iter()
+                .map(|(k, v)| (k, json_to_firestore(&v)))
+                .collect::<serde_json::Map<_, _>>(),
+            _ => panic!("DeviceInfo must serialize to map"),
+        };
+
+        fields.remove("pathOverrides");
+        fields.remove("pathOverridesIndexed");
+
+        assert!(!fields.contains_key("pathOverrides"));
+        assert!(!fields.contains_key("pathOverridesIndexed"));
+    }
 }
 
 /// Load a single `DeviceInfo` from Firestore.

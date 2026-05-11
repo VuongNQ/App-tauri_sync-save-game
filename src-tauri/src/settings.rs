@@ -638,7 +638,8 @@ pub fn load_and_merge_device_paths(app: &AppHandle) -> Result<bool, String> {
 
     let mut state = load_state(app)?;
 
-    let cloud_has_overrides = !cloud_device.path_overrides.is_empty();
+    let cloud_has_overrides = !cloud_device.path_overrides.is_empty()
+        || !cloud_device.path_overrides_indexed.is_empty();
     let local_has_overrides = !state.settings.path_overrides.is_empty()
         || !state.settings.path_overrides_indexed.is_empty();
 
@@ -665,6 +666,10 @@ pub fn load_and_merge_device_paths(app: &AppHandle) -> Result<bool, String> {
         }
         Ok(false) // local state unchanged
     } else {
+        println!(
+            "[firestore] No device path overrides found in cloud or local state (device '{}')",
+            device_id
+        );
         Ok(false) // nothing to do
     }
 }
