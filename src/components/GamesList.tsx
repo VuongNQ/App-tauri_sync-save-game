@@ -23,9 +23,10 @@ interface Props {
   games: GameEntry[];
   invalidGameIds?: Set<string>;
   missingExeIds?: Set<string>;
+  unconfiguredExeIds?: Set<string>;
 }
 
-export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
+export function GamesList({ games, invalidGameIds, missingExeIds, unconfiguredExeIds }: Props) {
   const removeMutation = useRemoveGameMutation();
 
   const [removeTarget, setRemoveTarget] = useState<GameEntry | null>(null);
@@ -57,6 +58,7 @@ export function GamesList({ games, invalidGameIds, missingExeIds }: Props) {
                 game={g}
                 isInvalid={invalidGameIds?.has(g.id) ?? false}
                 isExeMissing={missingExeIds?.has(g.id) ?? false}
+                      isExeUnconfigured={unconfiguredExeIds?.has(g.id) ?? false}
                 onRemove={() => setRemoveTarget(g)}
               />
             ))
@@ -81,11 +83,13 @@ function GameCard({
   game: g,
   isInvalid,
   isExeMissing,
+  isExeUnconfigured,
   onRemove,
 }: {
   game: GameEntry;
   isInvalid: boolean;
   isExeMissing: boolean;
+  isExeUnconfigured: boolean;
   onRemove: () => void;
 }) {
   const isSyncing = useGameSyncingQuery(g.id);
@@ -95,9 +99,11 @@ function GameCard({
   return (
     <div
       className={`relative flex items-center gap-4 p-4 rounded-2xl bg-[rgba(10,16,31,0.72)] border transition-colors ${
-        isInvalid || isExeMissing
+          isInvalid || isExeMissing
           ? "border-[rgba(255,100,100,0.4)] hover:border-[rgba(255,100,100,0.6)]"
-          : "border-[rgba(154,177,255,0.08)] hover:border-[rgba(111,171,255,0.4)]"
+            : isExeUnconfigured
+            ? "border-[rgba(255,200,80,0.3)] hover:border-[rgba(255,200,80,0.5)]"
+            : "border-[rgba(154,177,255,0.08)] hover:border-[rgba(111,171,255,0.4)]"
       }`}
     >
       <Link to={`/game/${g.id}`} className="flex items-center gap-4 flex-1 min-w-0 text-inherit no-underline">
@@ -149,6 +155,11 @@ function GameCard({
               <span>⚠</span> Executable not found on this device
             </p>
           )}
+          {isExeUnconfigured && (
+            <p className="m-0 text-xs text-[#ffd5a0] flex items-center gap-1">
+              <span>⚠</span> Exe path not set on this device
+            </p>
+          )}
           {g.trackChanges && !g.exeName && (
             <p className="m-0 text-xs text-[#ffd5a0] flex items-center gap-1">
               <span>⚠</span> No executable set — process tracking inactive
@@ -174,7 +185,7 @@ function GameCard({
       </Link>
 
       {/* Play button */}
-      <GamePlayButton game={g} exeMissing={isExeMissing} />
+      <GamePlayButton game={g} exeMissing={isExeMissing} exeUnconfigured={isExeUnconfigured} />
 
       {/* Remove button */}
       <button
@@ -191,7 +202,7 @@ function GameCard({
 
 // ── GamePlayButton ────────────────────────────────────────────────────────────
 
-function GamePlayButton({ game, exeMissing }: { game: GameEntry; exeMissing: boolean }) {
+function GamePlayButton({ game, exeMissing, exeUnconfigured: _exeUnconfigured }: { game: GameEntry; exeMissing: boolean; exeUnconfigured: boolean }) {
   const [error, setError] = useState<string | null>(null);
 
   const [canForce, setCanForce] = useState(false);

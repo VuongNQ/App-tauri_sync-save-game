@@ -87,7 +87,7 @@ src-tauri/src/
 | `path_mode` | `String` | `string` | `"auto"` (default) or `"per_device"`. Controls how save-path override keys are keyed: `"auto"` uses plain `game_id`; `"per_device"` uses `"{game_id}:{device_id}"`. Old records without this field deserialize as `"auto"` via `#[serde(default)]`. |
 | `save_paths` | `Vec<SavePathEntry>` | `SavePathEntry[]` | Ordered list of save-game folder entries. Primary path is index 0. Users can add multiple paths (e.g. memcards + save states). See `SavePathEntry` below. |
 | `exe_name` | `Option<String>` | `string \| null` | Game executable filename (e.g. `"MyGame.exe"`); used by the process monitor to detect when the game is running |
-| `exe_path` | `Option<String>` | `string \| null` | Full path to the game executable (e.g. `%PROGRAMFILES%\Steam\game.exe`); used by the `launch_game` command. **LOCAL-ONLY — never synced to Firestore or Drive; stripped to `None` before any cloud write; restored from local state after any cloud-to-local overwrite.** |
+| `exe_path` | `Option<String>` | `string \| null` | Full path to the game executable (e.g. `%PROGRAMFILES%\Steam\game.exe`); used by the `launch_game` command. **Device-local in game docs**: stripped from Firestore `games/{game_id}` and Drive library payloads, but backed up per-device via `AppSettings.exe_path_overrides` to `users/{user_id}/devices/{device_id}.exePathOverrides` for reinstall restore. |
 | `track_changes` | `bool` | `boolean` | Monitor game process and sync on exit (default `false`) |
 | `auto_sync` | `bool` | `boolean` | Automatically sync on change detection (default `false`) |
 | `last_local_modified` | `Option<String>` | `string \| null` | ISO 8601 timestamp of last known local save modification (max across all paths) |
@@ -123,6 +123,7 @@ Stored in Firestore at `users/{user_id}/devices/{device_id}`. Never stored in th
 | `total_ram_mb` | `u64` | `number` | Total RAM in MB |
 | `registered_at` | `String` | `string` | ISO 8601 timestamp of first registration (preserved on upsert) |
 | `last_seen_at` | `String` | `string` | ISO 8601 timestamp updated every app startup |
+| `exe_path_overrides` | `HashMap<String, String>` | `Record<string, string> \| undefined` | Device-local executable path backup map keyed by `game_id`; patched via `save_device_exe_path_overrides`; used to restore `GameEntry.exe_path` on reinstall |
 | `is_current` | `bool` (never stored) | `boolean \| undefined` | Computed locally — `true` on the device returned by the current machine; **never written to Firestore** |
 
 > **Legacy fields** (`save_path: Option<String>`, `sync_excludes: Vec<String>` on `GameEntry` and `SavePathEntry`) are kept on the Rust struct with `#[serde(default, skip_serializing_if)]` for migration deserialization only. `sync_excludes` is cleared automatically on first load by migration Pass 4 (`migrate_sync_excludes_to_includes`). They are never written by current code.
@@ -228,9 +229,11 @@ users/{user_id}/devices/{device_id} # DeviceInfo documents (one per registered m
 | `firestore::load_all_games(app, user_id)` | Cloud → Local | On first login via `fetch_all_from_firestore`. |
 | `firestore::load_settings(app, user_id)` | Cloud → Local | On first login via `fetch_all_from_firestore`. |
 | `settings::fetch_all_from_firestore(app)` | Cloud → Local | On first login; called from `save_auth_tokens` and `restore_from_cloud`. |
-| `firestore::save_device(app, user_id, device)` | Local → Cloud | Called by `devices::register_current_device()` on every startup and post-login. Strips `is_current`, `pathOverrides`, and `pathOverridesIndexed` from PATCH body — path fields are managed by `save_device_path_overrides` only. |
+| `firestore::save_device(app, user_id, device)` | Local → Cloud | Called by `devices::register_current_device()` on every startup and post-login. Strips `is_current`, `pathOverrides`, `pathOverridesIndexed`, and `exePathOverrides` from PATCH body — override fields are managed by dedicated updateMask helpers only. |
 | `firestore::save_device_path_overrides(app, user_id, device_id, ...)` | Local → Cloud | Called by `spawn_firestore_device_paths_sync` after any save-path change. Uses `updateMask` to write **only** `pathOverrides` and `pathOverridesIndexed` without touching other device fields. Enables reinstall restore. |
+| `firestore::save_device_exe_path_overrides(app, user_id, device_id, ...)` | Local → Cloud | Called by `spawn_firestore_device_exe_paths_sync` after any executable-path change. Uses `updateMask` to write **only** `exePathOverrides` without touching other device fields. Enables reinstall restore for `exe_path`. |
 | `settings::load_and_merge_device_paths(app)` | Cloud → Local | Called post-login after `register_current_device`. Reads device doc; if cloud has non-empty overrides, restores them into local `AppSettings`. If local has overrides and cloud is empty, pushes them up (one-time migration). |
+| `settings::load_and_merge_device_exe_paths(app)` | Cloud → Local | Called post-login after `register_current_device`. Reads device doc; if cloud has non-empty `exePathOverrides`, restores them into local `AppSettings` and `GameEntry.exe_path`. If local has overrides and cloud is empty, pushes them up (one-time migration). |
 | `firestore::load_all_devices(app, user_id)` | Cloud → Local | Called by `devices::get_devices_cmd()`. |
 | `firestore::delete_device(app, user_id, device_id)` | Cloud delete | Called by `devices::remove_device_cmd()`. |
 
@@ -258,7 +261,7 @@ pub struct StoredState {
 }
 ```
 
-`AppSettings` includes **two** local-only path-override fields that are **never synced to Firestore**:
+`AppSettings` includes **three** local-only override fields that are **never synced to Firestore settings/app**:
 
 ```rust
 pub struct AppSettings {
@@ -275,6 +278,10 @@ pub struct AppSettings {
     ///   "per_device" → "{game_id}:{device_id}:{i}"
     #[serde(default)]
     pub path_overrides_indexed: HashMap<String, String>,
+    /// Device-specific executable-path overrides keyed by `game_id`.
+    /// Local-only in settings/app; backed up under devices/{device_id}.exePathOverrides.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub exe_path_overrides: HashMap<String, String>,
 }
 ```
 
@@ -295,6 +302,11 @@ export interface AppSettings {
    * Key: "{gameId}:{i}" for "auto" games; "{gameId}:{deviceId}:{i}" for "per_device" games.
    */
   pathOverridesIndexed: Record<string, string>;
+  /**
+   * Device-specific executable-path overrides keyed by game id.
+   * Local-only in settings/app; backed up to devices/{deviceId}.exePathOverrides.
+   */
+  exePathOverrides: Record<string, string>;
 }
 ```
 
@@ -404,7 +416,9 @@ The override map key depends on `GameEntry.path_mode`:
 
 `path_overrides` and `path_overrides_indexed` within `AppSettings` are local to each machine and are **never written to Firestore via `save_settings`**. However, they are **backed up per-device** to the Firestore device document (`users/{user_id}/devices/{device_id}`) via `save_device_path_overrides` after every save-path change. On reinstall (no local JSON), `load_and_merge_device_paths` reads that device document and restores the override maps into local state so per-device save paths reappear automatically.
 
-> **Critical invariant**: `save_device()` must never include `pathOverrides` / `pathOverridesIndexed` in its generic device PATCH. Both fields are explicitly removed from the serialized body before sending. Violating this causes the upsert to overwrite the cloud backup with empty maps, breaking reinstall restore for `per_device` games.
+`exe_path_overrides` follows the same two-tier model: local-only in `settings/app`, backed up to `users/{user_id}/devices/{device_id}.exePathOverrides` via `save_device_exe_path_overrides`, and restored post-login by `load_and_merge_device_exe_paths`. Keys are plain `game_id` because the map is already scoped to one device document.
+
+> **Critical invariant**: `save_device()` must never include `pathOverrides`, `pathOverridesIndexed`, or `exePathOverrides` in its generic device PATCH. All three fields are explicitly removed from the serialized body before sending and are written only by dedicated updateMask helpers. Violating this causes device upsert to overwrite cloud backups with empty maps and breaks reinstall restore.
 
 ### Key Functions (`settings.rs`)
 
@@ -435,6 +449,10 @@ The override map key depends on `GameEntry.path_mode`:
 `migrate_absolute_save_paths()` also runs on load. Any `SavePathEntry.path` without `%` tokens is moved to the appropriate override map.
 
 `migrate_per_device_override_keys()` also runs on load (pass 3). For `"per_device"` games, upgrades old plain-`game_id` override keys (`"game_id"` / `"game_id:i"`) to the device-ID-keyed format (`"game_id:device_id"` / `"game_id:device_id:i"`). The old vs new format is distinguished by whether the part after the colon is a bare integer (old) or a UUID (new).
+
+`migrate_sync_excludes_to_includes()` runs on load (pass 4) and clears all legacy `sync_excludes` fields.
+
+`migrate_exe_paths_to_overrides()` runs on load (pass 5) and backfills `AppSettings.exe_path_overrides` from legacy local `GameEntry.exe_path` values so older local-only installs can upload executable-path backups to Firestore device docs on next login.
 
 ### New-device UX
 When a `SavePathEntry.path` is `null` (device-specific path not configured for this machine), `SavePathCard` in `GameSettingsForm` shows a blue info banner prompting the user to Browse. The banner auto-dismisses when the field is filled.
@@ -489,6 +507,7 @@ pub struct AppSettings {
     pub sync_interval_minutes: u32,  // periodic sync interval (0 = only on change)
     pub path_overrides: HashMap<String, String>, // key: "{game_id}" (auto) or "{game_id}:{device_id}" (per_device). Local-only.
     pub path_overrides_indexed: HashMap<String, String>, // key: "{game_id}:{i}" (auto) or "{game_id}:{device_id}:{i}" (per_device). Local-only.
+  pub exe_path_overrides: HashMap<String, String>, // key: "{game_id}". Local-only; backed up under devices/{device_id}.exePathOverrides.
 }
 ```
 

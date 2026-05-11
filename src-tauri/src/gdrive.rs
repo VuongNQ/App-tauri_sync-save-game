@@ -861,6 +861,13 @@ pub fn fetch_library_from_cloud(app: &AppHandle) -> Result<bool, String> {
         if let Some(local_path) = local_exe_paths.get(&game.id) {
             game.exe_path = local_path.clone();
         }
+        // Also fall back to the exe_path_overrides map for games that had no local snapshot
+        // (e.g. newly restored from Drive) but whose exe_path was previously backed up.
+        if game.exe_path.is_none() {
+            if let Some(override_path) = state.settings.exe_path_overrides.get(&game.id) {
+                game.exe_path = Some(override_path.clone());
+            }
+        }
     }
     if let Some(modified) = file.modified_time {
         state.last_cloud_library_modified = Some(modified);

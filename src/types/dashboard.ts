@@ -119,6 +119,8 @@ export interface DeviceInfo {
   lastSeenAt: string;
   /** True when this device is the one currently running the app. Computed, never stored. */
   isCurrent?: boolean;
+  /** Device-local exe-path overrides keyed by game id. Backed up here for reinstall restore. */
+  exePathOverrides?: Record<string, string>;
 }
 
 // ── Settings ──────────────────────────────────────────────
@@ -131,6 +133,8 @@ export interface AppSettings {
   pathOverrides: Record<string, string>;
   /** Device-specific save-path overrides for extra paths keyed by "{gameId}:{index}". Local-only. */
   pathOverridesIndexed: Record<string, string>;
+  /** Device-specific exe-path overrides keyed by game id. Backed up to Firestore device doc. */
+  exePathOverrides: Record<string, string>;
 }
 
 export interface AdminConfig {

@@ -547,7 +547,8 @@ export interface GameEntry {
   savePaths: SavePathEntry[];       // ordered list; index 0 is primary. Replaces old savePath + syncExcludes (now uses syncIncludes).
   exeName: string | null;           // game executable filename (e.g. "MyGame.exe"); used by process monitor
   exePath: string | null;           // full exe path with %VAR% tokens (e.g. "%PROGRAMFILES%\\Steam\\game.exe"); used by launch_game
-                                    // LOCAL-ONLY — stripped before any Firestore / Drive upload; never synced to cloud
+                                    // Device-local in game docs; stripped from Firestore games docs and Drive library payloads.
+                                    // Backed up per-device via settings.exePathOverrides -> devices/{deviceId}.exePathOverrides.
   trackChanges: boolean;
   autoSync: boolean;
   lastLocalModified: string | null; // ISO 8601 (max across all paths)
@@ -562,19 +563,24 @@ export interface AppSettings {
   startMinimised: boolean;
   runOnStartup: boolean;
   /**
-   * Device-specific save-path overrides. Local-only — never written to Firestore.
+   * Device-specific save-path overrides. Local-only in settings/app; backed up to devices/{deviceId}.
    * Key format depends on GameEntry.pathMode:
    *   "auto"       game, index 0   → key = "{gameId}"
    *   "per_device" game, index 0   → key = "{gameId}:{deviceId}"
    */
   pathOverrides: Record<string, string>;
   /**
-   * Device-specific save-path overrides for save_paths[i≥1]. Local-only — never written to Firestore.
+   * Device-specific save-path overrides for save_paths[i≥1]. Local-only in settings/app; backed up to devices/{deviceId}.
    * Key format depends on GameEntry.pathMode:
    *   "auto"       game, index i   → key = "{gameId}:{i}"
    *   "per_device" game, index i   → key = "{gameId}:{deviceId}:{i}"
    */
   pathOverridesIndexed: Record<string, string>;
+  /**
+   * Device-specific executable-path overrides keyed by game id.
+   * Local-only in settings/app; backed up to devices/{deviceId}.exePathOverrides.
+   */
+  exePathOverrides: Record<string, string>;
 }
 
 export interface DashboardData {
@@ -595,6 +601,7 @@ export interface DeviceInfo {
   totalRamMb: number;
   registeredAt: string;      // ISO 8601
   lastSeenAt: string;        // ISO 8601
+  exePathOverrides?: Record<string, string>; // device-level backup map for GameEntry.exePath (key = gameId)
   isCurrent?: boolean;       // computed locally — true on the current machine; never stored in Firestore
 }
 ```

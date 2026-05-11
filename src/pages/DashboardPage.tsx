@@ -60,6 +60,9 @@ export function DashboardPage() {
   // exePathValid === false means exe_path is set but the file doesn't exist on this machine.
   const missingExeIds = new Set((validateQuery.data ?? []).filter((v) => v.exePathValid === false).map((v) => v.gameId));
 
+  // trackChanges=true but exePath is null means exe path not yet configured on this device.
+  const unconfiguredExeIds = new Set(games.filter((g) => g.trackChanges && g.exePath === null).map((g) => g.id));
+
   if (dashboardQuery.isLoading) {
     return <DashboardSkeleton />;
   }
@@ -108,7 +111,7 @@ export function DashboardPage() {
       <HeroCard gamesCount={games.length} totalStorageBytes={games.reduce((sum, g) => sum + (g.cloudStorageBytes ?? 0), 0)} />
 
       {/* Game list */}
-      <GamesList games={games} invalidGameIds={invalidGameIds} missingExeIds={missingExeIds} />
+      <GamesList games={games} invalidGameIds={invalidGameIds} missingExeIds={missingExeIds} unconfiguredExeIds={unconfiguredExeIds} />
 
       {/* Add game */}
       <AddGameCard />

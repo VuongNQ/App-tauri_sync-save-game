@@ -382,7 +382,9 @@ pub fn save_settings(app: &AppHandle, user_id: &str, settings: &AppSettings) -> 
     let fields = match settings_val {
         Value::Object(map) => map
             .into_iter()
-            .filter(|(k, _)| k != "pathOverrides" && k != "pathOverridesIndexed")
+            .filter(|(k, _)| {
+                k != "pathOverrides" && k != "pathOverridesIndexed" && k != "exePathOverrides"
+            })
             .map(|(k, v)| (k, json_to_firestore(&v)))
             .collect::<serde_json::Map<_, _>>(),
         _ => return Err("AppSettings did not serialize to object".into()),
@@ -487,16 +489,18 @@ pub fn load_sync_meta(
 // ── Device CRUD ───────────────────────────────────────────
 
 /// Write (upsert) a `DeviceInfo` to Firestore at `users/{user_id}/devices/{device_id}`.
-/// `is_current`, `path_overrides`, and `path_overrides_indexed` are local-only and are
-/// stripped before writing. Path overrides are written separately via
-/// `save_device_path_overrides` with an `updateMask` PATCH so they are never clobbered.
+/// `is_current`, `path_overrides`, `path_overrides_indexed`, and `exe_path_overrides` are
+/// local-only and stripped before writing. Each override field is managed by its own
+/// dedicated updateMask PATCH function so it is never clobbered by this generic upsert.
 pub fn save_device(app: &AppHandle, user_id: &str, device: &DeviceInfo) -> Result<(), String> {
     // is_current is computed at query time — never persisted.
-    // path_overrides / path_overrides_indexed are written via a separate updateMask PATCH.
+    // path_overrides / path_overrides_indexed / exe_path_overrides are each managed by
+    // dedicated updateMask PATCH functions — never include them in the generic upsert.
     let cloud_device = DeviceInfo {
         is_current: false,
         path_overrides: std::collections::HashMap::new(),
         path_overrides_indexed: std::collections::HashMap::new(),
+        exe_path_overrides: std::collections::HashMap::new(),
         ..device.clone()
     };
     let device_val = serde_json::to_value(&cloud_device)
@@ -514,6 +518,8 @@ pub fn save_device(app: &AppHandle, user_id: &str, device: &DeviceInfo) -> Resul
     // values that are managed by `save_device_path_overrides` with an updateMask PATCH.
     fields.remove("pathOverrides");
     fields.remove("pathOverridesIndexed");
+    // exe-path overrides are managed exclusively by `save_device_exe_path_overrides`.
+    fields.remove("exePathOverrides");
 
     let body = json!({ "fields": fields }).to_string();
     let url = format!("{}/users/{user_id}/devices/{}", base_url(), device.id);
@@ -563,7 +569,38 @@ pub fn save_device_path_overrides(
     Ok(())
 }
 
-#[cfg(test)]
+/// Update only `exePathOverrides` on an existing device document
+/// using a Firestore `updateMask` PATCH so no other fields are touched.
+/// This is the safe write path for device-local exe-path overrides.
+pub fn save_device_exe_path_overrides(
+    app: &AppHandle,
+    user_id: &str,
+    device_id: &str,
+    exe_path_overrides: &std::collections::HashMap<String, String>,
+) -> Result<(), String> {
+    use serde_json::json;
+
+    let epo_val = serde_json::to_value(exe_path_overrides)
+        .map_err(|e| format!("Serialize exe_path_overrides: {e}"))?;
+
+    let fields = serde_json::json!({
+        "exePathOverrides": json_to_firestore(&epo_val),
+    });
+
+    let body = json!({ "fields": fields }).to_string();
+    // updateMask ensures only this field is written; all other device fields are preserved.
+    let url = format!(
+        "{}/users/{user_id}/devices/{device_id}?updateMask.fieldPaths=exePathOverrides",
+        base_url()
+    );
+
+    let (status, resp_body) = http_client::authed_patch_json(app, &url, &body)?;
+    if status != 200 && status != 201 {
+        return Err(format!("[firestore] save_device_exe_path_overrides HTTP {status}: {resp_body}"));
+    }
+    println!("[firestore] Saved exe-path overrides for device '{device_id}' (user {user_id})");
+    Ok(())
+}
 mod tests {
     use super::*;
     use std::collections::HashMap;
@@ -587,6 +624,10 @@ mod tests {
                 "game-a:dev:1".to_string(),
                 "D:\\Saves\\Extra".to_string(),
             )]),
+            exe_path_overrides: HashMap::from([(
+                "game-a".to_string(),
+                "%PROGRAMFILES%\\Game\\game.exe".to_string(),
+            )]),
         };
 
         let device_val = serde_json::to_value(&device).expect("serialize device");
@@ -600,9 +641,11 @@ mod tests {
 
         fields.remove("pathOverrides");
         fields.remove("pathOverridesIndexed");
+        fields.remove("exePathOverrides");
 
         assert!(!fields.contains_key("pathOverrides"));
         assert!(!fields.contains_key("pathOverridesIndexed"));
+        assert!(!fields.contains_key("exePathOverrides"));
     }
 }
 

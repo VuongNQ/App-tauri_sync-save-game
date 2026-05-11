@@ -239,6 +239,11 @@ pub struct DeviceInfo {
     /// Same lifecycle as `path_overrides`.
     #[serde(default)]
     pub path_overrides_indexed: std::collections::HashMap<String, String>,
+    /// Device-local exe-path overrides keyed by `game_id`.
+    /// Stored in Firestore only under this device's document for disaster recovery.
+    /// Stripped from the main DeviceInfo PATCH — written via `save_device_exe_path_overrides`.
+    #[serde(default)]
+    pub exe_path_overrides: std::collections::HashMap<String, String>,
 }
 
 // ── Settings ──────────────────────────────────────────────
@@ -259,6 +264,11 @@ pub struct AppSettings {
     /// **Local-only — never written to Firestore.**
     #[serde(default)]
     pub path_overrides_indexed: HashMap<String, String>,
+    /// Device-specific exe-path overrides keyed by `game_id`.
+    /// Backed up per-device to Firestore via `save_device_exe_path_overrides`.
+    /// **Local-only in `AppSettings` — backed up to Firestore device doc for reinstall restore.**
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub exe_path_overrides: HashMap<String, String>,
 }
 
 impl Default for AppSettings {
@@ -269,6 +279,7 @@ impl Default for AppSettings {
             run_on_startup: false,
             path_overrides: HashMap::new(),
             path_overrides_indexed: HashMap::new(),
+            exe_path_overrides: HashMap::new(),
         }
     }
 }

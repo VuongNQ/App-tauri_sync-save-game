@@ -233,6 +233,11 @@ fn save_auth_tokens(
             eprintln!("[firestore] Post-login: load_and_merge_device_paths failed: {e}");
         }
 
+        // Restore device-local exe-path overrides from Firestore (disaster recovery).
+        if let Err(e) = settings::load_and_merge_device_exe_paths(&app_clone) {
+            eprintln!("[firestore] Post-login: load_and_merge_device_exe_paths failed: {e}");
+        }
+
         // Sync all game saves from Drive (picks up cloud-side changes).
         match sync::sync_all_games(&app_clone) {
             Ok(results) => {

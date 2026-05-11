@@ -272,6 +272,16 @@ pub fn load_state(app: &AppHandle) -> Result<StoredState, String> {
         }
     }
 
+    // One-time migration (pass 5): backfill local exe-path override map from legacy
+    // `game.exe_path` values so existing local installs can upload them to Firestore
+    // device backup on next login.
+    if migrate_exe_paths_to_overrides(&mut state) {
+        println!("[settings] Migrated legacy game.exe_path values to exe_path_overrides");
+        if let Err(e) = save_state(app, &state) {
+            eprintln!("[settings] exe_path_overrides migration save failed: {e}");
+        }
+    }
+
     Ok(state)
 }
 
@@ -343,6 +353,16 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
     spawn_firestore_game_upsert(app, game.clone());
     // Path routing may have stored new device-specific overrides — sync them to Firestore.
     spawn_firestore_device_paths_sync(app);
+    // Keep exe-path override map in sync.
+    if let Some(ref p) = game.exe_path {
+        state.settings.exe_path_overrides.insert(game.id.clone(), p.clone());
+    } else {
+        state.settings.exe_path_overrides.remove(&game.id);
+    }
+    if !state.settings.exe_path_overrides.is_empty() {
+        save_state(app, &state)?;
+        spawn_firestore_device_exe_paths_sync(app);
+    }
     Ok(game)
 }
 
@@ -357,6 +377,7 @@ pub fn remove_game(app: &AppHandle, game_id: &str) -> Result<(), String> {
     let prefix = format!("{game_id}:");
     state.settings.path_overrides.retain(|k, _| k != game_id && !k.starts_with(&prefix));
     state.settings.path_overrides_indexed.retain(|k, _| !k.starts_with(&prefix));
+    state.settings.exe_path_overrides.remove(game_id);
     save_state(app, &state)?;
     spawn_firestore_game_delete(app, game_id.to_string());
     Ok(())
@@ -376,7 +397,7 @@ pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
         save_paths,
         save_path: None, // Legacy field — never persist back
         exe_name: normalized_exe_name,
-        exe_path: normalized_exe_path,
+        exe_path: normalized_exe_path.clone(),
         ..game
     };
 
@@ -391,6 +412,16 @@ pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
     spawn_firestore_game_upsert(app, to_sync);
     // Path routing may have updated device-specific overrides — sync them to Firestore.
     spawn_firestore_device_paths_sync(app);
+    // Keep exe-path override map in sync.
+    if let Some(ref p) = normalized_exe_path {
+        state.settings.exe_path_overrides.insert(game_id.clone(), p.clone());
+    } else {
+        state.settings.exe_path_overrides.remove(&game_id);
+    }
+    if !state.settings.exe_path_overrides.is_empty() {
+        save_state(app, &state)?;
+    }
+    spawn_firestore_device_exe_paths_sync(app);
     Ok(())
 }
 
@@ -520,14 +551,21 @@ pub fn fetch_all_from_firestore(app: &AppHandle) -> Result<bool, String> {
         if let Some(local_path) = local_exe_paths.get(&game.id) {
             game.exe_path = local_path.clone();
         }
+        // Also fall back to exe_path_overrides for games newly received from Firestore.
+        if game.exe_path.is_none() {
+            if let Some(override_path) = state.settings.exe_path_overrides.get(&game.id) {
+                game.exe_path = Some(override_path.clone());
+            }
+        }
     }
 
     if let Ok(Some(mut cloud_settings)) = firestore::load_settings(app, &user_id) {
-        // path_overrides and path_overrides_indexed are local-only (device-specific paths)
-        // — never synced via AppSettings. Preserve the local machine's overrides for now;
-        // load_and_merge_device_paths (called below) will reconcile with the device doc.
+        // path_overrides, path_overrides_indexed, and exe_path_overrides are local-only
+        // (device-specific) — never synced via AppSettings. Preserve local values; the
+        // load_and_merge_device_* functions (called below) reconcile with the device doc.
         cloud_settings.path_overrides = state.settings.path_overrides.clone();
         cloud_settings.path_overrides_indexed = state.settings.path_overrides_indexed.clone();
+        cloud_settings.exe_path_overrides = state.settings.exe_path_overrides.clone();
         state.settings = cloud_settings;
     }
 
@@ -668,6 +706,93 @@ pub fn load_and_merge_device_paths(app: &AppHandle) -> Result<bool, String> {
     } else {
         println!(
             "[firestore] No device path overrides found in cloud or local state (device '{}')",
+            device_id
+        );
+        Ok(false) // nothing to do
+    }
+}
+
+/// Push the current device's `exe_path_overrides` to Firestore under the device document
+/// using a targeted `updateMask` PATCH. Called in a background thread so it never blocks the UI.
+pub(crate) fn spawn_firestore_device_exe_paths_sync(app: &AppHandle) {
+    spawn_firestore_task(app, move |app, user_id| {
+        let device_id = match crate::devices::get_machine_device_id() {
+            Some(id) => id,
+            None => return Ok(()), // non-Windows or registry unavailable
+        };
+        let settings = load_state(app)?.settings;
+        firestore::save_device_exe_path_overrides(
+            app,
+            user_id,
+            &device_id,
+            &settings.exe_path_overrides,
+        )
+    });
+}
+
+/// Load device-scoped exe-path overrides from Firestore and merge them into local state.
+///
+/// Logic:
+/// - Firestore has **non-empty** `exePathOverrides` → restore from Firestore (covers reinstall)
+/// - Firestore has **empty** AND local has non-empty → push local to Firestore (one-time migration)
+/// - Both empty → no-op
+///
+/// Returns `Ok(true)` if local state was updated, `Ok(false)` otherwise.
+pub fn load_and_merge_device_exe_paths(app: &AppHandle) -> Result<bool, String> {
+    let device_id = match crate::devices::get_machine_device_id() {
+        Some(id) => id,
+        None => return Ok(false), // non-Windows
+    };
+    let user_id = match crate::gdrive_auth::get_current_user_id(app) {
+        Some(id) => id,
+        None => return Ok(false),
+    };
+
+    let cloud_device = match firestore::load_device(app, &user_id, &device_id) {
+        Ok(Some(d)) => d,
+        Ok(None) => return Ok(false), // device not yet registered
+        Err(e) => {
+            eprintln!("[firestore] load_and_merge_device_exe_paths: load_device failed: {e}");
+            return Ok(false);
+        }
+    };
+
+    let mut state = load_state(app)?;
+
+    let cloud_has_overrides = !cloud_device.exe_path_overrides.is_empty();
+    let local_has_overrides = !state.settings.exe_path_overrides.is_empty();
+
+    if cloud_has_overrides {
+        // Firestore is authoritative — restore (covers clean reinstall scenario).
+        // Apply each override to the matching game in local state.
+        for (game_id, path) in &cloud_device.exe_path_overrides {
+            if let Some(game) = state.games.iter_mut().find(|g| &g.id == game_id) {
+                game.exe_path = Some(path.clone());
+            }
+        }
+        state.settings.exe_path_overrides = cloud_device.exe_path_overrides;
+        save_state(app, &state)?;
+        println!(
+            "[firestore] Restored device exe-path overrides from Firestore ({} entries)",
+            state.settings.exe_path_overrides.len()
+        );
+        Ok(true)
+    } else if local_has_overrides {
+        // One-time migration: push existing local overrides up to Firestore.
+        if let Err(e) = firestore::save_device_exe_path_overrides(
+            app,
+            &user_id,
+            &device_id,
+            &state.settings.exe_path_overrides,
+        ) {
+            eprintln!("[firestore] load_and_merge_device_exe_paths: migration push failed: {e}");
+        } else {
+            println!("[firestore] Migrated local exe-path overrides to Firestore device doc");
+        }
+        Ok(false) // local state unchanged
+    } else {
+        println!(
+            "[firestore] No device exe-path overrides found in cloud or local state (device '{}')",
             device_id
         );
         Ok(false) // nothing to do
@@ -1008,6 +1133,31 @@ fn migrate_sync_excludes_to_includes(state: &mut StoredState) -> bool {
             migrated = true;
         }
     }
+    migrated
+}
+
+/// One-time migration (pass 5): backfill `AppSettings.exe_path_overrides` from
+/// existing per-game `exe_path` values in local JSON.
+///
+/// This closes the legacy gap where users had local `game.exe_path` configured but the
+/// new override map was still empty, which prevented one-time local→Firestore device
+/// backup migration in `load_and_merge_device_exe_paths`.
+/// Returns `true` when at least one map entry was inserted.
+fn migrate_exe_paths_to_overrides(state: &mut StoredState) -> bool {
+    let mut migrated = false;
+
+    for game in &state.games {
+        if let Some(exe_path) = normalize_optional_path(game.exe_path.clone()) {
+            if !state.settings.exe_path_overrides.contains_key(&game.id) {
+                state
+                    .settings
+                    .exe_path_overrides
+                    .insert(game.id.clone(), exe_path);
+                migrated = true;
+            }
+        }
+    }
+
     migrated
 }
 

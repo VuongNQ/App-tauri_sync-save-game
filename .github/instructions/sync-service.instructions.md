@@ -148,12 +148,14 @@ const PROJECT_ID: &str = match option_env!("GOOGLE_CLOUD_PROJECT_ID") {
 | `save_user_profile(app, profile)` | PATCH (upsert) | `userProfiles/{user_id}` |
 | `save_sync_meta(app, user_id, game_id, meta)` | PATCH (upsert) | `users/{uid}/syncMeta/{game_id}` |
 | `load_sync_meta(app, user_id, game_id)` | GET | `users/{uid}/syncMeta/{game_id}` → `Option<SyncMeta>` |
-| `save_device(app, user_id, device)` | PATCH (upsert) | `users/{uid}/devices/{device_id}` — strips `is_current`, `pathOverrides`, and `pathOverridesIndexed` before write; path fields are managed only by `save_device_path_overrides` |
+| `save_device(app, user_id, device)` | PATCH (upsert) | `users/{uid}/devices/{device_id}` — strips `is_current`, `pathOverrides`, `pathOverridesIndexed`, and `exePathOverrides` before write; override fields are managed only by dedicated updateMask helpers |
+| `save_device_path_overrides(app, user_id, device_id, path_overrides, path_overrides_indexed)` | PATCH (updateMask) | `users/{uid}/devices/{device_id}` — writes only `pathOverrides` and `pathOverridesIndexed` |
+| `save_device_exe_path_overrides(app, user_id, device_id, exe_path_overrides)` | PATCH (updateMask) | `users/{uid}/devices/{device_id}` — writes only `exePathOverrides` |
 | `load_device(app, user_id, device_id)` | GET | `users/{uid}/devices/{device_id}` → `Option<DeviceInfo>` |
 | `load_all_devices(app, user_id)` | GET collection | `users/{uid}/devices` → `Vec<DeviceInfo>` |
 | `delete_device(app, user_id, device_id)` | DELETE (idempotent on 404) | `users/{uid}/devices/{device_id}` |
 > `load_sync_meta` is marked `#[allow(dead_code)]` — retained for future cross-device read path. Drive `.sync-meta.json` remains the exclusive read source today.
-> **`save_settings` strips local-only fields**: When serialising `AppSettings` to Firestore, **both `pathOverrides` and `pathOverridesIndexed`** fields are **always filtered out** before the write. They are local-only device-specific values and must never be stored in Firestore.
+> **`save_settings` strips local-only fields**: When serialising `AppSettings` to Firestore, local-only override fields (`pathOverrides`, `pathOverridesIndexed`, and `exePathOverrides`) must be filtered out before the write. They are device-specific values and must not be stored in `settings/app`.
 > **Admin bootstrap**: the first authenticated Google account gets `role = admin` automatically and is stored in `userProfiles/{user_id}` along with profile metadata.
 ### 401 Retry Pattern (same as gdrive.rs)
 
@@ -212,7 +214,7 @@ Called from `lib.rs` → `save_auth_tokens` command after login. Algorithm:
 2. If Firestore has zero games → fall back to `gdrive::fetch_library_from_cloud()` for one-time migration.
 3. Try `firestore::load_settings()` → if `Some`, use Firestore settings.
 4. If `None` → fall back to `gdrive::fetch_settings_from_cloud()` for one-time migration.
-5. **Preserve local overrides**: before overwriting settings with the cloud version, copy the current `state.settings.path_overrides` **and `path_overrides_indexed`** into the cloud settings before merging, so device-specific paths are never lost during a cloud restore.
+5. **Preserve local overrides**: before overwriting settings with the cloud version, copy the current `state.settings.path_overrides`, `path_overrides_indexed`, and `exe_path_overrides` into the cloud settings before merging, so device-specific paths and executable paths are never lost during a cloud restore.
 6. Call `settings::save_state()` with merged data.
 
 This ensures existing users (who had Drive `library.json`) are seamlessly migrated to Firestore on first login after upgrade.
@@ -301,7 +303,9 @@ The key format inside `path_overrides` / `path_overrides_indexed` depends on `Ga
 
 `path_overrides` and `path_overrides_indexed` inside `AppSettings` are **local-only** — never written to Firestore via `save_settings`. However, they **are** backed up to Firestore for disaster recovery under the device document at `users/{user_id}/devices/{device_id}` using the dedicated `save_device_path_overrides` function (updateMask PATCH, so only those two fields are touched). This enables save-folder restore on reinstall via `load_and_merge_device_paths`.
 
-> **Critical invariant**: `save_device()` must never include `pathOverrides` or `pathOverridesIndexed` in its generic PATCH body. Both fields are explicitly `.remove()`-d from the serialized field map before the request is sent. Violating this causes a fresh device upsert to overwrite the cloud backup with empty maps, breaking the reinstall restore path.
+`exe_path_overrides` follows the same two-tier model: local-only in `settings/app`, backed up to `users/{user_id}/devices/{device_id}.exePathOverrides` using `save_device_exe_path_overrides`, and restored post-login by `load_and_merge_device_exe_paths`. Keys are plain `game_id` because the map is already scoped to one device document.
+
+> **Critical invariant**: `save_device()` must never include `pathOverrides`, `pathOverridesIndexed`, or `exePathOverrides` in its generic PATCH body. All are explicitly `.remove()`-d from the serialized field map before the request is sent. Violating this causes a fresh device upsert to overwrite cloud backups with empty maps, breaking reinstall restore.
 
 **Routing function**: `route_save_paths(save_paths, game_id, settings, path_mode)` in `settings.rs` — called on every `add_manual_game` / `upsert_game`. Uses `build_override_key(game_id, path_mode, index, device_id)` to construct the correct map key. For `"per_device"` mode all paths go to the device-keyed override and `entry.path` is set to `None`.
 
@@ -316,6 +320,7 @@ The key format inside `path_overrides` / `path_overrides_indexed` depends on `Ga
 - Pass 2 — `migrate_save_paths_to_vec()` — converts any `GameEntry` without `save_paths` but with legacy `save_path` + `sync_excludes` into `save_paths[0]` with `sync_includes: []` (old excludes are discarded — cannot be automatically inverted).
 - Pass 3 — `migrate_per_device_override_keys()` — for `per_device` games, upgrades old plain-`game_id` override keys (`"game_id"` / `"game_id:i"`) written before the device-ID scheme was introduced to the new `"game_id:device_id"` / `"game_id:device_id:i"` format. Disambiguates by checking whether the part after the colon is a bare integer (old format) vs. a UUID (new format). Returns `true` when at least one key was migrated; triggers a `save_state` call.
 - Pass 4 — `migrate_sync_excludes_to_includes()` — clears all legacy `sync_excludes` fields from every `SavePathEntry` and from `GameEntry`. Old exclusion data cannot be automatically converted to an inclusion list without a full file scan, so it is discarded. Pushes updated games to Firestore so the old `syncExcludes` field is wiped there too.
+- Pass 5 — `migrate_exe_paths_to_overrides()` — backfills `AppSettings.exe_path_overrides` from legacy local `GameEntry.exe_path` values so existing local-only installs can migrate executable-path backups to Firestore device docs on next login.
 
 **`sync_all_games` filter**: Must check `!g.save_paths.is_empty()` to include games with configured paths.
 

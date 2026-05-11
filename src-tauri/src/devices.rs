@@ -110,9 +110,11 @@ fn collect_device_info(app: &AppHandle, user_id: &str) -> Result<DeviceInfo, Str
         last_seen_at: now_iso,
         is_current: false, // never stored; computed at query time
         // path overrides are not part of collect_device_info — they live in AppSettings
-        // and are written to Firestore separately via save_device_path_overrides.
+        // and are written to Firestore separately via save_device_path_overrides /
+        // save_device_exe_path_overrides.
         path_overrides: std::collections::HashMap::new(),
         path_overrides_indexed: std::collections::HashMap::new(),
+        exe_path_overrides: std::collections::HashMap::new(),
     })
 }
 

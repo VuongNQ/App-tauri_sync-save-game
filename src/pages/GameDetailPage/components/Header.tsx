@@ -179,6 +179,24 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
           </span>
         </div>
       )}
+
+      {/* Exe-path not configured on this device */}
+      {game.trackChanges && !game.exePath && (
+        <div className="mt-4 px-4 py-3 rounded-2xl border border-[rgba(255,200,80,0.3)] bg-[rgba(62,45,12,0.55)] text-[#ffd5a0] text-sm flex items-center gap-2">
+          <span>⚠</span>
+          <span>
+            <strong>Executable path not configured on this device.</strong> Set it in the{" "}
+            <button
+              type="button"
+              className="underline text-[#ffd5a0] bg-transparent border-0 p-0 cursor-pointer"
+              onClick={() => setActiveTab("config")}
+            >
+              Configuration
+            </button>{" "}
+            tab to enable process tracking and the ▶ Play button on this machine.
+          </span>
+        </div>
+      )}
     </div>
   );
 };

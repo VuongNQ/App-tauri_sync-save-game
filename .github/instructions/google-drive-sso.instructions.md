@@ -205,9 +205,11 @@ appDataFolder/
 | `sync_settings_to_cloud(app)` | Local → Cloud | **Dead code** — replaced by Firestore |
 | `fetch_settings_from_cloud(app)` | Cloud → Local | Kept — migration path in `settings::fetch_all_from_firestore` |
 
-### exe_path is LOCAL-ONLY — Strip Before All Cloud Writes
+### exe_path Two-Tier Model (Game Docs vs Device Backup)
 
-`GameEntry.exe_path` is a device-specific absolute path (with `%VAR%` tokens). It must **never** be serialised to Firestore or Google Drive, because the path is meaningless (or missing entirely) on other machines.
+`GameEntry.exe_path` is a device-specific absolute path (with `%VAR%` tokens). It must **not** be serialized inside shared game-library records (`users/{uid}/games/{game_id}` or Drive `library.json`) because that value is machine-specific.
+
+However, executable paths are backed up per-device via `AppSettings.exe_path_overrides` to `users/{uid}/devices/{device_id}.exePathOverrides` so reinstall on the same machine can restore them.
 
 **Rule:** Any code that serialises a `GameEntry` for cloud upload must replace `exe_path` with `None` first.
 
@@ -219,6 +221,9 @@ let cloud_game = GameEntry { exe_path: None, ..game.clone() };
 Apply this pattern in:
 - `firestore::save_game()` — before PATCH to Firestore
 - `gdrive::sync_library_to_cloud()` — before writing `library.json`
+
+Device backup writer (allowed path):
+- `firestore::save_device_exe_path_overrides()` — PATCH with `updateMask.fieldPaths=exePathOverrides`
 
 **Rule:** Any code that overwrites local state from cloud data must restore the local `exe_path` values after the overwrite.
 
@@ -237,6 +242,14 @@ for g in &mut state.games {
 Apply this pattern in:
 - `settings::fetch_all_from_firestore()` — after loading games from Firestore
 - `gdrive::fetch_library_from_cloud()` — after loading games from Drive `library.json`
+
+Also run post-login device restore/migration:
+- `settings::load_and_merge_device_exe_paths()`
+  - Cloud has non-empty `exePathOverrides` -> restore into `state.settings.exe_path_overrides` and matching `GameEntry.exe_path`
+  - Cloud empty + local map non-empty -> push one-time migration to Firestore device doc
+
+Legacy local-only migration support:
+- `migrate_exe_paths_to_overrides()` runs in `load_state()` (pass 5) to backfill `settings.exe_path_overrides` from existing local `GameEntry.exe_path` values, enabling full migration on next login.
 
 ### Common Drive Operations
 
