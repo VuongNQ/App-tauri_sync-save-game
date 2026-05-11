@@ -1,7 +1,7 @@
 import { CARD, EYEBROW, GHOST_BTN, PRIMARY_BTN, SOFT_BADGE, SOURCE_BADGE } from "@/components/styles";
 import { GameThumbnail } from "@/components/GameThumbnail";
 import { DashboardQuery, ValidatePathsQuery } from "@/queries/dashboard";
-import { useSyncAndLaunchFlow } from "@/queries/detail";
+import { useGamePlaying, useSyncAndLaunchFlow } from "@/queries/detail";
 import { formatBytes, formatDuration, formatLocalTime } from "@/utils";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -28,6 +28,7 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
       setCanForceAfterError(canForce);
     },
   });
+  const { data: isGamePlaying = false } = useGamePlaying(id ?? "");
 
   const sourceBadge = game ? SOURCE_BADGE[game.source] : SOFT_BADGE;
 
@@ -67,6 +68,12 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="m-0">{game.name}</h2>
             <span className={sourceBadge}>{game.source}</span>
+            {isGamePlaying && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(120,230,170,0.35)] bg-[rgba(70,220,150,0.14)] px-2 py-0.5 text-[0.7rem] font-semibold uppercase tracking-[0.08em] text-[#8ff5c2]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#8ff5c2] animate-pulse" />
+                Playing
+              </span>
+            )}
           </div>
           <details className="group [&_p]:group-open:line-clamp-none [&_p]:line-clamp-3">
             <summary className="text-sm text-[#9aa8c7] cursor-pointer pb-2">Click to view description</summary>
@@ -79,9 +86,11 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
           <button
             type="button"
             className={`${PRIMARY_BTN} w-auto px-6`}
-            disabled={!canLaunch || flow.isPending}
+            disabled={!canLaunch || flow.isPending || isGamePlaying}
             title={
-              !game.exePath
+              isGamePlaying
+                ? "Game is currently running"
+                : !game.exePath
                 ? "Set an executable path in Settings to enable launching"
                 : exePathValid === false
                   ? "Executable not found on this machine — update the path in Settings"
@@ -89,7 +98,7 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
             }
             onClick={handlePlay}
           >
-            {playLabel}
+            {isGamePlaying ? "🎮 Playing" : playLabel}
           </button>
           {!game.exePath && <span className="text-xs text-[#9aa8c7] text-right max-w-[140px]">Set an exe path in Settings</span>}
           {game.exePath && exePathValid === false && (

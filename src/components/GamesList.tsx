@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { useRemoveGameMutation } from "../queries";
 import { useGameSyncingQuery } from "../queries/sync";
-import { useSyncAndLaunchFlow } from "../queries/detail";
+import { useGamePlaying, useSyncAndLaunchFlow } from "../queries/detail";
 import type { GameEntry } from "../types/dashboard";
 import { formatBytes, formatDuration } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
@@ -89,6 +89,7 @@ function GameCard({
   onRemove: () => void;
 }) {
   const isSyncing = useGameSyncingQuery(g.id);
+  const { data: isGamePlaying = false } = useGamePlaying(g.id);
   const badge = SOURCE_BADGE[g.source] ?? SOFT_BADGE;
 
   return (
@@ -126,6 +127,12 @@ function GameCard({
           <strong className="truncate">{g.name}</strong>
           <div className="flex items-center gap-2">
             <span className={badge}>{g.source}</span>
+            {isGamePlaying && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(120,230,170,0.35)] bg-[rgba(70,220,150,0.14)] px-2 py-0.5 text-[0.7rem] font-semibold uppercase tracking-[0.08em] text-[#8ff5c2]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#8ff5c2] animate-pulse" />
+                Playing
+              </span>
+            )}
             {g.savePaths.length > 0 && g.savePaths[0].path && (
               <span className={`${MUTED} text-xs truncate`}>
                 {g.savePaths.length > 1 ? `${g.savePaths[0].path} (+${g.savePaths.length - 1} more)` : g.savePaths[0].path}
@@ -188,6 +195,7 @@ function GamePlayButton({ game, exeMissing }: { game: GameEntry; exeMissing: boo
   const [error, setError] = useState<string | null>(null);
 
   const [canForce, setCanForce] = useState(false);
+  const { data: isGamePlaying = false } = useGamePlaying(game.id);
 
   const flow = useSyncAndLaunchFlow({
     onError: (msg, canForceArg) => {
@@ -198,11 +206,13 @@ function GamePlayButton({ game, exeMissing }: { game: GameEntry; exeMissing: boo
 
   if (!game.exePath) return null;
 
-  const isDisabled = flow.isPending || exeMissing;
+  const isDisabled = flow.isPending || exeMissing || isGamePlaying;
 
-  const label = flow.phase === "syncing" ? "⏳" : flow.phase === "launching" ? "▶" : "▶";
+  const label = flow.phase === "syncing" ? "⏳" : flow.phase === "launching" ? "▶" : isGamePlaying ? "🎮" : "▶";
 
-  const title = exeMissing
+  const title = isGamePlaying
+    ? "Game is currently running"
+    : exeMissing
     ? "Executable not found on this device — update path in Settings"
     : flow.phase === "syncing"
       ? "Syncing saves…"

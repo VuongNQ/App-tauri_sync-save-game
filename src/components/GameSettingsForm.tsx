@@ -671,15 +671,17 @@ function GameExecutableSection({ game, exePathValid }: GameExecutableSectionProp
       multiple: false,
       title: "Choose the game executable",
       defaultPath,
-      filters: [{ name: "Executable", extensions: ["exe"] }],
+      filters: [{ name: "Executable or Shortcut", extensions: ["exe", "lnk"] }],
     });
     if (typeof p === "string") {
       // Tokenize the absolute path for portability (e.g. C:\Program Files\... → %PROGRAMFILES%\...).
       const portable = await contractPath(p);
       setValue("exePath", portable, { shouldDirty: true, shouldValidate: true });
-      // Auto-fill the process name from the basename; user can override for launcher vs. process cases.
       const filename = p.split(/[\\/]/).pop() ?? p;
-      setValue("exeName", filename, { shouldDirty: true, shouldValidate: true });
+      // Only auto-fill from direct .exe picks. For .lnk, backend resolves target on Save when Process name is empty.
+      if (!watchedExeName?.trim() && /\.exe$/i.test(filename)) {
+        setValue("exeName", filename, { shouldDirty: true, shouldValidate: true });
+      }
     }
   }
 
@@ -704,7 +706,7 @@ function GameExecutableSection({ game, exePathValid }: GameExecutableSectionProp
             </button>
           </div>
           <span className={MUTED + " text-xs mt-1"}>
-            Full path to the .exe used to launch the game. Enables the ▶ Play button. Stored with env-var tokens (e.g.{" "}
+            Full path to the .exe or .lnk used to launch the game. Enables the ▶ Play button. Stored with env-var tokens (e.g.{" "}
             <code>%PROGRAMFILES%</code>) for portability. <strong className="text-amber-400/80">Saved locally only</strong> — not synced to
             the cloud, since paths differ between devices.
           </span>
@@ -720,7 +722,7 @@ function GameExecutableSection({ game, exePathValid }: GameExecutableSectionProp
                 Watcher will track: <strong className="text-white/80">{watchedExeName}</strong>
               </>
             ) : (
-              "Auto-filled from the path above. Edit if the launcher differs from the main process. Leave empty to disable tracking."
+              "If empty, it is inferred from executable path on Save (supports .exe and .lnk). Edit if launcher and game process differ."
             )}
           </span>
           {errors.exeName && <span className={FIELD_ERROR}>{errors.exeName.message}</span>}

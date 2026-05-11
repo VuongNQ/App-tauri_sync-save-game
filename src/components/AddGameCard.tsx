@@ -69,7 +69,7 @@ export function AddGameCard() {
     const p = await open({
       multiple: false,
       title: "Choose the game executable",
-      filters: [{ name: "Executable", extensions: ["exe"] }],
+      filters: [{ name: "Executable or Shortcut", extensions: ["exe", "lnk"] }],
     });
     if (typeof p === "string") {
       const portable = await contractPath(p);
@@ -222,7 +222,7 @@ export function AddGameCard() {
               className={INPUT_CLS}
               {...register("exePath")}
               value={exePath ?? ""}
-              placeholder="Browse or paste the .exe path (e.g. %PROGRAMFILES%\…)"
+              placeholder="Browse or paste .exe/.lnk path (e.g. %PROGRAMFILES%\…)"
             />
             <button type="button" className={SECONDARY_BTN} onClick={handleBrowseExe}>
               Browse

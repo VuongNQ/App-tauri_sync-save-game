@@ -1,4 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use tauri::{AppHandle, Manager};
 
@@ -303,6 +306,8 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
         .filter(|d| !d.trim().is_empty());
 
     let normalized_save_path = normalize_optional_path(payload.save_path);
+    let normalized_exe_path = normalize_optional_path(payload.exe_path);
+    let inferred_exe_name = normalize_exe_name(None, normalized_exe_path.as_deref());
     let mut save_paths = vec![SavePathEntry {
         label: "Save Folder".to_string(),
         path: normalized_save_path,
@@ -320,8 +325,8 @@ pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameE
         source: payload.source,
         save_paths,
         save_path: None,
-        exe_name: None,
-        exe_path: payload.exe_path,
+        exe_name: inferred_exe_name,
+        exe_path: normalized_exe_path,
             track_changes: false,
             auto_sync: false,
             last_local_modified: None,
@@ -360,7 +365,8 @@ pub fn remove_game(app: &AppHandle, game_id: &str) -> Result<(), String> {
 pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
     let mut state = load_state(app)?;
     let game_id = game.id.clone();
-    let normalized_exe_path = normalize_optional_path(game.exe_path);
+    let normalized_exe_path = normalize_optional_path(game.exe_path.clone());
+    let normalized_exe_name = normalize_exe_name(game.exe_name.clone(), normalized_exe_path.as_deref());
 
     let path_mode = game.path_mode.clone();
     let mut save_paths = game.save_paths.clone();
@@ -369,6 +375,7 @@ pub fn upsert_game(app: &AppHandle, game: GameEntry) -> Result<(), String> {
     let normalized = GameEntry {
         save_paths,
         save_path: None, // Legacy field — never persist back
+        exe_name: normalized_exe_name,
         exe_path: normalized_exe_path,
         ..game
     };
@@ -757,6 +764,81 @@ fn normalize_optional_path(value: Option<String>) -> Option<String> {
         .map(|v| v.trim().replace('/', "\\"))
         .filter(|v| !v.is_empty())
         .map(|v| contract_env_vars(&v))
+}
+
+fn normalize_exe_name(exe_name: Option<String>, exe_path: Option<&str>) -> Option<String> {
+    let explicit = exe_name
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty());
+    if explicit.is_some() {
+        return explicit;
+    }
+    exe_path.and_then(derive_exe_name_from_path)
+}
+
+fn derive_exe_name_from_path(exe_path: &str) -> Option<String> {
+    let expanded = expand_env_vars(exe_path);
+    let expanded_path = Path::new(&expanded);
+    let is_shortcut = expanded_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("lnk"))
+        .unwrap_or(false);
+
+    if is_shortcut {
+        if let Some(target) = resolve_shortcut_target(&expanded) {
+            if let Some(target_name) = file_name_from_path(&target) {
+                return Some(target_name);
+            }
+        }
+    }
+
+    file_name_from_path(exe_path)
+}
+
+fn file_name_from_path(path: &str) -> Option<String> {
+    let normalized = path.replace('/', "\\");
+    Path::new(&normalized)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_shortcut_target(shortcut_path: &str) -> Option<String> {
+    let escaped = shortcut_path.replace('\'', "''");
+    let script = format!(
+        "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{escaped}'); if ($s.TargetPath) {{ Write-Output $s.TargetPath }}"
+    );
+
+    let output = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let target = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if target.is_empty() {
+        None
+    } else {
+        Some(target.replace('/', "\\"))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn resolve_shortcut_target(_shortcut_path: &str) -> Option<String> {
+    None
 }
 
 fn slugify(value: &str) -> String {
