@@ -147,7 +147,8 @@ const PROJECT_ID: &str = match option_env!("GOOGLE_CLOUD_PROJECT_ID") {
 | `load_user_profile(app, user_id)` | GET | `userProfiles/{user_id}` → `Option<UserProfile>` |
 | `save_user_profile(app, profile)` | PATCH (upsert) | `userProfiles/{user_id}` |
 | `save_sync_meta(app, user_id, game_id, meta)` | PATCH (upsert) | `users/{uid}/syncMeta/{game_id}` |
-| `load_sync_meta(app, user_id, game_id)` | GET | `users/{uid}/syncMeta/{game_id}` → `Option<SyncMeta>` || `save_device(app, user_id, device)` | PATCH (upsert) | `users/{uid}/devices/{device_id}` — strips `is_current` before write |
+| `load_sync_meta(app, user_id, game_id)` | GET | `users/{uid}/syncMeta/{game_id}` → `Option<SyncMeta>` |
+| `save_device(app, user_id, device)` | PATCH (upsert) | `users/{uid}/devices/{device_id}` — strips `is_current`, `pathOverrides`, and `pathOverridesIndexed` before write; path fields are managed only by `save_device_path_overrides` |
 | `load_device(app, user_id, device_id)` | GET | `users/{uid}/devices/{device_id}` → `Option<DeviceInfo>` |
 | `load_all_devices(app, user_id)` | GET collection | `users/{uid}/devices` → `Vec<DeviceInfo>` |
 | `delete_device(app, user_id, device_id)` | DELETE (idempotent on 404) | `users/{uid}/devices/{device_id}` |
@@ -298,7 +299,9 @@ The key format inside `path_overrides` / `path_overrides_indexed` depends on `Ga
 
 `device_id` is the deterministic SHA-256(`MachineGuid`) UUID from `devices::get_machine_device_id()`. Falls back to `"unknown"` on non-Windows.
 
-Both `path_overrides` and `path_overrides_indexed` are **local-only** — never written to Firestore.
+`path_overrides` and `path_overrides_indexed` inside `AppSettings` are **local-only** — never written to Firestore via `save_settings`. However, they **are** backed up to Firestore for disaster recovery under the device document at `users/{user_id}/devices/{device_id}` using the dedicated `save_device_path_overrides` function (updateMask PATCH, so only those two fields are touched). This enables save-folder restore on reinstall via `load_and_merge_device_paths`.
+
+> **Critical invariant**: `save_device()` must never include `pathOverrides` or `pathOverridesIndexed` in its generic PATCH body. Both fields are explicitly `.remove()`-d from the serialized field map before the request is sent. Violating this causes a fresh device upsert to overwrite the cloud backup with empty maps, breaking the reinstall restore path.
 
 **Routing function**: `route_save_paths(save_paths, game_id, settings, path_mode)` in `settings.rs` — called on every `add_manual_game` / `upsert_game`. Uses `build_override_key(game_id, path_mode, index, device_id)` to construct the correct map key. For `"per_device"` mode all paths go to the device-keyed override and `entry.path` is set to `None`.
 

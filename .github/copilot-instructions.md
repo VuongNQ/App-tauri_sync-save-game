@@ -228,7 +228,9 @@ users/{user_id}/devices/{device_id} # DeviceInfo documents (one per registered m
 | `firestore::load_all_games(app, user_id)` | Cloud → Local | On first login via `fetch_all_from_firestore`. |
 | `firestore::load_settings(app, user_id)` | Cloud → Local | On first login via `fetch_all_from_firestore`. |
 | `settings::fetch_all_from_firestore(app)` | Cloud → Local | On first login; called from `save_auth_tokens` and `restore_from_cloud`. |
-| `firestore::save_device(app, user_id, device)` | Local → Cloud | Called by `devices::register_current_device()` on every startup and post-login. |
+| `firestore::save_device(app, user_id, device)` | Local → Cloud | Called by `devices::register_current_device()` on every startup and post-login. Strips `is_current`, `pathOverrides`, and `pathOverridesIndexed` from PATCH body — path fields are managed by `save_device_path_overrides` only. |
+| `firestore::save_device_path_overrides(app, user_id, device_id, ...)` | Local → Cloud | Called by `spawn_firestore_device_paths_sync` after any save-path change. Uses `updateMask` to write **only** `pathOverrides` and `pathOverridesIndexed` without touching other device fields. Enables reinstall restore. |
+| `settings::load_and_merge_device_paths(app)` | Cloud → Local | Called post-login after `register_current_device`. Reads device doc; if cloud has non-empty overrides, restores them into local `AppSettings`. If local has overrides and cloud is empty, pushes them up (one-time migration). |
 | `firestore::load_all_devices(app, user_id)` | Cloud → Local | Called by `devices::get_devices_cmd()`. |
 | `firestore::delete_device(app, user_id, device_id)` | Cloud delete | Called by `devices::remove_device_cmd()`. |
 
@@ -400,7 +402,9 @@ The override map key depends on `GameEntry.path_mode`:
 
 `device_id` = SHA-256(`MachineGuid`) UUID from `devices::get_machine_device_id()`. Falls back to `"unknown"` on non-Windows.
 
-Both `path_overrides` and `path_overrides_indexed` are **local-only** — never written to Firestore. For `"per_device"` games `SavePathEntry.path` is always `None` in Firestore — each device stores its own path in the local override map.
+`path_overrides` and `path_overrides_indexed` within `AppSettings` are local to each machine and are **never written to Firestore via `save_settings`**. However, they are **backed up per-device** to the Firestore device document (`users/{user_id}/devices/{device_id}`) via `save_device_path_overrides` after every save-path change. On reinstall (no local JSON), `load_and_merge_device_paths` reads that device document and restores the override maps into local state so per-device save paths reappear automatically.
+
+> **Critical invariant**: `save_device()` must never include `pathOverrides` / `pathOverridesIndexed` in its generic device PATCH. Both fields are explicitly removed from the serialized body before sending. Violating this causes the upsert to overwrite the cloud backup with empty maps, breaking reinstall restore for `per_device` games.
 
 ### Key Functions (`settings.rs`)
 
