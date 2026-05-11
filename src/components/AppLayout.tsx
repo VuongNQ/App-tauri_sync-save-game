@@ -1,20 +1,13 @@
-import { getVersion } from "@tauri-apps/api/app";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { NavLink, Outlet } from "react-router";
 
-import { useAuthStatusQuery } from "../queries";
+import { useAppUpdateQuery, useAuthStatusQuery } from "../queries";
 import { NAV_LINK, NAV_LINK_ACTIVE } from "./styles";
 
 export function AppLayout() {
-  const [appVersion, setAppVersion] = useState<string>("");
   const [collapsed, setCollapsed] = useState(false);
   const { data: authStatus } = useAuthStatusQuery();
-
-  useEffect(() => {
-    getVersion()
-      .then(setAppVersion)
-      .catch(() => {});
-  }, []);
+  const { data: updateInfo } = useAppUpdateQuery();
 
   const iconNavLink = "flex items-center justify-center p-3 rounded-2xl text-[#c7d3f7] transition-colors hover:bg-[rgba(86,133,255,0.12)]";
   const iconNavLinkActive = "flex items-center justify-center p-3 rounded-2xl text-white bg-[rgba(86,133,255,0.18)]";
@@ -30,7 +23,7 @@ export function AppLayout() {
           {!collapsed && (
             <div className="px-4">
               <h1 className="text-lg font-bold text-white">Save Game Sync</h1>
-              {appVersion && <span className="text-xs text-[#9aa8c7]">v{appVersion}</span>}
+              {updateInfo?.currentVersion && <span className="text-xs text-[#9aa8c7]">v{updateInfo.currentVersion}</span>}
             </div>
           )}
           <button
@@ -83,6 +76,22 @@ export function AppLayout() {
 
       {/* ── Page content ── */}
       <main className="flex flex-col gap-5 overflow-auto p-7 max-[720px]:p-4.5">
+        {updateInfo?.update && (
+          <div className="rounded-2xl border border-[rgba(104,132,255,0.22)] bg-[rgba(87,109,255,0.12)] px-4 py-3 text-sm text-[#dbe3ff]">
+            <div className="flex items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start">
+              <div>
+                <p className="m-0 font-semibold text-[#9effc3]">Update available: v{updateInfo.update.version}</p>
+                <p className="m-0 mt-0.5 text-xs text-[#c7d3f7]">Open Settings to download and install the latest release.</p>
+              </div>
+              <NavLink
+                to="/settings"
+                className="rounded-xl bg-white/10 px-4 py-2 text-xs font-medium text-[#eef4ff] transition-colors hover:bg-white/15"
+              >
+                Open Settings
+              </NavLink>
+            </div>
+          </div>
+        )}
         <Outlet />
       </main>
     </div>

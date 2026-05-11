@@ -1,10 +1,7 @@
-import { useEffect, useState } from "react";
-
-import { check } from "@tauri-apps/plugin-updater";
-import type { Update } from "@tauri-apps/plugin-updater";
-import { getVersion } from "@tauri-apps/api/app";
+import { useState } from "react";
 
 import { useClearAllDriveMutation, useGoogleUserInfoQuery, useLogoutMutation } from "../queries";
+import { useAppUpdateQuery } from "../queries/appUpdate";
 import { useSettingsQuery, useUpdateSettingsMutation } from "../queries/settings";
 import { ConfirmModal } from "../components/ConfirmModal";
 import {
@@ -310,40 +307,24 @@ interface DownloadProgress {
 }
 
 function useAppUpdater() {
+  const updateQuery = useAppUpdateQuery();
   const [status, setStatus] = useState<UpdateStatus>("idle");
-  const [currentVersion, setCurrentVersion] = useState<string | null>(null);
-  const [update, setUpdate] = useState<Update | null>(null);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    getVersion()
-      .then(setCurrentVersion)
-      .catch(() => {});
-  }, []);
+  const [installError, setInstallError] = useState<string | null>(null);
 
   const handleCheck = async () => {
     setStatus("checking");
-    setError(null);
-    setUpdate(null);
-    try {
-      const result = await check();
-      if (result) {
-        setUpdate(result);
-        setStatus("available");
-      } else {
-        setStatus("up-to-date");
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setStatus("error");
-    }
+    setInstallError(null);
+    await updateQuery.refetch();
+    setStatus("idle");
   };
 
   const handleInstall = async () => {
+    const update = updateQuery.data?.update;
     if (!update) return;
     setStatus("downloading");
     setProgress(null);
+    setInstallError(null);
     let totalSize = 0;
     let downloaded = 0;
     try {
@@ -362,10 +343,24 @@ function useAppUpdater() {
         }
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setInstallError(e instanceof Error ? e.message : String(e));
       setStatus("error");
     }
   };
 
-  return { status, currentVersion, update, progress, updateError: error, handleCheck, handleInstall };
+  const currentVersion = updateQuery.data?.currentVersion ?? null;
+  const update = updateQuery.data?.update ?? null;
+  const updateError = installError ?? updateQuery.data?.error ?? null;
+  const derivedStatus =
+    status === "downloading" || status === "installed" || status === "error"
+      ? status
+      : updateQuery.isFetching
+        ? "checking"
+        : update
+          ? "available"
+          : updateError
+            ? "error"
+            : "up-to-date";
+
+  return { status: derivedStatus, currentVersion, update, progress, updateError, handleCheck, handleInstall };
 }

@@ -12,6 +12,9 @@ export type GoogleUserInfoKey = typeof GOOGLE_USER_INFO_KEY;
 export const SETTINGS_KEY = ["settings"] as const;
 export type SettingsKey = typeof SETTINGS_KEY;
 
+export const APP_UPDATE_KEY = ["app-update"] as const;
+export type AppUpdateKey = typeof APP_UPDATE_KEY;
+
 export const SAVE_INFO_KEY = ["save-info"] as const;
 export type SaveInfoKey = typeof SAVE_INFO_KEY;
 export const saveInfoKey = (gameId: string) => ["save-info", gameId] as const;

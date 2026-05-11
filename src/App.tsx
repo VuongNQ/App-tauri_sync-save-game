@@ -7,6 +7,7 @@ import { AppLayout } from "./components/AppLayout";
 import { AdminGuard } from "./components/AdminGuard";
 import { AuthGuard } from "./components/AuthGuard";
 import { AUTH_STATUS_KEY, DASHBOARD_KEY, DEVICES_KEY, gamePlayingKey, gameSyncingKey, gameSyncResultKey } from "./queries/keys";
+import { useAppUpdateQuery } from "./queries";
 import type { SyncResult } from "./types/dashboard";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DevicesPage } from "./pages/DevicesPage";
@@ -19,6 +20,7 @@ import "./App.css";
 
 export function App() {
   useAuthStatusCallbacks();
+  useAppUpdateQuery();
 
   return (
     <HashRouter>
