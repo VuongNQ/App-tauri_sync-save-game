@@ -6,14 +6,14 @@ description: "Use when: modifying the GitHub Actions release workflow, changing 
 ## CI/CD Pipeline — `release.yml`
 
 ### Trigger
-- Workflow fires on **tag push** matching `v*` (e.g. `v0.1.23` → triggers a release build).
-- No push-to-main trigger. Push a tag manually to initiate a release: `git tag v0.1.23 && git push origin v0.1.23`.
+- Workflow fires on **tag push** matching `release-prod-*` (e.g. `release-prod-check-version` → triggers a release build).
+- No push-to-main trigger. Push a production release tag manually to initiate a release.
 
 ### Version Sync Step
-- Extracts the version number from the pushed tag (strips leading `v`).
-- Writes the version into `src-tauri/tauri.conf.json` (`.version` key) and `src-tauri/Cargo.toml` (`version = "..."` line) **locally inside the CI runner** — no git commit is made.
-- Both files must be in sync before the build starts; the step ensures this automatically from the tag.
-- To release a new version: bump `tauri.conf.json` + `Cargo.toml` locally, commit, then push a matching `v*` tag.
+- Reads the current version from `src-tauri/Cargo.toml` and auto-increments patch (`X.Y.Z` → `X.Y.(Z+1)`) in CI.
+- Writes the computed version into `src-tauri/tauri.conf.json` (`.version` key) and `src-tauri/Cargo.toml` (`version = "..."` line) before the build.
+- After a successful release, CI commits the bumped version back to `main`, so no manual version editing is required for the next production release.
+- Tags are release intent labels (for example, `release-prod-check-version`), not semantic version carriers.
 
 ### Build Step (`tauri-apps/tauri-action@v0`)
 Required secrets (must exist in repo Settings → Secrets):
@@ -27,8 +27,8 @@ Required secrets (must exist in repo Settings → Secrets):
 | `TAURI_SIGNING_PRIVATE_KEY` | Signs bundles so the updater can verify them |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password for the signing key |
 
-- Release tag: `${{ github.ref_name }}` (the pushed tag, e.g. `v0.1.23`).
-- Release name: `"Save Game Sync ${{ github.ref_name }}"`.
+- Release tag: `${{ github.ref_name }}` (the pushed tag, for example `release-prod-check-version`).
+- Release name uses the computed semantic version (for example, `Save Game Sync v1.1.4`).
 - Releases are **published immediately** (`releaseDraft: false`) — required so `/releases/latest/download/latest.json` is publicly accessible for the in-app updater.
 - `tauri-action` automatically uploads `latest.json` alongside each installer bundle; this file is what the in-app updater polls.
 - The `.sig` file pattern for NSIS v2 bundles is `*-setup.exe.sig` (not `*.nsis.zip.sig` which is the legacy v1 format).
@@ -174,7 +174,8 @@ npx tauri signer generate -w ./my-key.key
 
 ## Common Mistakes
 
-- **Version mismatch**: If `tauri.conf.json` and `Cargo.toml` versions diverge, the build fails. The CI version-sync step updates both from the pushed tag — ensure the tag matches the version you intend to release.
+- **Non-semver Cargo version**: Auto-bump requires `src-tauri/Cargo.toml` to contain strict `X.Y.Z`. If a pre-release/build suffix is used, the bump step fails.
+- **Parallel production tags**: Multiple `release-prod-*` tags pushed close together can race version persistence. Keep release pushes serialized.
 - **Draft releases break the updater**: `releaseDraft: true` means the release is not public, so `/releases/latest/download/latest.json` returns 404. Always use `releaseDraft: false`.
 - **Wrong `.sig` pattern**: NSIS v2 bundles produce `*-setup.exe.sig`. The old v1 pattern `*.nsis.zip.sig` will fail to find the signature file.
 - **Adding custom Rust updater commands**: Do not add `check_for_update` or `download_and_install_update` Tauri commands. Use `check()` and `update.downloadAndInstall()` from `@tauri-apps/plugin-updater` directly in the frontend.

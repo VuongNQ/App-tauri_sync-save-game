@@ -3,10 +3,13 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "release-prod-*"
 
 jobs:
   release:
+    concurrency:
+      group: release-prod-version-bump
+      cancel-in-progress: false
     permissions:
       contents: write
     strategy:
@@ -22,6 +25,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,18 +44,36 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: Extract version from tag
+      - name: Compute next patch version
         id: version
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
-          $version = $tag.TrimStart('v')
-          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          $cargoVersionLine = Select-String -Path "src-tauri/Cargo.toml" -Pattern '^version = "(.*)"$' | Select-Object -First 1
+          if (-not $cargoVersionLine) {
+            Write-Error "Could not find version in src-tauri/Cargo.toml"
+            exit 1
+          }
 
-      - name: Sync version files to tag version
+          $current = $cargoVersionLine.Matches[0].Groups[1].Value
+          if ($current -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
+            Write-Error "Current version '$current' is not strict semver (X.Y.Z)."
+            exit 1
+          }
+
+          $major = [int]$Matches[1]
+          $minor = [int]$Matches[2]
+          $patch = [int]$Matches[3]
+          $next = "$major.$minor.$($patch + 1)"
+
+          "CURRENT_VERSION=$current" >> $env:GITHUB_OUTPUT
+          "NEXT_VERSION=$next" >> $env:GITHUB_OUTPUT
+          Write-Host "Current version: $current"
+          Write-Host "Next version: $next"
+
+      - name: Sync version files to computed version
         shell: pwsh
         run: |
-          $version = "${{ steps.version.outputs.VERSION }}"
+          $version = "${{ steps.version.outputs.NEXT_VERSION }}"
 
           $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
           $conf.version = $version
@@ -72,7 +94,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Save Game Sync ${{ github.ref_name }}"
+          releaseName: "Save Game Sync v${{ steps.version.outputs.NEXT_VERSION }}"
           releaseBody: "See https://github.com/VuongNQ/App-tauri_sync-save-game/releases/tag/${{ github.ref_name }} for details."
           releaseDraft: false
           prerelease: false
@@ -84,7 +106,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $version = "${{ steps.version.outputs.VERSION }}"
+          $version = "${{ steps.version.outputs.NEXT_VERSION }}"
           $tag = "${{ github.ref_name }}"
           $repo = "VuongNQ/App-tauri_sync-save-game"
           $targetDir = "src-tauri/target"
@@ -148,3 +170,33 @@ jobs:
           Get-Content "latest.json"
 
           gh release upload $tag "latest.json" --repo $repo --clobber
+
+      - name: Persist bumped version to main
+        if: success()
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.NEXT_VERSION }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout main
+          git pull --ff-only origin main
+
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $conf.version = $version
+          $conf | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
+
+          $cargo = Get-Content src-tauri/Cargo.toml
+          $cargo = $cargo -replace '^version = ".*"$', "version = `"$version`""
+          $cargo | Set-Content src-tauri/Cargo.toml
+
+          git add src-tauri/Cargo.toml src-tauri/tauri.conf.json
+
+          if (git diff --cached --quiet) {
+            Write-Host "No version changes to persist."
+            exit 0
+          }
+
+          git commit -m "ci(release): bump version to $version [skip ci]"
+          git push origin HEAD:main
