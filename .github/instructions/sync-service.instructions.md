@@ -13,7 +13,7 @@ The sync system spans five Rust modules and their frontend counterparts:
 | `gdrive.rs` | Google Drive REST API client (folders, upload, download, metadata, rename, move, copy) |
 | `firestore.rs` | Firestore REST API client (game library, settings, SyncMeta mirror) |
 | `sync.rs` | Per-game sync algorithm (collect → compare → transfer → update) |
-| `watcher.rs` | Process monitor / poller — detects game launch/exit, triggers sync on exit |
+| `watcher.rs` | Process monitor / poller — detects game launch/exit, accumulates play time, triggers sync on exit |
 | `settings.rs` | Persistence for `AppSettings` and `GameEntry` state |
 | `drive_mgmt.rs` | Drive file manager + version backup commands (list, rename, move, delete, backup CRUD) |
 
@@ -427,6 +427,7 @@ Content-Type: application/octet-stream
       tracked_games: HashMap<String, String>,   // game_id → exe_name (lowercased)
       sync_locks:    HashMap<String, Arc<Mutex<()>>>,
       playing_games: HashMap<String, bool>,     // game_id → was_playing last tick
+      playing_since: HashMap<String, Instant>,  // game_id → session start time for playtime accounting
   }
   ```
 - NO file-system watchers — no `Debouncer`, no `RecommendedWatcher`.
@@ -487,13 +488,25 @@ loop:
     was_playing = snapshot.playing_games[game_id]
     if !was_playing && is_now_playing:
       emit "game-status-changed" { gameId, status: "playing" }
+      set playing_since[game_id] = Instant::now()
     if was_playing && !is_now_playing:  // game just exited
       emit "game-status-changed" { gameId, status: "idle" }
+      if playing_since[game_id] exists:
+        add elapsed seconds to game.total_play_time_seconds via settings::update_game_field
       check game.auto_sync from settings:
         true  → try_lock(sync_lock) → sync::sync_game(app, game_id)
         false → emit "game-sync-pending" { gameId }
   lock WatcherManager → update playing_games → unlock
 ```
+
+### Play Time Accounting
+
+- Canonical field: `GameEntry.total_play_time_seconds` (Rust) / `GameEntry.totalPlayTimeSeconds` (TypeScript).
+- Increment path: watcher only. Use `add_play_time(app, game_id, seconds)` and `saturating_add` to avoid overflow.
+- Session start source: `playing_since[game_id] = Instant::now()` on process transition `idle -> playing`.
+- Session end source: on transition `playing -> idle`, add `started.elapsed().as_secs()`.
+- Quit safety: tray Quit must call `watcher::flush_active_playtime(app)` before `app.exit(0)` so currently running tracked games are persisted.
+- Do not mutate `total_play_time_seconds` in sync commands (`sync_game`, `push_to_cloud`, `restore_from_cloud`). Sync and playtime are separate concerns.
 
 ### Windows-Only Guard
 

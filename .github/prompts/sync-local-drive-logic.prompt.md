@@ -44,7 +44,7 @@ usePushToCloudMutation()
 |---|---|---|
 | Rust | `src-tauri/src/sync.rs` | Per-game sync algorithm |
 | Rust | `src-tauri/src/gdrive.rs` | Drive REST API (upload, download, folder ops) |
-| Rust | `src-tauri/src/watcher.rs` | Process monitor — triggers sync on game exit |
+| Rust | `src-tauri/src/watcher.rs` | Process monitor — records play sessions and triggers sync on game exit |
 | Rust | `src-tauri/src/settings.rs` | `effective_save_paths()`, `apply_path_overrides()`, `save_state()` |
 | Rust | `src-tauri/src/lib.rs` | Tauri command wiring + `apply_path_overrides` before every return |
 | TS | `src/services/tauri.ts` | `invoke<T>()` wrappers — only place IPC is called |
@@ -82,6 +82,7 @@ usePushToCloudMutation()
 - **401 retry once**: Wrap every Drive API call; on HTTP 401 force `gdrive_auth::get_access_token()` refresh and retry once.
 - **Drive return type**: `Result<DashboardData, String>` for all Tauri sync commands; include the updated game entry in the returned state.
 - **`sync_excludes`**: Before uploading, filter out any file whose relative path matches `SavePathEntry.sync_excludes` entries (trailing `/` = folder prefix).
+- **Playtime ownership**: `GameEntry.totalPlayTimeSeconds` is updated by watcher transitions (`playing -> idle`) and quit flush, not by sync commands.
 
 ## Tauri Events Emitted by Sync
 
@@ -92,6 +93,8 @@ usePushToCloudMutation()
 | `"sync-error"` | `{ gameId, error }` | `sync.rs` on sync failure |
 | `"game-sync-pending"` | `{ gameId }` | `watcher.rs` when game exits but auto-sync is off |
 | `"game-status-changed"` | `{ gameId, status: "playing" \| "idle" }` | `watcher.rs` on game process start/exit |
+
+> `game-status-changed` is a UI presence signal. The durable playtime counter is persisted by backend watcher state (`playing_since` + `add_play_time`) into `totalPlayTimeSeconds`.
 
 ## Frontend Patterns
 

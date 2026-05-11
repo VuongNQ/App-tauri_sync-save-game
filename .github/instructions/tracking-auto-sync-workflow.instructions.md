@@ -11,11 +11,13 @@ Apply these rules when implementing or reviewing process tracking and auto-sync-
 ## Core Contract
 
 - Process-exit sync is keyed by `exe_name` detection and `auto_sync` state.
+- Playtime accounting is keyed by the same process transitions: start session on `playing`, add elapsed seconds on `idle`.
 - `exe_path` is optional for close-triggered sync. Never gate watcher-triggered sync on `exe_path` existence.
 - `exe_name` is required for process close detection. If missing, tracking cannot be active.
 - Keep behavior explicit in logs and UI text:
 - Logs should explain why sync triggered or was skipped.
 - UI should state `exe_name` is required and `exe_path` is optional for close-triggered sync.
+- UI can display cumulative playtime from `totalPlayTimeSeconds` (formatted duration), but must not derive it from events client-side.
 
 ## Watcher Lifecycle Rules
 
@@ -30,11 +32,14 @@ Apply these rules when implementing or reviewing process tracking and auto-sync-
 ## Event And Decision Semantics
 
 - On process start: emit `game-status-changed` with `status: "playing"`.
+- On process start: store `playing_since[game_id] = Instant::now()`.
 - On process exit: emit `game-status-changed` with `status: "idle"` before sync decision.
+- On process exit: if `playing_since` exists, add elapsed seconds to `total_play_time_seconds` using saturating addition.
 - If `auto_sync=true`, attempt `sync::sync_game` with per-game lock.
 - Auto-sync on exit is bidirectional: download newer Drive saves and upload newer local saves (newest timestamp wins per file/path).
 - If lock is busy, skip duplicate sync and log reason.
 - If `auto_sync=false`, emit `game-sync-pending`.
+- On app quit via tray, call `flush_active_playtime` to persist active sessions before exit.
 
 ## Safety And Regression Guards
 
@@ -50,3 +55,4 @@ Apply these rules when implementing or reviewing process tracking and auto-sync-
 - Case B: `exe_path` empty + `exe_name` set + `track_changes=true` + `auto_sync=true` -> sync on close.
 - Case C: `exe_path` empty + `exe_name` set + `track_changes=true` + `auto_sync=false` -> emit `game-sync-pending`.
 - Case D: `exe_name` empty + `track_changes=true` -> no tracking activation; show UI guidance.
+- Case E: app quits while game is still running -> active elapsed session is flushed into `total_play_time_seconds`.

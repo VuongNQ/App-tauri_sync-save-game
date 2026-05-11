@@ -375,6 +375,12 @@ For tracking UI copy (such as `TrackingSyncCard`), describe process-exit auto-sy
 - Correct intent: on tracked process exit, auto-sync downloads newer files from Drive and uploads newer local changes.
 - Avoid wording that implies local-to-cloud only backup for this toggle.
 
+### Play Time Display Rule
+
+- `totalPlayTimeSeconds` is backend-owned (`watcher.rs`) and arrives via `DashboardData`; treat it as read-only frontend data.
+- Display with `formatDuration(totalPlayTimeSeconds)` in dashboard and game detail stats.
+- Do not derive/accumulate playtime client-side from `game-status-changed`; that event is for transient playing-state UX.
+
 - Admin-only data should use dedicated hooks such as `useAdminUsersQuery()` and `useAdminConfigQuery()` behind `AdminGuard`; do not fetch it from generic dashboard hooks.
 
 ### Mutation Hook Pattern — Full Dashboard State Update
@@ -547,6 +553,7 @@ export interface GameEntry {
   lastLocalModified: string | null; // ISO 8601 (max across all paths)
   lastCloudModified: string | null;
   gdriveFolderId: string | null;
+  totalPlayTimeSeconds: number;     // cumulative play duration in seconds (watcher-owned)
   cloudStorageBytes: number | null; // total bytes synced to Drive across ALL paths; null = never synced
 }
 

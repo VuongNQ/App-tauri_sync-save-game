@@ -8,9 +8,10 @@ A **Windows desktop tool** built with [Tauri 2](https://tauri.app/) that tracks 
 
 - **Game Library** — Manually add games with name, description, logo/thumbnail, source, and save-game folder location.
 - **Google Drive Sync** — All save data is synced to Google Drive via OAuth 2.0. Authentication is required before using the app.
-- **Background Tracking** — Process-based monitoring per game: detects when the game `.exe` starts/stops and syncs saves on exit (default: off, user opts in per game and sets the executable name).
+- **Background Tracking** — Process-based monitoring per game: detects when the game `.exe` starts/stops, accumulates total play time, and syncs saves on exit (default: off, user opts in per game and sets the executable name).
 - **Auto-Sync** — Automatically backs up local saves to Drive when changes are detected.
 - **Conflict Resolution** — Compares local vs. Drive `last_modified` timestamps and always picks the newest save.
+- **Total Play Time** — Tracks cumulative play duration per game (`totalPlayTimeSeconds`) and shows it in both the dashboard cards and game detail header.
 - **Game Launcher** — Launch games directly from the app (Play button on each game card and detail page). Before launching, the latest save is automatically restored from Google Drive so the newest cloud save is always loaded first.
 - **In-App Updater** — Checks GitHub Releases for new versions and installs them automatically.
 
@@ -50,12 +51,22 @@ src-tauri/src/
   gdrive_auth.rs              # OAuth token management (persist, refresh, check status)
   gdrive.rs                   # Google Drive API client (upload, download, list, folders)
   firestore.rs                # Firestore REST API client (game library, settings, SyncMeta mirror)
-  watcher.rs                  # Process monitor / poller — detects game launch/exit, triggers sync on exit
+  watcher.rs                  # Process monitor / poller — detects game launch/exit, accumulates play time, triggers sync on exit
   sync.rs                     # Sync logic: compare timestamps, upload/download newest save
   drive_mgmt.rs               # Drive file manager + version backup commands
   tray.rs                     # System-tray setup and background lifecycle
   lib.rs                      # Tauri commands wired to handler functions
 ```
+
+---
+
+## Play Time Tracking
+
+- Stored in `GameEntry.totalPlayTimeSeconds` as a cumulative counter in seconds.
+- On process start (`game-status-changed: playing`), watcher stores a per-game session start timestamp.
+- On process exit (`game-status-changed: idle`), watcher adds elapsed session seconds to `totalPlayTimeSeconds` using saturating addition.
+- On tray **Quit**, `flush_active_playtime()` persists any in-progress session so the final active game time is not lost.
+- In the frontend, `formatDuration()` renders the value in compact form (for example: `42s`, `12m 8s`, `3h 14m`, `2d 5h`).
 
 ---
 

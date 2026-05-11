@@ -8,10 +8,11 @@ This is a **Windows desktop tool** built with Tauri 2 that tracks and syncs save
 
 1. **Game Library** — Users manually add games with: name, description, logo/thumbnail (local file or URL), source (Manual, Emulator), and save-game folder location.
 2. **Google Drive Sync** — All game save data is synced to Google Drive via the Google Drive API. OAuth 2.0 authentication is required before the app is usable.
-3. **Background Tracking** — The app runs in the background (system tray) on Windows startup. Per-game **process tracking** monitors whether the game executable is running; syncs save files when the process exits using bidirectional newest-wins sync (upload or download as needed) (**default: off**, user must opt-in per game and set the game's executable name `exeName`).
+3. **Background Tracking** — The app runs in the background (system tray) on Windows startup. Per-game **process tracking** monitors whether the game executable is running; accumulates play time for each finished session; and syncs save files when the process exits using bidirectional newest-wins sync (upload or download as needed) (**default: off**, user must opt-in per game and set the game's executable name `exeName`).
 4. **Auto-Sync** — When enabled, automatically syncs saves with Google Drive whenever changes are detected (downloads newer Drive files and uploads newer local files).
 5. **Conflict Resolution** — On each sync, compare the local file's last-modified timestamp with the Google Drive version's timestamp; always pick the **newest** save.
-6. **Device Management** — Each Windows machine that signs in is automatically registered in Firestore with a deterministic UUID (SHA-256 of `MachineGuid`), hostname, OS, CPU, and RAM info. Users can rename or remove devices from the `/devices` page.
+6. **Total Play Time** — The app tracks cumulative play duration per game in `total_play_time_seconds` (Rust) / `totalPlayTimeSeconds` (TypeScript), shown in game cards and game detail metadata.
+7. **Device Management** — Each Windows machine that signs in is automatically registered in Firestore with a deterministic UUID (SHA-256 of `MachineGuid`), hostname, OS, CPU, and RAM info. Users can rename or remove devices from the `/devices` page.
 
 ---
 
@@ -92,6 +93,7 @@ src-tauri/src/
 | `last_local_modified` | `Option<String>` | `string \| null` | ISO 8601 timestamp of last known local save modification (max across all paths) |
 | `last_cloud_modified` | `Option<String>` | `string \| null` | ISO 8601 timestamp of last Google Drive save version |
 | `gdrive_folder_id` | `Option<String>` | `string \| null` | Google Drive root folder ID for this game's saves |
+| `total_play_time_seconds` | `u64` | `number` | Cumulative play duration in seconds. Incremented by watcher on process exit (and flushed on app quit for active sessions). |
 | `cloud_storage_bytes` | `Option<u64>` | `number \| null` | Total bytes stored in Drive across **all** paths; `None` = never synced |
 
 ### SavePathEntry
@@ -312,14 +314,15 @@ export interface AppSettings {
 ### Background Process Monitor
 
 - Uses `sysinfo = "0.32"` — polls the OS process list every **7 seconds** (no file-system watcher).
-- `WatcherManager` struct: `tracked_games: HashMap<game_id, exe_name>` + `sync_locks: HashMap<game_id, Arc<Mutex<()>>>` + `playing_games: HashMap<game_id, bool>`.
+- `WatcherManager` struct: `tracked_games: HashMap<game_id, exe_name>` + `sync_locks: HashMap<game_id, Arc<Mutex<()>>>` + `playing_games: HashMap<game_id, bool>` + `playing_since: HashMap<game_id, Instant>`.
 - Only active for games where `track_changes == true` **and** `exe_name` is set.
 - `start_poll_thread(app)` spawns one permanent background thread that loops every 7 s:
   - Snapshot tracked games → refresh process list (Windows-only `#[cfg]`) → diff `was_playing` vs `is_now_playing` per exe.
-  - On **game start**: emit `"game-status-changed"` `{ gameId, status: "playing" }`.
-  - On **game exit**: emit `"game-status-changed"` `{ gameId, status: "idle" }` → check `auto_sync` → `try_lock()` per-game mutex → `sync::sync_game()` or emit `"game-sync-pending"`.
+  - On **game start**: emit `"game-status-changed"` `{ gameId, status: "playing" }` and store `playing_since[game_id] = Instant::now()`.
+  - On **game exit**: emit `"game-status-changed"` `{ gameId, status: "idle" }` → add elapsed session time to `total_play_time_seconds` → check `auto_sync` → `try_lock()` per-game mutex → `sync::sync_game()` or emit `"game-sync-pending"`.
 - `init_watchers()` is called at app startup. For each game with `track_changes == true`: if `exe_path` expands to a real file on this machine (`Path::is_file()`), **skip startup registration** — the watcher is armed on-demand when the user clicks Play. Only games without a valid local `exe_path` register at startup.
 - `arm_on_launch(app, game_id, exe_name)` — called from `launch_game` command after successful `open_path()`; guards: `track_changes == true && exe_name` non-empty. Idempotent (calls `start_tracking` which handles duplicates).
+- `flush_active_playtime(app)` is called by tray Quit to persist elapsed time for currently-running tracked sessions before process exit.
 - Process list refresh is wrapped in `#[cfg(target_os = "windows")]` — non-Windows is a safe no-op.
 
 ---
@@ -366,7 +369,8 @@ Thumbnails use a two-tier loading strategy:
 - On Windows startup, the app launches minimised to tray (opt-in setting, managed via Windows registry `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`).
 - Tray context menu: "Open Dashboard", "Sync All Now", separator, "Quit".
 - Double-clicking the tray icon shows/focuses the main window.
-- The file watcher and auto-sync continue running while the app is in the tray.
+- The process watcher and auto-sync continue running while the app is in the tray.
+- On tray Quit, `watcher::flush_active_playtime()` runs before app exit so active play sessions contribute to `total_play_time_seconds`.
 
 ---
 
@@ -655,4 +659,4 @@ The Rust backend emits these events that the frontend can listen to:
 All `println!` / `eprintln!` statements use grep-friendly prefixes:
 - `[gdrive]` — Google Drive API calls
 - `[sync]` — Sync operations
-- `[watcher]` — File watcher events
+- `[watcher]` — Process watcher / playtime tracking events
