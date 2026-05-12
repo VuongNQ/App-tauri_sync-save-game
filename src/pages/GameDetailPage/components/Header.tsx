@@ -75,6 +75,10 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
               </span>
             )}
           </div>
+          <div className="flex items-center gap-2 flex-wrap text-sm text-[#9aa8c7]">
+            <span className="text-[#c7d3f7]">Total play time</span>
+            <span>{formatDuration(game.totalPlayTimeSeconds)}</span>
+          </div>
           <details className="group [&_p]:group-open:line-clamp-none [&_p]:line-clamp-3">
             <summary className="text-sm text-[#9aa8c7] cursor-pointer pb-2">Click to view description</summary>
             <p className="m-0 text-sm text-[#9aa8c7] whitespace-pre-wrap">{game.description}</p >
@@ -145,10 +149,6 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
           {
             label: "Last cloud save",
             value: formatLocalTime(game.lastCloudModified),
-          },
-          {
-            label: "Total play time",
-            value: formatDuration(game.totalPlayTimeSeconds),
           },
           {
             label: "Drive storage used",
