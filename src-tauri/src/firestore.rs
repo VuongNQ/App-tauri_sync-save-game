@@ -522,7 +522,13 @@ pub fn save_device(app: &AppHandle, user_id: &str, device: &DeviceInfo) -> Resul
     fields.remove("exePathOverrides");
 
     let body = json!({ "fields": fields }).to_string();
-    let url = format!("{}/users/{user_id}/devices/{}", base_url(), device.id);
+    // Use updateMask so the generic device upsert updates only core device metadata
+    // and never wipes override backup maps stored in the same document.
+    let url = format!(
+        "{}/users/{user_id}/devices/{}?updateMask.fieldPaths=id&updateMask.fieldPaths=name&updateMask.fieldPaths=hostname&updateMask.fieldPaths=osName&updateMask.fieldPaths=osVersion&updateMask.fieldPaths=cpuName&updateMask.fieldPaths=cpuCores&updateMask.fieldPaths=totalRamMb&updateMask.fieldPaths=registeredAt&updateMask.fieldPaths=lastSeenAt",
+        base_url(),
+        device.id
+    );
 
     let (status, resp_body) = http_client::authed_patch_json(app, &url, &body)?;
     if status != 200 && status != 201 {

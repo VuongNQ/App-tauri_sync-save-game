@@ -56,7 +56,7 @@ export function GameDetailPage() {
       {/* Header */}
       <Header setActiveTab={setActiveTab} />
 
-      <div className="relative">
+      <div className="relative flex flex-col gap-4">
         {/* Tabs */}
         <div className="flex gap-1 p-1 rounded-2xl bg-[rgba(9,14,28,0.6)] border border-white/[0.07] cursor-pointer">
           {(
