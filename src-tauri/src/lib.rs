@@ -24,6 +24,11 @@ use models::{
 
 #[tauri::command]
 fn load_dashboard(app: tauri::AppHandle) -> Result<DashboardData, String> {
+    // Keep playtime aligned across devices (local vs Firestore) before serving UI data.
+    if let Err(e) = settings::reconcile_playtime_with_firestore(&app) {
+        eprintln!("[firestore] load_dashboard reconcile_playtime_with_firestore failed: {e}");
+    }
+
     let mut state = settings::load_state(&app)?;
     // Merge device-specific path_overrides into save_paths (transient — not persisted).
     settings::apply_path_overrides(&mut state.games, &state.settings);

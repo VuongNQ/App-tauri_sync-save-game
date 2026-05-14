@@ -94,9 +94,7 @@ fn add_play_time(app: &AppHandle, game_id: &str, seconds: u64) {
         return;
     }
 
-    match settings::update_game_field(app, game_id, |game| {
-        game.total_play_time_seconds = game.total_play_time_seconds.saturating_add(seconds);
-    }) {
+    match settings::add_play_time_seconds(app, game_id, seconds) {
         Ok(_) => println!("[watcher] Added {seconds}s playtime to '{game_id}'"),
         Err(e) => eprintln!("[watcher] Failed to add playtime for '{game_id}': {e}"),
     }

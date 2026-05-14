@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -484,6 +485,74 @@ pub fn update_game_field(
     Ok(state)
 }
 
+/// Add elapsed playtime to a game locally, then atomically increment Firestore.
+///
+/// Local write is done first so UI remains responsive and durable offline.
+/// Cloud increment runs in background and is additive across devices.
+pub fn add_play_time_seconds(
+    app: &AppHandle,
+    game_id: &str,
+    seconds: u64,
+) -> Result<StoredState, String> {
+    let mut state = load_state(app)?;
+    let game = find_game_mut(&mut state, game_id)?;
+    game.total_play_time_seconds = game.total_play_time_seconds.saturating_add(seconds);
+    save_state(app, &state)?;
+    spawn_firestore_playtime_increment(app, game_id.to_string(), seconds);
+    Ok(state)
+}
+
+/// Reconcile per-game playtime between local state and Firestore.
+///
+/// Rules:
+/// - local > cloud: increment cloud by the delta (atomic)
+/// - cloud > local: update local to cloud
+/// - equal: no-op
+///
+/// Returns `Ok(true)` when local state was updated.
+pub fn reconcile_playtime_with_firestore(app: &AppHandle) -> Result<bool, String> {
+    let user_id = match crate::gdrive_auth::get_current_user_id(app) {
+        Some(id) => id,
+        None => return Ok(false),
+    };
+
+    let cloud_games = match firestore::load_all_games(app, &user_id) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("[firestore] reconcile_playtime_with_firestore: load_all_games failed: {e}");
+            return Ok(false);
+        }
+    };
+    let cloud_totals: HashMap<String, u64> = cloud_games
+        .into_iter()
+        .map(|g| (g.id, g.total_play_time_seconds))
+        .collect();
+
+    let mut state = load_state(app)?;
+    let mut local_changed = false;
+
+    for game in &mut state.games {
+        let Some(cloud_total) = cloud_totals.get(&game.id).copied() else {
+            continue;
+        };
+
+        if game.total_play_time_seconds > cloud_total {
+            let delta = game.total_play_time_seconds - cloud_total;
+            spawn_firestore_playtime_increment(app, game.id.clone(), delta);
+        } else if cloud_total > game.total_play_time_seconds {
+            game.total_play_time_seconds = cloud_total;
+            local_changed = true;
+        }
+    }
+
+    if local_changed {
+        save_state(app, &state)?;
+        println!("[firestore] Reconciled local playtime from Firestore");
+    }
+
+    Ok(local_changed)
+}
+
 // ── Background Firestore sync helpers ────────────────────
 
 /// Fetch game library + settings from Firestore and overwrite local state.
@@ -624,6 +693,16 @@ fn spawn_firestore_settings_sync(app: &AppHandle) {
     spawn_firestore_task(app, move |app, user_id| {
         let settings = load_state(app)?.settings;
         firestore::save_settings(app, user_id, &settings)
+    });
+}
+
+/// Atomically increment Firestore totalPlayTimeSeconds for one game.
+fn spawn_firestore_playtime_increment(app: &AppHandle, game_id: String, delta_seconds: u64) {
+    if delta_seconds == 0 {
+        return;
+    }
+    spawn_firestore_task(app, move |app, user_id| {
+        firestore::increment_game_play_time(app, user_id, &game_id, delta_seconds)
     });
 }
 

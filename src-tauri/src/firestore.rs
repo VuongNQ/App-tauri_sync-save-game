@@ -293,6 +293,8 @@ pub fn save_admin_config(app: &AppHandle, config: &AdminConfig) -> Result<(), St
 
 /// Write (upsert) a `GameEntry` to Firestore at `users/{user_id}/games/{game_id}`.
 /// `exe_path` is intentionally stripped — it is local-only (differs per device).
+/// `total_play_time_seconds` is intentionally excluded from generic upserts and
+/// is synchronized via `increment_game_play_time` to avoid cross-device clobbering.
 pub fn save_game(app: &AppHandle, user_id: &str, game: &GameEntry) -> Result<(), String> {
     // exe_path is device-specific and must not be synced to the cloud.
     let cloud_game = GameEntry { exe_path: None, ..game.clone() };
@@ -300,10 +302,15 @@ pub fn save_game(app: &AppHandle, user_id: &str, game: &GameEntry) -> Result<(),
         .map_err(|e| format!("Serialize GameEntry: {e}"))?;
 
     let fields = match game_val {
-        Value::Object(map) => map
-            .into_iter()
-            .map(|(k, v)| (k, json_to_firestore(&v)))
-            .collect::<serde_json::Map<_, _>>(),
+        Value::Object(mut map) => {
+            // Playtime is written only through atomic increments so totals from
+            // multiple devices are additive and never overwritten by stale docs.
+            map.remove("totalPlayTimeSeconds");
+            map
+                .into_iter()
+                .map(|(k, v)| (k, json_to_firestore(&v)))
+                .collect::<serde_json::Map<_, _>>()
+        }
         _ => return Err("GameEntry did not serialize to object".into()),
     };
 
@@ -315,6 +322,59 @@ pub fn save_game(app: &AppHandle, user_id: &str, game: &GameEntry) -> Result<(),
         return Err(format!("[firestore] save_game HTTP {status}: {resp_body}"));
     }
     println!("[firestore] Saved game '{}' for user {user_id}", game.id);
+    Ok(())
+}
+
+/// Atomically increment `totalPlayTimeSeconds` for a game document.
+///
+/// This uses Firestore document transforms so concurrent increments from
+/// different devices are additive (`A + B`) instead of last-write-wins.
+pub fn increment_game_play_time(
+    app: &AppHandle,
+    user_id: &str,
+    game_id: &str,
+    delta_seconds: u64,
+) -> Result<(), String> {
+    if delta_seconds == 0 {
+        return Ok(());
+    }
+
+    let delta_i64 = i64::try_from(delta_seconds)
+        .map_err(|_| format!("Playtime delta too large: {delta_seconds}"))?;
+    let commit_url = format!(
+        "https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents:commit"
+    );
+    let doc_name = format!(
+        "projects/{PROJECT_ID}/databases/(default)/documents/users/{user_id}/games/{game_id}"
+    );
+    let body = json!({
+        "writes": [
+            {
+                "transform": {
+                    "document": doc_name,
+                    "fieldTransforms": [
+                        {
+                            "fieldPath": "totalPlayTimeSeconds",
+                            "increment": { "integerValue": delta_i64.to_string() }
+                        }
+                    ]
+                }
+            }
+        ]
+    })
+    .to_string();
+
+    let (status, resp_body) = http_client::authed_post_json(app, &commit_url, &body)?;
+    if status != 200 {
+        return Err(format!(
+            "[firestore] increment_game_play_time HTTP {status}: {resp_body}"
+        ));
+    }
+
+    println!(
+        "[firestore] Incremented playtime for '{}' by {}s",
+        game_id, delta_seconds
+    );
     Ok(())
 }
 
@@ -607,6 +667,7 @@ pub fn save_device_exe_path_overrides(
     println!("[firestore] Saved exe-path overrides for device '{device_id}' (user {user_id})");
     Ok(())
 }
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
