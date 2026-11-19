@@ -2,13 +2,14 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router";
 
 import { CARD, MUTED, PRIMARY_BTN } from "../components/styles";
-import { useAuthStatusQuery, useLoginMutation } from "../queries";
+import { useAuthStatusQuery, useLoginMutation, useLogoutMutation } from "../queries";
 import { msg } from "../utils";
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { data: authStatus } = useAuthStatusQuery();
+  const { data: authStatus, error: authError } = useAuthStatusQuery();
   const login = useLoginMutation();
+  const resetSession = useLogoutMutation();
 
   useEffect(() => {
     if (authStatus?.authenticated) {
@@ -30,11 +31,21 @@ export function LoginPage() {
           <p className={MUTED}>Connect your Google account to sync your save games across devices.</p>
         </div>
 
-        <button className={PRIMARY_BTN} type="button" onClick={handleLogin} disabled={login.isPending || isRedirecting}>
+        <button className={PRIMARY_BTN} type="button" onClick={handleLogin} disabled={login.isPending || resetSession.isPending || isRedirecting}>
           {login.isPending ? "Connecting…" : isRedirecting ? "Redirecting…" : "Connect with Google"}
         </button>
 
         {isRedirecting && <p className={MUTED}>Login successful. Returning to your dashboard…</p>}
+
+        {authError && (
+          <div className="grid gap-3">
+            <p className="m-0 text-sm text-[#ffd5d5]">{msg(authError, "Saved sign-in could not be read.")}</p>
+            <button type="button" className="text-sm underline text-[#c7d3f7]" disabled={login.isPending || resetSession.isPending} onClick={() => resetSession.mutate()}>
+              {resetSession.isPending ? "Clearing…" : "Clear saved sign-in"}
+            </button>
+          </div>
+        )}
+        {resetSession.isError && <p className="m-0 text-sm text-[#ffd5d5]">{msg(resetSession.error, "Unable to clear saved sign-in.")}</p>}
 
         {login.isError && <p className="m-0 text-sm text-[#ffd5d5]">{msg(login.error, "Unable to connect to Google.")}</p>}
       </div>

@@ -199,7 +199,18 @@ fn save_auth_tokens_inner(app:tauri::AppHandle,payload:SaveTokensPayload)->Resul
     let _operation = game_operations::acquire_exclusive()?;
     let account_change = session::change()?;
     watcher::ensure_no_active_sessions(&app)?;
-    let status = gdrive_auth::save_tokens_from_plugin(&app, payload)?;
+    let status = match gdrive_auth::save_tokens_from_plugin(&app, payload) {
+        Ok(status)=>status,
+        Err(error)=> {
+            session::advance();
+            watcher::reset_for_account(&app);
+            let user_id=gdrive_auth::get_current_user_id(&app);
+            let actual=AuthStatus {authenticated:user_id.is_some(),user_id,role:UserRole::User};
+            drop(account_change); drop(_operation);
+            let _=tauri::Emitter::emit(&app,"auth-status-changed",actual);
+            return Err(error);
+        }
+    };
     session::advance();
     watcher::reset_for_account(&app);
     drop(account_change);
@@ -289,10 +300,15 @@ fn logout(app: tauri::AppHandle) -> Result<AuthStatus, String> {
     let _operation = game_operations::acquire_exclusive()?;
     let _account_change=session::change()?;
     watcher::ensure_no_active_sessions(&app)?;
-    let status=gdrive_auth::logout(&app)?;
+    let result=gdrive_auth::logout(&app);
     session::advance();
     watcher::reset_for_account(&app);
-    Ok(status)
+    if result.is_err() {
+        let user_id=gdrive_auth::get_current_user_id(&app);
+        let actual=AuthStatus {authenticated:user_id.is_some(),user_id,role:UserRole::User};
+        let _=tauri::Emitter::emit(&app,"auth-status-changed",actual);
+    }
+    result
 }
 
 #[tauri::command]

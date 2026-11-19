@@ -31,9 +31,13 @@ On first read, a valid legacy `oauth-tokens.json` is encrypted, written and
 reopened successfully before the plaintext file is removed. Failed encryption
 or write retains the old file; a corrupt protected file never silently falls
 back to plaintext. A copy of this ciphertext on another Windows user/device
-requires signing in again. DPAPI does not protect against malicious processes
+typically requires signing in again; Windows domain/roaming protection contexts may differ. DPAPI does not protect against malicious processes
 already running as the same Windows user. Check any manually made backups of
 the old app-data directory separately: this migration does not scan other paths.
+
+A damaged credential file can be removed with **Clear saved sign-in** on the
+login screen before reconnecting. This clears credentials, not save files or
+library data. Post-write verification failures restore the previous ciphertext.
 
 No plaintext storage fallback exists on Linux/macOS. Those platforms need their
 native secure-store adapters before the desktop app can support sign-in there.

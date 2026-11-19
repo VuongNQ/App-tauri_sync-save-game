@@ -75,16 +75,30 @@ fn write_with(
     }
     let mut bytes = HEADER.to_vec();
     bytes.extend_from_slice(&encrypted);
+    let previous = match fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(e) if e.kind() == ErrorKind::NotFound => None,
+        Err(_) => return Err("Cannot read previous protected credentials".into()),
+    };
     crate::safe_files::atomic_write(path, &bytes)?;
-    let stored = fs::read(path).map_err(|_| "Cannot verify saved credentials")?;
-    if open(
-        stored
-            .strip_prefix(HEADER)
-            .ok_or("Cannot verify credential format")?,
-    )? != plain
-    {
-        return Err("Saved credentials could not be reopened".into());
+    let verified = fs::read(path)
+        .ok()
+        .and_then(|stored| {
+            stored
+                .strip_prefix(HEADER)
+                .and_then(|payload| open(payload).ok())
+        })
+        .is_some_and(|reopened| reopened == plain);
+    if !verified {
+        match previous {
+            Some(old) => crate::safe_files::atomic_write(path, &old)?,
+            None => delete(path)?,
+        }
+        return Err(
+            "Saved credentials could not be reopened; previous credentials restored".into(),
+        );
     }
+
     Ok(())
 }
 
@@ -233,6 +247,25 @@ mod tests {
             load_with(&protected, Some(&old), codec, codec);
         assert!(result.is_err());
         assert!(old.exists());
+    }
+
+    #[test]
+    fn failed_post_write_verification_restores_previous_ciphertext() {
+        let t = Temp::new();
+        let path = t.0.join("session.bin");
+        let old = b"previous protected bytes";
+        fs::write(&path, old).unwrap();
+        let count = std::cell::Cell::new(0);
+        let result = write_with(&path, b"new session", codec, |bytes| {
+            count.set(count.get() + 1);
+            if count.get() > 1 {
+                Err("verification failure".into())
+            } else {
+                codec(bytes)
+            }
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).unwrap(), old);
     }
 
     #[cfg(windows)]

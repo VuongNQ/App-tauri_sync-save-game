@@ -158,8 +158,11 @@ pub fn save_tokens_from_plugin(
     let _lock = TOKEN_LOCK
         .lock()
         .map_err(|_| "Credential store unavailable")?;
-    let refresh_token=payload.refresh_token.filter(|s| !s.is_empty()).or_else(|| {
-        load_tokens(app).ok().flatten().filter(|old| old.user_id==info.id).map(|old|old.refresh_token)
+    // Migrate/clean up the previous session BEFORE committing the candidate.
+    // A failed legacy cleanup must never install a different account silently.
+    let previous = load_tokens(app)?;
+    let refresh_token = payload.refresh_token.filter(|s| !s.is_empty()).or_else(|| {
+        previous.filter(|old|old.user_id==info.id).map(|old|old.refresh_token).filter(|s|!s.is_empty())
     }).ok_or("Google did not return offline access. Reconnect with consent to obtain a refresh token.")?;
     let tokens = OAuthTokens {
         access_token: payload.access_token,
@@ -169,7 +172,6 @@ pub fn save_tokens_from_plugin(
         firebase: Some(firebase),
     };
     save_tokens(app, &tokens)?;
-    crate::secret_store::delete(&legacy_tokens_path(app)?)?;
     Ok(AuthStatus {
         authenticated: true,
         user_id: Some(info.id),
