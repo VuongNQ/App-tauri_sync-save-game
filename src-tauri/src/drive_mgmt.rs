@@ -449,6 +449,11 @@ pub fn restore_version_backup(
         return Err("Backup does not belong to this game".into());
     }
 
+    let (current_meta, _) = gdrive::download_sync_meta(app, &game_folder_id)?;
+    if current_meta.as_ref().is_some_and(|meta| meta.files.iter().any(|entry| entry.path_file.contains('/'))) {
+        return Err("This legacy snapshot has no relative-path manifest and cannot safely restore nested saves. Recover it manually instead.".into());
+    }
+
     // Snapshot files (excluding .backup-meta.json).
     let backup_items = gdrive::list_drive_items(app, backup_folder_id)?;
     let backup_files: Vec<&DriveFileItem> = backup_items

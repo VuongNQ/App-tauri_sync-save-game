@@ -12,9 +12,15 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 pub const TEMP_PREFIX: &str = ".save-sync-";
 
 fn unique_name() -> String {
-    format!("{}-{}-{}", std::process::id(),
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos(),
-        NEXT_ID.fetch_add(1, Ordering::Relaxed))
+    format!(
+        "{}-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 fn is_link(meta: &fs::Metadata) -> bool {
@@ -25,13 +31,17 @@ fn is_link(meta: &fs::Metadata) -> bool {
         meta.file_attributes() & 0x400 != 0
     }
     #[cfg(not(windows))]
-    { meta.file_type().is_symlink() }
+    {
+        meta.file_type().is_symlink()
+    }
 }
 
 fn reject_links(path: &Path) -> Result<(), String> {
     for ancestor in path.ancestors() {
         match fs::symlink_metadata(ancestor) {
-            Ok(meta) if is_link(&meta) => return Err(format!("Refusing linked save path: {}", ancestor.display())),
+            Ok(meta) if is_link(&meta) => {
+                return Err(format!("Refusing linked save path: {}", ancestor.display()))
+            }
             Ok(_) => (),
             Err(e) if e.kind() == io::ErrorKind::NotFound => (),
             Err(e) => return Err(format!("Cannot validate {}: {e}", ancestor.display())),
@@ -51,11 +61,17 @@ pub fn safe_join(root: &Path, relative: &str) -> Result<PathBuf, String> {
     for part in relative.split('/') {
         let stem = part.split('.').next().unwrap_or("").to_ascii_uppercase();
         let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-            || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            || (stem.len() == 4
+                && (stem.starts_with("COM") || stem.starts_with("LPT"))
                 && matches!(stem.as_bytes()[3], b'1'..=b'9'));
-        if part.is_empty() || part == "." || part == ".." || reserved
+        if part.is_empty()
+            || part == "."
+            || part == ".."
+            || reserved
             || part.ends_with(['.', ' '])
-            || part.chars().any(|c| c.is_control() || ":<>\"|?*".contains(c))
+            || part
+                .chars()
+                .any(|c| c.is_control() || ":<>\"|?*".contains(c))
         {
             return Err(format!("Invalid cloud save path: {relative:?}"));
         }
@@ -67,21 +83,33 @@ pub fn safe_join(root: &Path, relative: &str) -> Result<PathBuf, String> {
 
 struct StagedFile(PathBuf);
 impl Drop for StagedFile {
-    fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
 }
 
 /// A durable, unique recovery copy plus its original path. Kept outside the save
 /// tree so backups can never become game files or be uploaded as saves.
 fn preserve_original(target: &Path, recovery_root: &Path) -> Result<(), String> {
-    if !target.exists() { return Ok(()); }
+    if !target.exists() {
+        return Ok(());
+    }
     let folder = recovery_root.join(unique_name());
     fs::create_dir_all(&folder).map_err(|e| format!("Cannot create recovery backup: {e}"))?;
     let mut source = File::open(target).map_err(|e| format!("Cannot read original save: {e}"))?;
-    let mut backup = OpenOptions::new().write(true).create_new(true)
-        .open(folder.join("save.bak")).map_err(|e| format!("Cannot create recovery copy: {e}"))?;
+    let mut backup = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(folder.join("save.bak"))
+        .map_err(|e| format!("Cannot create recovery copy: {e}"))?;
     io::copy(&mut source, &mut backup).map_err(|e| format!("Cannot back up original save: {e}"))?;
-    backup.sync_all().map_err(|e| format!("Cannot flush recovery copy: {e}"))?;
-    atomic_write(&folder.join("original-path.txt"), target.to_string_lossy().as_bytes())?;
+    backup
+        .sync_all()
+        .map_err(|e| format!("Cannot flush recovery copy: {e}"))?;
+    atomic_write(
+        &folder.join("original-path.txt"),
+        target.to_string_lossy().as_bytes(),
+    )?;
     Ok(())
 }
 
@@ -102,17 +130,30 @@ pub fn replace_from_reader(
     let parent = target.parent().ok_or("Destination has no parent")?;
     fs::create_dir_all(parent).map_err(|e| format!("Cannot create save directory: {e}"))?;
     let temp = StagedFile(parent.join(format!("{TEMP_PREFIX}{}.tmp", unique_name())));
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&temp.0)
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp.0)
         .map_err(|e| format!("Cannot stage save: {e}"))?;
-    let copied = io::copy(reader, &mut file).map_err(|e| format!("Save download interrupted: {e}"))?;
+    let copied =
+        io::copy(reader, &mut file).map_err(|e| format!("Save download interrupted: {e}"))?;
     if let Some(expected) = expected_size {
-        if expected != copied { return Err(format!("Incomplete save: expected {expected} bytes, received {copied}")); }
+        if expected != copied {
+            return Err(format!(
+                "Incomplete save: expected {expected} bytes, received {copied}"
+            ));
+        }
     }
-    file.flush().and_then(|_| file.sync_all()).map_err(|e| format!("Cannot flush staged save: {e}"))?;
+    file.flush()
+        .and_then(|_| file.sync_all())
+        .map_err(|e| format!("Cannot flush staged save: {e}"))?;
     drop(file);
     reject_links(target)?;
-    if let Some(root) = recovery_root { preserve_original(target, root)?; }
-    fs::rename(&temp.0, target).map_err(|e| format!("Cannot replace save safely; original retained: {e}"))?;
+    if let Some(root) = recovery_root {
+        preserve_original(target, root)?;
+    }
+    fs::rename(&temp.0, target)
+        .map_err(|e| format!("Cannot replace save safely; original retained: {e}"))?;
     Ok(())
 }
 
@@ -128,12 +169,21 @@ mod tests {
             Self(dir)
         }
     }
-    impl Drop for TestDir { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     struct InterruptedReader(bool);
     impl Read for InterruptedReader {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            if self.0 { return Err(io::Error::new(io::ErrorKind::ConnectionReset, "network lost")); }
+            if self.0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionReset,
+                    "network lost",
+                ));
+            }
             self.0 = true;
             buf[..3].copy_from_slice(b"new");
             Ok(3)
@@ -170,19 +220,44 @@ mod tests {
         let recovery = dir.0.join("recovery");
         replace_from_reader(&target, &mut &b"new"[..], Some(3), Some(&recovery)).unwrap();
         assert_eq!(fs::read(&target).unwrap(), b"new");
-        let backup = fs::read_dir(&recovery).unwrap().next().unwrap().unwrap().path();
+        let backup = fs::read_dir(&recovery)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
         assert_eq!(fs::read(backup.join("save.bak")).unwrap(), b"old");
-        assert_eq!(fs::read_to_string(backup.join("original-path.txt")).unwrap(), target.to_string_lossy());
+        assert_eq!(
+            fs::read_to_string(backup.join("original-path.txt")).unwrap(),
+            target.to_string_lossy()
+        );
         assert_eq!(fs::read_dir(target.parent().unwrap()).unwrap().count(), 1);
     }
 
     #[test]
     fn rejects_untrusted_paths_on_every_os() {
         let dir = TestDir::new();
-        for path in ["", "../outside", "/absolute", "a/../../x", "C:/save", "C:save", "a\\..\\x", "//host/share", "slot:stream", "a//b", "CON.txt", "LPT1", "a./save"] {
+        for path in [
+            "",
+            "../outside",
+            "/absolute",
+            "a/../../x",
+            "C:/save",
+            "C:save",
+            "a\\..\\x",
+            "//host/share",
+            "slot:stream",
+            "a//b",
+            "CON.txt",
+            "LPT1",
+            "a./save",
+        ] {
             assert!(safe_join(&dir.0, path).is_err(), "accepted {path:?}");
         }
-        assert_eq!(safe_join(&dir.0, "profile/slot.sav").unwrap(), dir.0.join("profile/slot.sav"));
+        assert_eq!(
+            safe_join(&dir.0, "profile/slot.sav").unwrap(),
+            dir.0.join("profile/slot.sav")
+        );
     }
 
     #[cfg(unix)]

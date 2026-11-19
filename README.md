@@ -10,9 +10,9 @@ A **Windows desktop tool** built with [Tauri 2](https://tauri.app/) that tracks 
 - **Google Drive Sync** — All save data is synced to Google Drive via OAuth 2.0. Authentication is required before using the app.
 - **Background Tracking** — Process-based monitoring per game: detects when the game `.exe` starts/stops, accumulates total play time, and syncs saves on exit (default: off, user opts in per game and sets the executable name).
 - **Auto-Sync** — Automatically backs up local saves to Drive when changes are detected.
-- **Conflict Resolution** — Compares local vs. Drive `last_modified` timestamps and always picks the newest save.
+- **Conflict Resolution** — Compares local changes and the last observed cloud state. Automatic sync stops when both sides changed; the user explicitly chooses Push local or Restore cloud. Previous local/cloud bytes are preserved before replacement.
 - **Total Play Time** — Tracks cumulative play duration per game (`totalPlayTimeSeconds`) and shows it in both the dashboard cards and game detail header.
-- **Game Launcher** — Launch games directly from the app (Play button on each game card and detail page). Before launching, the latest save is automatically restored from Google Drive so the newest cloud save is always loaded first.
+- **Game Launcher** — Launch games directly from the app (Play button on each game card and detail page). Before launching, safe bidirectional sync checks both local and cloud changes under the same Rust operation gate. Offline progress is not force-restored from Drive.
 - **In-App Updater** — Checks GitHub Releases for new versions and installs them automatically.
 
 ---
@@ -59,6 +59,10 @@ src-tauri/src/
 ```
 
 ---
+
+## Save Safety
+
+See [save safety and rollout](docs/save-safety.md) for recovery locations, upgrade behavior, validation and the remaining account, cross-device and handheld-platform roadmap.
 
 ## Play Time Tracking
 
@@ -204,11 +208,11 @@ npm run tauri -- build
 
 ## CI/CD & Releases
 
-Releases are published automatically via GitHub Actions on every push to `main`:
+Releases are published automatically via GitHub Actions when a `release-prod-*` tag is pushed:
 
 1. CI bumps the patch version in `tauri.conf.json` and `Cargo.toml`.
 2. Builds and signs the Windows installer.
-3. Publishes a GitHub Release tagged `vX.Y.Z` with `latest.json` for the in-app updater.
+3. Publishes a GitHub Release using that tag, with `latest.json` for the in-app updater.
 
 Required repository secrets: `GITHUB_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CLOUD_PROJECT_ID`, `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 

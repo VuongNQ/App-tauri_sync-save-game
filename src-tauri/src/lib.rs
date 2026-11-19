@@ -122,6 +122,7 @@ fn remove_game(app: tauri::AppHandle, game_id: String) -> Result<DashboardData, 
     if let Some(folder_id) = drive_folder_id {
         let app_clone = app.clone();
         std::thread::spawn(move || {
+            let _operation = _operation;
             match gdrive::delete_drive_file(&app_clone, &folder_id) {
                 Ok(_) => println!("[gdrive] Deleted Drive folder for removed game: {folder_id}"),
                 Err(e) => eprintln!("[gdrive] Failed to delete Drive folder {folder_id}: {e}"),
@@ -294,6 +295,7 @@ fn get_settings(app: tauri::AppHandle) -> Result<AppSettings, String> {
 
 #[tauri::command]
 fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
+    let _operation = game_operations::acquire_exclusive()?;
     settings::update_settings(&app, settings)
 }
 
@@ -629,6 +631,7 @@ fn toggle_track_changes(
     game_id: String,
     enabled: bool,
 ) -> Result<DashboardData, String> {
+    let _operation = game_operations::acquire(&game_id)?;
     // Update the game entry first
     let mut state = settings::update_game_field(&app, &game_id, |g| {
         g.track_changes = enabled;
@@ -647,6 +650,7 @@ fn toggle_auto_sync(
     game_id: String,
     enabled: bool,
 ) -> Result<DashboardData, String> {
+    let _operation = game_operations::acquire(&game_id)?;
     let mut state = settings::update_game_field(&app, &game_id, |g| {
         g.auto_sync = enabled;
     })?;

@@ -1279,3 +1279,44 @@ fn validate_cloud_paths(save_dir: &Path, meta: &SyncMeta) -> Result<(), String> 
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod safety_tests {
+    use super::*;
+
+    fn cloud() -> SyncFileEntry {
+        SyncFileEntry { path_file: "slot.sav".into(), size: 42, drive_file_id: Some("drive-1".into()), modified_time: Some("cloud-time".into()) }
+    }
+
+    #[test]
+    fn downloaded_local_timestamp_is_not_the_cloud_baseline() {
+        let cloud = cloud();
+        let baseline = LocalFileRecord { path_file: cloud.path_file.clone(), size: cloud.size,
+            modified_time: "os-download-time".into(), cloud_state: Some(CloudFileState::from(&cloud)) };
+        assert!(!cloud_changed(&cloud, Some(&baseline)));
+        let mut replaced = cloud.clone();
+        replaced.drive_file_id = Some("different-id-same-time-and-size".into());
+        assert!(cloud_changed(&replaced, Some(&baseline)));
+    }
+
+    #[test]
+    fn old_tracker_is_readable_but_does_not_invent_cloud_identity() {
+        let baseline: LocalFileRecord = serde_json::from_str(r#"{"pathFile":"slot.sav","size":42,"modifiedTime":"cloud-time"}"#).unwrap();
+        assert!(baseline.cloud_state.is_none());
+        assert!(cloud_changed(&cloud(), Some(&baseline)));
+    }
+
+    #[test]
+    fn duplicate_case_insensitive_paths_and_traversal_fail_before_transfers() {
+        let mut meta = SyncMeta::default();
+        meta.files.push(cloud());
+        assert!(validate_cloud_paths(Path::new("."), &meta).is_ok());
+        let mut duplicate = cloud();
+        duplicate.path_file = "SLOT.SAV".into();
+        meta.files.push(duplicate);
+        assert!(validate_cloud_paths(Path::new("."), &meta).is_err());
+        meta.files.truncate(1);
+        meta.files[0].path_file = "../outside.sav".into();
+        assert!(validate_cloud_paths(Path::new("."), &meta).is_err());
+    }
+}
