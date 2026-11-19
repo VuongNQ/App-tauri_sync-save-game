@@ -32,6 +32,7 @@ use models::{
 
 #[tauri::command]
 fn load_dashboard(app: tauri::AppHandle) -> Result<DashboardData, String> {
+    let _session = session::current(&app)?;
     // Keep playtime aligned across devices (local vs Firestore) before serving UI data.
     if let Err(e) = settings::reconcile_playtime_with_firestore(&app) {
         eprintln!("[firestore] load_dashboard reconcile_playtime_with_firestore failed: {e}");
@@ -72,6 +73,7 @@ fn add_manual_game(
     app: tauri::AppHandle,
     payload: AddGamePayload,
 ) -> Result<DashboardData, String> {
+    let _session = session::current(&app)?;
     let _operation = game_operations::acquire_exclusive()?;
     settings::add_manual_game(&app, payload)?;
     let mut state = settings::load_state(&app)?;
@@ -84,6 +86,7 @@ fn update_game(
     app: tauri::AppHandle,
     payload: UpdateGamePayload,
 ) -> Result<DashboardData, String> {
+    let _session = session::current(&app)?;
     let _operation = game_operations::acquire(&payload.game.id)?;
     // Capture old game state before updating so we can diff.
     let old_game = settings::load_state(&app)
@@ -114,6 +117,7 @@ fn update_game(
 
 #[tauri::command]
 fn remove_game(app: tauri::AppHandle, game_id: String) -> Result<DashboardData, String> {
+    let _session = session::current(&app)?;
     let _operation = game_operations::acquire(&game_id)?;
     // Capture the Drive folder ID before removing from local state.
     let drive_folder_id = settings::load_state(&app)
@@ -142,6 +146,7 @@ fn remove_game(app: tauri::AppHandle, game_id: String) -> Result<DashboardData, 
 
 #[tauri::command]
 fn clear_all_drive_data(app: tauri::AppHandle) -> Result<DashboardData, String> {
+    let _session = session::current(&app)?;
     let _operation = game_operations::acquire_exclusive()?;
     // Delete the entire game-processing-sync root folder on Drive.
     let root_folder_id = gdrive::ensure_root_folder(&app)?;
@@ -182,10 +187,15 @@ async fn check_auth_status(app: tauri::AppHandle) -> Result<AuthStatus, String> 
 
 /// Receive tokens from the frontend after tauri-plugin-google-auth sign-in.
 #[tauri::command]
-fn save_auth_tokens(
+async fn save_auth_tokens(
     app: tauri::AppHandle,
     payload: SaveTokensPayload,
 ) -> Result<AuthStatus, String> {
+    tokio::task::spawn_blocking(move || save_auth_tokens_inner(app,payload))
+        .await.map_err(|e|e.to_string())?
+}
+
+fn save_auth_tokens_inner(app:tauri::AppHandle,payload:SaveTokensPayload)->Result<AuthStatus,String> {
     let _operation = game_operations::acquire_exclusive()?;
     let account_change = session::change()?;
     watcher::ensure_no_active_sessions(&app)?;
@@ -318,11 +328,13 @@ fn update_user_role(
 
 #[tauri::command]
 fn get_settings(app: tauri::AppHandle) -> Result<AppSettings, String> {
+    let _session = session::current(&app)?;
     settings::get_settings(&app)
 }
 
 #[tauri::command]
 fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
+    let _session = session::current(&app)?;
     let _operation = game_operations::acquire_exclusive()?;
     settings::update_settings(&app, settings)
 }
@@ -344,11 +356,13 @@ fn contract_path(path: String) -> String {
 
 #[tauri::command]
 fn validate_save_paths(app: tauri::AppHandle) -> Result<Vec<PathValidation>, String> {
+    let _session = session::current(&app)?;
     settings::validate_save_paths(&app)
 }
 
 #[tauri::command]
 fn get_browse_default_path(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let _session = session::current(&app)?;
     settings::get_browse_default_path(&app)
 }
 
@@ -356,6 +370,7 @@ fn get_browse_default_path(app: tauri::AppHandle) -> Result<Option<String>, Stri
 
 #[tauri::command]
 fn get_save_info(app: tauri::AppHandle, game_id: String) -> Result<SaveInfo, String> {
+    let _session = session::current(&app)?;
     sync::get_save_info(&app, &game_id)
 }
 
@@ -599,6 +614,7 @@ async fn clean_excluded_drive_files(
 
 #[tauri::command]
 fn launch_game(app: tauri::AppHandle, game_id: String) -> Result<(), String> {
+    let _session = session::current(&app)?;
     let _operation = game_operations::acquire(&game_id)?;
     launch_game_locked(&app, &game_id)
 }
@@ -659,6 +675,7 @@ fn toggle_track_changes(
     game_id: String,
     enabled: bool,
 ) -> Result<DashboardData, String> {
+    let _session = session::current(&app)?;
     let _operation = game_operations::acquire(&game_id)?;
     // Update the game entry first
     let mut state = settings::update_game_field(&app, &game_id, |g| {
@@ -678,6 +695,7 @@ fn toggle_auto_sync(
     game_id: String,
     enabled: bool,
 ) -> Result<DashboardData, String> {
+    let _session = session::current(&app)?;
     let _operation = game_operations::acquire(&game_id)?;
     let mut state = settings::update_game_field(&app, &game_id, |g| {
         g.auto_sync = enabled;

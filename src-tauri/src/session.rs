@@ -29,7 +29,7 @@ pub fn advance() {
 }
 
 pub fn capture(app: &AppHandle) -> Option<Snapshot> {
-    let _guard = GATE.read().ok()?;
+    let _guard = GATE.try_read().ok()?;
     Some(Snapshot {
         epoch: EPOCH.load(Ordering::SeqCst),
         user_id: crate::gdrive_auth::get_current_user_id(app)?,
@@ -54,7 +54,9 @@ pub fn current(app: &AppHandle) -> Result<Lease, String> {
 
 pub fn read() -> Result<Lease, String> {
     Ok(Lease {
-        _guard: GATE.read().map_err(|_| "Account session unavailable")?,
+        _guard: GATE
+            .try_read()
+            .map_err(|_| "ACCOUNT_BUSY: Account change in progress")?,
     })
 }
 

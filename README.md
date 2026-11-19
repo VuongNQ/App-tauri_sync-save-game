@@ -112,7 +112,7 @@ appDataFolder/
 - `CLIENT_ID`, `CLIENT_SECRET`, and `GOOGLE_CLOUD_PROJECT_ID` are compiled into the Rust binary via `option_env!()` — never stored in frontend code.
 - Tokens are persisted in a Windows-user-protected DPAPI session file. Legacy plaintext credentials migrate after a verified protected write. See [account security](docs/account-security.md).
 
-> Existing users upgrading from a build without the `datastore` scope must re-authenticate once.
+> Before releasing the account-security update, complete the Firebase Auth, Rules and IAM activation steps in [account security](docs/account-security.md).
 
 ---
 
@@ -161,7 +161,7 @@ Before running the app locally you must configure a Google Cloud project with th
 4. **Configure OAuth consent screen**:
    - Go to *APIs & Services → OAuth consent screen*.
    - Set user type to **External** (or Internal if using a Google Workspace org).
-   - Add scopes: `openid`, `email`, `profile`, `https://www.googleapis.com/auth/drive.file`, `https://www.googleapis.com/auth/drive.appdata`, `https://www.googleapis.com/auth/datastore`.
+   - Add scopes: `openid`, `email`, `profile`, `https://www.googleapis.com/auth/drive.file`, `https://www.googleapis.com/auth/drive.appdata`.
    - Add your Google account as a **test user** while the app is in *Testing* status.
 
 5. **Create a Firestore database** — in *Firestore → Create database*.

@@ -267,6 +267,7 @@ const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
 
 /// Fetch the authenticated user's Google profile.
 pub fn get_google_user_info(app: &AppHandle) -> Result<GoogleUserInfo, String> {
+    let _session = crate::session::current(app)?;
     let token = get_access_token(app)?;
     fetch_user_info_with_token(&token)
 }
