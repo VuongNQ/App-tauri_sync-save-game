@@ -2,6 +2,11 @@ mod admin;
 mod devices;
 mod drive_mgmt;
 mod firestore;
+mod firebase_auth;
+mod firestore_http;
+mod auth_identity;
+mod secret_store;
+mod session;
 mod gdrive;
 mod gdrive_auth;
 mod game_operations;
@@ -182,14 +187,30 @@ fn save_auth_tokens(
     payload: SaveTokensPayload,
 ) -> Result<AuthStatus, String> {
     let _operation = game_operations::acquire_exclusive()?;
+    let account_change = session::change()?;
+    watcher::ensure_no_active_sessions(&app)?;
     let status = gdrive_auth::save_tokens_from_plugin(&app, payload)?;
+    session::advance();
+    watcher::reset_for_account(&app);
+    drop(account_change);
     drop(_operation);
+    let _ = tauri::Emitter::emit(&app,"auth-status-changed",&status);
+    let expected=session::capture(&app).ok_or("Account session unavailable")?;
 
     // After every login: restore library + settings from Firestore (with Drive migration
     // fallback), then sync all save files.
     let app_clone = app.clone();
     std::thread::spawn(move || {
+        let Ok(_session)=session::lease(&app_clone,&expected) else {return};
         let mut library_changed = false;
+        // Create/update the profile after releasing the account-change write gate.
+        if let Ok(info)=gdrive_auth::get_google_user_info(&app_clone) {
+            if let Some(user_id)=gdrive_auth::get_current_user_id(&app_clone) {
+                let _=firestore::ensure_current_user_profile(&app_clone,&user_id,&info);
+            }
+        }
+        let refreshed=AuthStatus {authenticated:true,user_id:gdrive_auth::get_current_user_id(&app_clone),role:firestore::current_user_role(&app_clone)};
+        let _=tauri::Emitter::emit(&app_clone,"auth-status-changed",refreshed);
 
         match settings::fetch_all_from_firestore(&app_clone) {
             Ok(true) => {
@@ -234,6 +255,7 @@ fn save_auth_tokens(
             }
         }
 
+        watcher::refresh_watchers(&app_clone);
         let _ = library_changed; // suppress unused warning when library was already up-to-date
     });
 
@@ -243,6 +265,7 @@ fn save_auth_tokens(
 /// Return OAuth client credentials so the frontend can pass them to the plugin.
 #[tauri::command]
 fn get_oauth_credentials() -> Result<OAuthCredentials, String> {
+    firebase_auth::ensure_config()?;
     let client_id = gdrive_auth::get_client_id()?;
     let client_secret = gdrive_auth::get_client_secret();
     Ok(OAuthCredentials {
@@ -254,7 +277,12 @@ fn get_oauth_credentials() -> Result<OAuthCredentials, String> {
 #[tauri::command]
 fn logout(app: tauri::AppHandle) -> Result<AuthStatus, String> {
     let _operation = game_operations::acquire_exclusive()?;
-    gdrive_auth::logout(&app)
+    let _account_change=session::change()?;
+    watcher::ensure_no_active_sessions(&app)?;
+    let status=gdrive_auth::logout(&app)?;
+    session::advance();
+    watcher::reset_for_account(&app);
+    Ok(status)
 }
 
 #[tauri::command]
@@ -341,7 +369,7 @@ async fn upload_game_logo(
     game_id: String,
     logo_source: String,
 ) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || gdrive::upload_game_logo(&app, &game_id, &logo_source))
+    session::spawn_blocking(app.clone(), move || gdrive::upload_game_logo(&app, &game_id, &logo_source))
         .await
         .map_err(|e| format!("Logo upload task failed: {e}"))?
 }
@@ -362,7 +390,7 @@ async fn get_logo_data_url(
     app: tauri::AppHandle,
     thumbnail: String,
 ) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+    session::spawn_blocking(app.clone(), move || {
         let file_id = if let Some(id) = thumbnail.strip_prefix("drive-file:") {
             id.to_string()
         } else if let Some(id) = thumbnail.strip_prefix("gdrive-img://localhost/") {
@@ -389,7 +417,7 @@ async fn list_game_drive_files_flat(
     app: tauri::AppHandle,
     game_id: String,
 ) -> Result<Vec<DriveFileFlatItem>, String> {
-    tokio::task::spawn_blocking(move || drive_mgmt::list_game_drive_files_flat(&app, &game_id))
+    session::spawn_blocking(app.clone(), move || drive_mgmt::list_game_drive_files_flat(&app, &game_id))
         .await
         .map_err(|e| format!("List flat drive files task failed: {e}"))?
 }
@@ -400,7 +428,7 @@ async fn list_game_drive_files(
     game_id: String,
     folder_id: Option<String>,
 ) -> Result<Vec<DriveFileItem>, String> {
-    tokio::task::spawn_blocking(move || {
+    session::spawn_blocking(app.clone(), move || {
         drive_mgmt::list_game_drive_files(&app, &game_id, folder_id.as_deref())
     })
     .await
@@ -416,7 +444,7 @@ async fn rename_game_drive_file(
     new_name: String,
     is_folder: bool,
 ) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
+    session::spawn_blocking(app.clone(), move || {
         drive_mgmt::rename_game_drive_file(&app, &game_id, &file_id, &old_name, &new_name, is_folder)
     })
     .await
@@ -432,7 +460,7 @@ async fn move_game_drive_file(
     new_parent_id: String,
     old_parent_id: String,
 ) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
+    session::spawn_blocking(app.clone(), move || {
         drive_mgmt::move_game_drive_file(
             &app,
             &game_id,
@@ -454,7 +482,7 @@ async fn delete_game_drive_file(
     file_name: String,
     is_folder: bool,
 ) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
+    session::spawn_blocking(app.clone(), move || {
         drive_mgmt::delete_game_drive_file(&app, &game_id, &file_id, &file_name, is_folder)
     })
     .await
@@ -467,7 +495,7 @@ async fn create_version_backup(
     game_id: String,
     label: Option<String>,
 ) -> Result<DriveVersionBackup, String> {
-    tokio::task::spawn_blocking(move || drive_mgmt::create_version_backup(&app, &game_id, label))
+    session::spawn_blocking(app.clone(), move || drive_mgmt::create_version_backup(&app, &game_id, label))
         .await
         .map_err(|e| format!("Create backup task failed: {e}"))?
 }
@@ -477,7 +505,7 @@ async fn list_version_backups(
     app: tauri::AppHandle,
     game_id: String,
 ) -> Result<Vec<DriveVersionBackup>, String> {
-    tokio::task::spawn_blocking(move || drive_mgmt::list_version_backups(&app, &game_id))
+    session::spawn_blocking(app.clone(), move || drive_mgmt::list_version_backups(&app, &game_id))
         .await
         .map_err(|e| format!("List backups task failed: {e}"))?
 }
@@ -488,7 +516,7 @@ async fn restore_version_backup(
     game_id: String,
     backup_folder_id: String,
 ) -> Result<SyncResult, String> {
-    tokio::task::spawn_blocking(move || {
+    session::spawn_blocking(app.clone(), move || {
         drive_mgmt::restore_version_backup(&app, &game_id, &backup_folder_id)
     })
     .await
@@ -501,7 +529,7 @@ async fn delete_version_backup(
     game_id: String,
     backup_folder_id: String,
 ) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
+    session::spawn_blocking(app.clone(), move || {
         drive_mgmt::delete_version_backup(&app, &game_id, &backup_folder_id)
     })
     .await
@@ -510,14 +538,14 @@ async fn delete_version_backup(
 
 #[tauri::command]
 async fn sync_game(app: tauri::AppHandle, game_id: String) -> Result<SyncResult, String> {
-    tokio::task::spawn_blocking(move || sync::sync_game(&app, &game_id))
+    session::spawn_blocking(app.clone(), move || sync::sync_game(&app, &game_id))
         .await
         .map_err(|e| format!("Sync task failed: {e}"))?
 }
 
 #[tauri::command]
 async fn sync_all_games(app: tauri::AppHandle) -> Result<Vec<SyncResult>, String> {
-    tokio::task::spawn_blocking(move || sync::sync_all_games(&app))
+    session::spawn_blocking(app.clone(), move || sync::sync_all_games(&app))
         .await
         .map_err(|e| format!("Sync all task failed: {e}"))?
 }
@@ -527,7 +555,7 @@ async fn check_sync_structure_diff(
     app: tauri::AppHandle,
     game_id: String,
 ) -> Result<SyncStructureDiff, String> {
-    tokio::task::spawn_blocking(move || sync::check_sync_structure_diff(&app, &game_id))
+    session::spawn_blocking(app.clone(), move || sync::check_sync_structure_diff(&app, &game_id))
         .await
         .map_err(|e| format!("Diff check task failed: {e}"))?
 }
@@ -537,7 +565,7 @@ async fn restore_from_cloud(
     app: tauri::AppHandle,
     game_id: String,
 ) -> Result<SyncResult, String> {
-    tokio::task::spawn_blocking(move || sync::restore_from_cloud(&app, &game_id))
+    session::spawn_blocking(app.clone(), move || sync::restore_from_cloud(&app, &game_id))
         .await
         .map_err(|e| format!("Restore task failed: {e}"))?
 }
@@ -547,7 +575,7 @@ async fn push_to_cloud(
     app: tauri::AppHandle,
     game_id: String,
 ) -> Result<SyncResult, String> {
-    tokio::task::spawn_blocking(move || sync::push_to_cloud(&app, &game_id))
+    session::spawn_blocking(app.clone(), move || sync::push_to_cloud(&app, &game_id))
         .await
         .map_err(|e| format!("Push task failed: {e}"))?
 }
@@ -557,7 +585,7 @@ async fn clean_excluded_drive_files(
     app: tauri::AppHandle,
     game_id: String,
 ) -> Result<DashboardData, String> {
-    tokio::task::spawn_blocking(move || {
+    session::spawn_blocking(app.clone(), move || {
         sync::clean_not_included_from_cloud_all_paths(&app, &game_id)?;
         let mut state = settings::load_state(&app)?;
         settings::apply_path_overrides(&mut state.games, &state.settings);
@@ -612,7 +640,7 @@ fn launch_game_locked(app: &tauri::AppHandle, game_id: &str) -> Result<(), Strin
 /// Hold the same gate from preparation through launch. No force-restore here.
 #[tauri::command]
 async fn sync_and_launch_game(app: tauri::AppHandle, game_id: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
+    session::spawn_blocking(app.clone(), move || {
         let _operation = game_operations::acquire(&game_id)?;
         let state = settings::load_state(&app)?;
         let game = settings::find_game(&state, &game_id)?;
@@ -663,7 +691,7 @@ fn toggle_auto_sync(
 
 #[tauri::command]
 async fn get_devices(app: tauri::AppHandle) -> Result<Vec<DeviceInfo>, String> {
-    tokio::task::spawn_blocking(move || devices::get_devices_cmd(&app)).await.map_err(|e| e.to_string())?
+    session::spawn_blocking(app.clone(), move || devices::get_devices_cmd(&app)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -672,7 +700,7 @@ async fn rename_device(
     device_id: String,
     name: String,
 ) -> Result<Vec<DeviceInfo>, String> {
-    tokio::task::spawn_blocking(move || devices::rename_device_cmd(&app, device_id, name))
+    session::spawn_blocking(app.clone(), move || devices::rename_device_cmd(&app, device_id, name))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -682,7 +710,7 @@ async fn remove_device(
     app: tauri::AppHandle,
     device_id: String,
 ) -> Result<Vec<DeviceInfo>, String> {
-    tokio::task::spawn_blocking(move || devices::remove_device_cmd(&app, device_id))
+    session::spawn_blocking(app.clone(), move || devices::remove_device_cmd(&app, device_id))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -704,9 +732,12 @@ pub fn run() {
 
             // Register this device in Firestore (if already authenticated — e.g. on subsequent launches)
             let app_for_device = app.handle().clone();
-            std::thread::spawn(move || {
-                devices::register_current_device(&app_for_device);
-            });
+            if let Some(expected)=session::capture(&app_for_device) {
+                std::thread::spawn(move || {
+                    let Ok(_lease)=session::lease(&app_for_device,&expected) else {return};
+                    devices::register_current_device(&app_for_device);
+                });
+            }
 
             // Set up system tray icon and context menu
             tray::setup_tray(app).map_err(|e| e.to_string())?;

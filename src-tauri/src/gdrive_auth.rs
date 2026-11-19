@@ -1,5 +1,4 @@
 use std::{
-    fs,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -8,8 +7,7 @@ use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
-    firestore,
-    http_client,
+    firestore, http_client,
     models::{AuthStatus, GoogleUserInfo, OAuthTokens, SaveTokensPayload},
 };
 
@@ -30,11 +28,9 @@ const TOKEN_FILE_NAME: &str = "oauth-tokens.json";
 
 fn require_client_id() -> Result<(), String> {
     if CLIENT_ID.is_empty() {
-        return Err(
-            "GOOGLE_CLIENT_ID is not configured. \
+        return Err("GOOGLE_CLIENT_ID is not configured. \
              Add it to src-tauri/.env (see .env.example)."
-                .into(),
-        );
+            .into());
     }
     println!(
         "[gdrive_auth] CLIENT_ID loaded: {}... (Desktop app)",
@@ -55,173 +51,151 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-// ── Public API ────────────────────────────────────────────
+pub(crate) static TOKEN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Check if we already have a valid (non-expired) access token.
 pub fn check_auth_status(app: &AppHandle) -> Result<AuthStatus, String> {
     require_client_id()?;
-
-    let tokens = match load_tokens(app) {
-        Some(t) => t,
-        None => {
-            return Ok(AuthStatus {
-                authenticated: false,
-                role: crate::models::UserRole::User,
-            })
-        }
-    };
-
-    if now_secs() < tokens.expires_at {
-        spawn_profile_sync(app);
+    let _session = crate::session::read()?;
+    let Some(tokens) = load_tokens(app)? else {
         return Ok(AuthStatus {
-            authenticated: true,
-            role: firestore::current_user_role(app),
+            authenticated: false,
+            user_id: None,
+            role: crate::models::UserRole::User,
+        });
+    };
+    if tokens.user_id.is_empty() {
+        return Ok(AuthStatus {
+            authenticated: false,
+            user_id: None,
+            role: crate::models::UserRole::User,
         });
     }
-
-    // Token expired — try silent refresh
-    match refresh_access_token(app, &tokens) {
-        Ok(_) => {
-            spawn_profile_sync(app);
-            Ok(AuthStatus {
-                authenticated: true,
-                role: firestore::current_user_role(app),
-            })
-        }
-        Err(_) => {
-            delete_tokens(app)?;
-            Ok(AuthStatus {
-                authenticated: false,
-                role: crate::models::UserRole::User,
-            })
-        }
-    }
+    // Network failures must not delete a usable local/offline session.
+    let role = firestore::current_user_role(app);
+    spawn_profile_sync(app);
+    Ok(AuthStatus {
+        authenticated: true,
+        user_id: Some(tokens.user_id),
+        role,
+    })
 }
 
 fn spawn_profile_sync(app: &AppHandle) {
-    let app_clone = app.clone();
+    let Some(expected) = crate::session::capture(app) else {
+        return;
+    };
+    let app = app.clone();
     std::thread::spawn(move || {
-        sync_current_user_profile(&app_clone);
+        let Ok(_lease) = crate::session::lease(&app, &expected) else {
+            return;
+        };
+        sync_current_user_profile(&app);
     });
 }
 
 fn sync_current_user_profile(app: &AppHandle) {
-    let user_id = match get_current_user_id(app) {
-        Some(id) => id,
-        None => return,
+    let Some(user_id) = get_current_user_id(app) else {
+        return;
     };
-    match get_google_user_info(app) {
-        Ok(info) => {
-            if let Err(e) = firestore::ensure_current_user_profile(app, &user_id, &info) {
-                eprintln!("[firestore] Failed to sync current user profile: {e}");
-            }
+    if let Ok(info) = get_google_user_info(app) {
+        if let Err(e) = firestore::ensure_current_user_profile(app, &user_id, &info) {
+            eprintln!("[firestore] Profile refresh failed: {e}");
         }
-        Err(e) => eprintln!("[gdrive_auth] Could not refresh current user profile: {e}"),
     }
 }
 
-/// Delete local tokens and return to unauthenticated state.
 pub fn logout(app: &AppHandle) -> Result<AuthStatus, String> {
-    delete_tokens(app)?;
+    let _lock = TOKEN_LOCK
+        .lock()
+        .map_err(|_| "Credential store unavailable")?;
+    crate::secret_store::delete(&tokens_path(app)?)?;
+    crate::secret_store::delete(&legacy_tokens_path(app)?)?;
     let status = AuthStatus {
         authenticated: false,
+        user_id: None,
         role: crate::models::UserRole::User,
     };
     let _ = app.emit("auth-status-changed", &status);
-    println!("[gdrive_auth] Logged out — tokens deleted");
     Ok(status)
 }
 
-/// Return a valid access token, silently refreshing if expired.
-/// For use by internal Rust modules (e.g. future gdrive.rs).
-#[allow(dead_code)]
 pub fn get_access_token(app: &AppHandle) -> Result<String, String> {
-    let tokens = load_tokens(app).ok_or("Not authenticated — no tokens stored")?;
-    if now_secs() < tokens.expires_at {
+    let _lock = TOKEN_LOCK
+        .lock()
+        .map_err(|_| "Credential refresh unavailable")?;
+    get_access_token_locked(app)
+}
+
+pub(crate) fn get_access_token_locked(app: &AppHandle) -> Result<String, String> {
+    let tokens = load_tokens(app)?.ok_or("Not authenticated")?;
+    if tokens.expires_at > now_secs() + 60 {
         return Ok(tokens.access_token);
     }
-    // Token expired — refresh silently
-    let refreshed = refresh_access_token(app, &tokens)?;
-    Ok(refreshed.access_token)
+    Ok(refresh_access_token(app, &tokens)?.access_token)
 }
 
-/// Save tokens received from the frontend (via tauri-plugin-google-auth).
-/// Called after the JS plugin's `signIn()` resolves with a TokenResponse.
-/// Immediately fetches userinfo to capture the stable Google account `id`,
-/// which is then stored in the token file to scope per-user local state.
-pub fn save_tokens_from_plugin(app: &AppHandle, payload: SaveTokensPayload) -> Result<AuthStatus, String> {
+pub fn force_refresh_access_token(app: &AppHandle) -> Result<String, String> {
+    let _lock = TOKEN_LOCK
+        .lock()
+        .map_err(|_| "Credential refresh unavailable")?;
+    let old = load_tokens(app)?.ok_or("Not authenticated")?;
+    Ok(refresh_access_token(app, &old)?.access_token)
+}
+
+/// Verify the candidate account BEFORE replacing the old session. Tokens for
+/// both APIs are committed together in one OS-protected file.
+pub fn save_tokens_from_plugin(
+    app: &AppHandle,
+    payload: SaveTokensPayload,
+) -> Result<AuthStatus, String> {
     require_client_id()?;
-
-    let access_token = payload.access_token.clone();
-    let mut tokens = OAuthTokens {
-        access_token: payload.access_token,
-        refresh_token: payload.refresh_token.unwrap_or_default(),
-        expires_at: payload.expires_at.unwrap_or_else(|| now_secs() + 3600),
-        user_id: String::new(),
-    };
-    // Save first so that get_access_token() is functional for subsequent calls.
-    save_tokens(app, &tokens)?;
-
-    // Fetch the stable Google account ID and persist it alongside the tokens.
-    match fetch_user_info_with_token(&access_token) {
-        Ok(info) => {
-            let user_id = info.id.clone();
-            tokens.user_id = user_id.clone();
-            if let Err(e) = save_tokens(app, &tokens) {
-                eprintln!("[gdrive_auth] Failed to persist user_id in token file: {e}");
-            } else {
-                println!("[gdrive_auth] user_id captured: {}", tokens.user_id);
-            }
-
-            if let Err(e) = firestore::ensure_current_user_profile(app, &user_id, &info) {
-                eprintln!("[firestore] Failed to ensure current user profile: {e}");
-            }
-        }
-        Err(e) => {
-            // Non-fatal: library will fall back to the legacy shared path until re-login.
-            eprintln!("[gdrive_auth] Could not fetch user_id at login: {e}");
-        }
+    crate::firebase_auth::ensure_config()?;
+    let info = fetch_user_info_with_token(&payload.access_token)?;
+    if info.id.is_empty() || !info.id.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("Google returned an invalid account identity".into());
     }
-
-    let status = AuthStatus {
-        authenticated: true,
-        role: firestore::current_user_role(app),
+    let firebase = crate::firebase_auth::exchange_google_token(&payload.access_token, &info.id)?;
+    let _lock = TOKEN_LOCK
+        .lock()
+        .map_err(|_| "Credential store unavailable")?;
+    let refresh_token=payload.refresh_token.filter(|s| !s.is_empty()).or_else(|| {
+        load_tokens(app).ok().flatten().filter(|old| old.user_id==info.id).map(|old|old.refresh_token)
+    }).ok_or("Google did not return offline access. Reconnect with consent to obtain a refresh token.")?;
+    let tokens = OAuthTokens {
+        access_token: payload.access_token,
+        refresh_token,
+        expires_at: payload.expires_at.unwrap_or_else(|| now_secs() + 3600),
+        user_id: info.id.clone(),
+        firebase: Some(firebase),
     };
-    let _ = app.emit("auth-status-changed", &status);
-    println!("[gdrive_auth] Tokens saved from plugin sign-in");
-    Ok(status)
+    save_tokens(app, &tokens)?;
+    crate::secret_store::delete(&legacy_tokens_path(app)?)?;
+    Ok(AuthStatus {
+        authenticated: true,
+        user_id: Some(info.id),
+        role: crate::models::UserRole::User,
+    })
 }
-
-// ── Token persistence ─────────────────────────────────────
 
 fn tokens_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
+    Ok(app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Cannot resolve app data dir: {e}"))?;
-    fs::create_dir_all(&dir).map_err(|e| format!("Cannot create app data dir: {e}"))?;
-    Ok(dir.join(TOKEN_FILE_NAME))
+        .map_err(|_| "Cannot resolve credential directory")?
+        .join("oauth-session.dpapi"))
 }
-
-fn load_tokens(app: &AppHandle) -> Option<OAuthTokens> {
-    let path = tokens_path(app).ok()?;
-    let content = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&content).ok()
+fn legacy_tokens_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "Cannot resolve credential directory")?
+        .join(TOKEN_FILE_NAME))
 }
-
-fn save_tokens(app: &AppHandle, tokens: &OAuthTokens) -> Result<(), String> {
-    let path = tokens_path(app)?;
-    let json = serde_json::to_string_pretty(tokens)
-        .map_err(|e| format!("Cannot serialize tokens: {e}"))?;
-    crate::safe_files::atomic_write(&path, json.as_bytes())
+pub(crate) fn load_tokens(app: &AppHandle) -> Result<Option<OAuthTokens>, String> {
+    crate::secret_store::load(&tokens_path(app)?, Some(&legacy_tokens_path(app)?))
 }
-
-fn delete_tokens(app: &AppHandle) -> Result<(), String> {
-    let path = tokens_path(app)?;
-    if path.exists() {
-        fs::remove_file(&path).map_err(|e| format!("Cannot delete token file: {e}"))?;
-    }
-    Ok(())
+pub(crate) fn save_tokens(app: &AppHandle, tokens: &OAuthTokens) -> Result<(), String> {
+    crate::secret_store::save(&tokens_path(app)?, tokens)
 }
 
 // ── Token refresh ─────────────────────────────────────────
@@ -246,22 +220,30 @@ fn refresh_access_token(app: &AppHandle, old: &OAuthTokens) -> Result<OAuthToken
         urlencoding::encode(&old.refresh_token),
     );
     if !CLIENT_SECRET.is_empty() {
-        form_body.push_str(&format!("&client_secret={}", urlencoding::encode(CLIENT_SECRET)));
+        form_body.push_str(&format!(
+            "&client_secret={}",
+            urlencoding::encode(CLIENT_SECRET)
+        ));
     }
 
     let (http_status, resp_body) = post_form(TOKEN_ENDPOINT, &form_body)?;
     if http_status != 200 {
-        return Err(format!("Token refresh failed (HTTP {http_status}): {resp_body}"));
+        return Err(format!(
+            "Google session refresh failed (HTTP {http_status}); reconnect if access was revoked"
+        ));
     }
-    let tr: TokenResponse = serde_json::from_str(&resp_body)
-        .map_err(|e| format!("Failed to parse refresh response: {e}"))?;
+    let tr: TokenResponse =
+        serde_json::from_str(&resp_body).map_err(|_| "Invalid Google refresh response")?;
 
     let new_tokens = OAuthTokens {
         access_token: tr.access_token,
-        refresh_token: tr.refresh_token.unwrap_or_else(|| old.refresh_token.clone()),
+        refresh_token: tr
+            .refresh_token
+            .unwrap_or_else(|| old.refresh_token.clone()),
         expires_at: now_secs() + tr.expires_in.unwrap_or(3600),
         // Preserve the stable user_id across refreshes — it never changes.
         user_id: old.user_id.clone(),
+        firebase: old.firebase.clone(),
     };
 
     save_tokens(app, &new_tokens)?;
@@ -293,7 +275,9 @@ pub fn get_google_user_info(app: &AppHandle) -> Result<GoogleUserInfo, String> {
 fn fetch_user_info_with_token(token: &str) -> Result<GoogleUserInfo, String> {
     let (status, body) = http_client::get_with_token(USERINFO_URL, token)?;
     if status != 200 {
-        return Err(format!("Userinfo failed (HTTP {status}): {body}"));
+        return Err(format!(
+            "Google account verification failed (HTTP {status})"
+        ));
     }
 
     #[derive(Deserialize)]
@@ -304,8 +288,7 @@ fn fetch_user_info_with_token(token: &str) -> Result<GoogleUserInfo, String> {
         picture: Option<String>,
     }
 
-    let raw: Raw = serde_json::from_str(&body)
-        .map_err(|e| format!("Parse userinfo: {e}"))?;
+    let raw: Raw = serde_json::from_str(&body).map_err(|e| format!("Parse userinfo: {e}"))?;
 
     Ok(GoogleUserInfo {
         id: raw.id,
@@ -318,7 +301,7 @@ fn fetch_user_info_with_token(token: &str) -> Result<GoogleUserInfo, String> {
 /// Return the stable Google account numeric ID stored in the local token file.
 /// Returns `None` if the token file is missing, unreadable, or predates user_id capture.
 pub fn get_current_user_id(app: &AppHandle) -> Option<String> {
-    let tokens = load_tokens(app)?;
+    let tokens = load_tokens(app).ok().flatten()?;
     if tokens.user_id.is_empty() {
         None
     } else {

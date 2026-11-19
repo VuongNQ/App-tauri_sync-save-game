@@ -1,0 +1,14 @@
+{
+  "name": "save-game-sync-security-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "firebase --config ../firebase.json emulators:exec --only firestore --project demo-save-game-sync \"node --test rules.test.mjs\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "firebase": "^13.4.0",
+    "firebase-admin": "^14.5.1",
+    "firebase-tools": "^15.37.0"
+  }
+}

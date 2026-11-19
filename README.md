@@ -62,7 +62,7 @@ src-tauri/src/
 
 ## Save Safety
 
-See [save safety and rollout](docs/save-safety.md) for recovery locations, upgrade behavior, validation and the remaining account, cross-device and handheld-platform roadmap.
+See [account security and activation](docs/account-security.md) and [save safety and rollout](docs/save-safety.md) for recovery locations, upgrade behavior, validation and the remaining account, cross-device and handheld-platform roadmap.
 
 ## Play Time Tracking
 
@@ -108,9 +108,9 @@ appDataFolder/
 ## Authentication
 
 - Uses `tauri-plugin-google-auth` — browser-based OAuth with no local HTTP server.
-- Scopes: `openid`, `email`, `profile`, `drive.file`, `drive.appdata`, `https://www.googleapis.com/auth/datastore`.
+- Scopes: `openid`, `email`, `profile`, `drive.file`, `drive.appdata`. Firestore uses a separate Firebase Authentication ID token and deployed Security Rules.
 - `CLIENT_ID`, `CLIENT_SECRET`, and `GOOGLE_CLOUD_PROJECT_ID` are compiled into the Rust binary via `option_env!()` — never stored in frontend code.
-- Tokens are persisted to `{app_data_dir}/oauth-tokens.json`.
+- Tokens are persisted in a Windows-user-protected DPAPI session file. Legacy plaintext credentials migrate after a verified protected write. See [account security](docs/account-security.md).
 
 > Existing users upgrading from a build without the `datastore` scope must re-authenticate once.
 
@@ -173,10 +173,11 @@ Before running the app locally you must configure a Google Cloud project with th
    GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
    GOOGLE_CLIENT_SECRET=your-client-secret
    GOOGLE_CLOUD_PROJECT_ID=your-gcp-project-id
+   FIREBASE_WEB_API_KEY=the-same-project-firebase-web-api-key
    ```
    These are injected at compile time via `option_env!()` in `build.rs` and are **never** exposed to the frontend directly.
 
-> For CI/CD, add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CLOUD_PROJECT_ID` as GitHub repository secrets instead of using `.env`.
+> For CI/CD, add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CLOUD_PROJECT_ID`, and `FIREBASE_WEB_API_KEY` as GitHub repository secrets instead of using `.env`.
 
 ---
 
@@ -214,7 +215,7 @@ Releases are published automatically via GitHub Actions when a `release-prod-*` 
 2. Builds and signs the Windows installer.
 3. Publishes a GitHub Release using that tag, with `latest.json` for the in-app updater.
 
-Required repository secrets: `GITHUB_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CLOUD_PROJECT_ID`, `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+Required repository secrets: `GITHUB_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CLOUD_PROJECT_ID`, `FIREBASE_WEB_API_KEY`, `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 ### Generating the Signing Key
 
@@ -239,5 +240,5 @@ This outputs:
 ## Security Notes
 
 - OAuth credentials are **never** stored in frontend code — served only through a Tauri command from the compiled Rust binary.
-- Tokens are stored as plain JSON at `{app_data_dir}/oauth-tokens.json` (OS keyring migration is a future enhancement).
+- Google and Firebase tokens are stored with Windows DPAPI under the current OS user. New clients never use a plaintext fallback. See [activation and IAM prerequisites](docs/account-security.md).
 - CSP in `tauri.conf.json` restricts connections to `accounts.google.com`, `oauth2.googleapis.com`, `www.googleapis.com`, `firestore.googleapis.com`, and `localhost`.

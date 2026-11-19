@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Keep existing numeric Google IDs. Firebase UIDs must never be substituted
+    // into legacy paths or accepted as proof of another Google identity.
+    function googleIds() {
+      return request.auth == null ? [] : request.auth.token.get('firebase', {}).get('identities', {}).get('google.com', []);
+    }
+    function owner(id) { return request.auth != null && id in googleIds(); }
+    function admin() {
+      return googleIds().size() > 0
+        && exists(/databases/$(database)/documents/roles/$(googleIds()[0]))
+        && get(/databases/$(database)/documents/roles/$(googleIds()[0])).data.role == 'admin';
+    }
+    function validProfile(id) {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['userId','email','name','picture','role','registeredAt','lastSeenAt'])
+        && d.userId == id && d.email == request.auth.token.email
+        && d.registeredAt is string && d.lastSeenAt is string
+        && d.role in ['user','admin'];
+    }
+    match /userProfiles/{id} {
+      allow get: if owner(id) || admin();
+      allow list: if admin();
+      allow create: if owner(id) && validProfile(id) && request.resource.data.role == 'user';
+      // Old profile.role is preserved for compatibility, never authoritative.
+      allow update: if owner(id) && validProfile(id)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['email','name','picture','lastSeenAt']);
+      allow delete: if false;
+    }
+    match /roles/{id} {
+      allow get: if owner(id) || admin();
+      allow list: if admin();
+      // The first admin is seeded with a trusted Admin SDK tool, never a client.
+      allow create, update: if admin() && !owner(id)
+        && request.resource.data.keys().hasOnly(['role'])
+        && request.resource.data.role in ['user','admin'];
+      allow delete: if admin() && !owner(id);
+    }
+    match /adminConfig/global {
+      allow read: if googleIds().size() > 0;
+      allow create, update: if admin()
+        && request.resource.data.keys().hasOnly(['driveQuotaBytes'])
+        && request.resource.data.driveQuotaBytes is int
+        && request.resource.data.driveQuotaBytes > 0;
+      allow delete: if false;
+    }
+    match /users/{id}/games/{game} {
+      allow read, delete: if owner(id);
+      allow create, update: if owner(id)
+        && request.resource.data.id == game
+        && request.resource.data.name is string
+        && request.resource.data.get('totalPlayTimeSeconds', 0) is int
+        && request.resource.data.get('totalPlayTimeSeconds', 0) >= 0;
+    }
+    match /users/{id}/settings/app {
+      allow read, delete: if owner(id);
+      allow create, update: if owner(id)
+        && request.resource.data.syncIntervalMinutes is int
+        && request.resource.data.syncIntervalMinutes >= 0
+        && request.resource.data.syncIntervalMinutes <= 1440
+        && request.resource.data.startMinimised is bool
+        && request.resource.data.runOnStartup is bool;
+    }
+    match /users/{id}/devices/{device} { allow read, write: if owner(id); }
+    match /users/{id}/syncMeta/{game} { allow read, write: if owner(id); }
+    // Unmatched collections/subcollections, including nested role paths, are denied.
+  }
+}

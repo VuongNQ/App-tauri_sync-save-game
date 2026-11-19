@@ -6,7 +6,8 @@ import { HashRouter, Routes, Route, Navigate } from "react-router";
 import { AppLayout } from "./components/AppLayout";
 import { AdminGuard } from "./components/AdminGuard";
 import { AuthGuard } from "./components/AuthGuard";
-import { AUTH_STATUS_KEY, DASHBOARD_KEY, DEVICES_KEY, gamePlayingKey, gameSyncingKey, gameSyncResultKey } from "./queries/keys";
+import { DASHBOARD_KEY, DEVICES_KEY, gamePlayingKey, gameSyncingKey, gameSyncResultKey } from "./queries/keys";
+import { applyAuthStatus } from "./queries/authCache";
 import { useAppUpdateQuery } from "./queries";
 import type { SyncResult } from "./types/dashboard";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -48,7 +49,7 @@ function useAuthStatusCallbacks() {
 
   useEffect(() => {
     const unlistenPromise = listen<AuthStatus>("auth-status-changed", ({ payload }) => {
-      queryClient.setQueryData<AuthStatus>(AUTH_STATUS_KEY, payload);
+      void applyAuthStatus(queryClient, payload);
     });
 
     // Refresh the game library when a cloud restore completes after first login.

@@ -129,10 +129,12 @@ pub struct UpdateGamePayload {
 pub struct AuthStatus {
     pub authenticated: bool,
     #[serde(default)]
+    pub user_id: Option<String>,
+    #[serde(default)]
     pub role: UserRole,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct OAuthTokens {
     pub access_token: String,
     pub refresh_token: String,
@@ -140,6 +142,17 @@ pub struct OAuthTokens {
     /// Stable Google account numeric ID (populated at login, empty on old token files).
     #[serde(default)]
     pub user_id: String,
+    #[serde(default)]
+    pub firebase: Option<FirebaseTokens>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct FirebaseTokens {
+    pub id_token: String,
+    pub refresh_token: String,
+    pub expires_at: u64,
+    pub uid: String,
+    pub project_id: String,
 }
 
 /// Payload received from the frontend after plugin-based Google sign-in.

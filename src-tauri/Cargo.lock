@@ -1178,6 +1178,7 @@ dependencies = [
  "urlencoding",
  "walkdir",
  "winreg",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
