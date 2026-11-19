@@ -621,8 +621,8 @@ function MoveFileModal({ fileName, gameFolderId, subfolders, onMove, onCancel }:
       open
       className="m-auto max-w-105 w-full rounded-3xl border border-[rgba(165,185,255,0.12)] bg-[rgba(14,22,40,0.97)] p-6 text-[#eef4ff] shadow-[0_32px_80px_rgba(0,0,0,0.5)] backdrop:bg-[rgba(0,0,0,0.55)]"
     >
-      <h3 className="m-0 mb-2 text-lg font-semibold">Move "{fileName}"</h3>
-      <p className="m-0 mb-4 text-sm text-[#9aa8c7]">Choose a destination folder within this game's Drive folder.</p>
+      <h3 className="m-0 mb-2 text-lg font-semibold">Move &quot;{fileName}&quot;</h3>
+      <p className="m-0 mb-4 text-sm text-[#9aa8c7]">Choose a destination folder within this game&apos;s Drive folder.</p>
       <ul className="list-none p-0 grid gap-2 mb-5">
         <li>
           <label className="flex items-center gap-3 p-3 rounded-xl cursor-pointer hover:bg-white/5">

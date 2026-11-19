@@ -57,6 +57,7 @@ export function VersionBackupsSection({ gameId }: Props) {
 
       {isOpen && (
         <div className="mt-5 grid gap-4">
+          <p className={`m-0 text-xs ${MUTED}`}>These snapshots cover root files in the primary save path. Nested saves and additional paths require separate recovery.</p>
           {/* Create backup area */}
           {!showCreateForm ? (
             <button

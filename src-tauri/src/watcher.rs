@@ -398,3 +398,22 @@ pub fn flush_active_playtime(app: &AppHandle) {
         }
     }
 }
+
+/// Check the live process list, rather than relying on the last 7-second UI poll.
+/// A missing executable name cannot prove whether a game is running, so users
+/// should configure it even when automatic tracking is disabled.
+pub fn ensure_game_stopped(app: &AppHandle, game_id: &str) -> Result<(), String> {
+    let state = settings::load_state(app)?;
+    let game = settings::find_game(&state, game_id)?;
+    #[cfg(target_os = "windows")]
+    if let Some(exe) = game.exe_name.as_deref().filter(|exe| !exe.is_empty()) {
+        use sysinfo::{ProcessesToUpdate, System};
+        let mut sys = System::new();
+        sys.refresh_processes(ProcessesToUpdate::All, true);
+        if sys.processes().values().any(|p| p.name().to_string_lossy().eq_ignore_ascii_case(exe)) {
+            return Err("SAVE_PLAYING: Close the game before changing its saves.".into());
+        }
+    }
+    let _ = game;
+    Ok(())
+}

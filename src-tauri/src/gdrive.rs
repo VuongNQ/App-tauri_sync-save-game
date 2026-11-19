@@ -1,11 +1,10 @@
-﻿use std::{
+use std::{
     fs,
-    io,
     path::Path,
 };
 
 use serde::Deserialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::{
     gdrive_auth,
@@ -397,6 +396,11 @@ pub fn upload_file(
     let file_bytes = fs::read(local_path)
         .map_err(|e| format!("Cannot read file {}: {e}", local_path.display()))?;
 
+    // Fail closed: the previous cloud bytes must be recoverable before PATCH.
+    if let Some(file_id) = existing_file_id {
+        preserve_cloud_file(app, folder_id, file_id)?;
+    }
+
     let boundary = format!("----boundary{}", fastrand::u64(..));
 
     let metadata = if existing_file_id.is_some() {
@@ -537,17 +541,13 @@ pub fn download_file(app: &AppHandle, file_id: &str, local_dest: &Path) -> Resul
         ));
     }
 
-    if let Some(parent) = local_dest.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Cannot create directory {}: {e}", parent.display()))?;
-    }
-
-    // Stream response directly to disk — avoids ureq's 10 MB in-memory body limit.
-    let mut file = fs::File::create(local_dest)
-        .map_err(|e| format!("Cannot create file {}: {e}", local_dest.display()))?;
+    let expected_size = resp.headers().get("content-length")
+        .and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
+    let recovery_root = app.path().app_data_dir()
+        .map_err(|e| format!("Cannot resolve recovery directory: {e}"))?
+        .join("save-recovery");
     let mut reader = resp.into_body().into_reader();
-    io::copy(&mut reader, &mut file)
-        .map_err(|e| format!("Failed to read download body: {e}"))?;
+    crate::safe_files::replace_from_reader(local_dest, &mut reader, expected_size, Some(&recovery_root))?;
 
     println!(
         "[gdrive] Downloaded {file_id} → {}",
@@ -1163,5 +1163,23 @@ pub fn delete_drive_file(app: &AppHandle, file_id: &str) -> Result<(), String> {
         return Err(format!("Delete Drive file {file_id} failed (HTTP {status}): {body}"));
     }
     println!("[gdrive] Deleted Drive file {file_id}");
+    Ok(())
+}
+
+/// Save a recoverable, per-file cloud version before an explicit/automatic overwrite.
+/// Each record is isolated from live .sync-meta.json; a failed backup aborts PATCH.
+pub fn preserve_cloud_file(app: &AppHandle, folder_id: &str, file_id: &str) -> Result<(), String> {
+    let recovery_root = ensure_subfolder(app, folder_id, "recovery")?;
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+    let recovery = ensure_subfolder(app, &recovery_root, &format!("{now}-{:016x}", fastrand::u64(..)))?;
+    let copy = copy_drive_file(app, file_id, &recovery)?;
+    let (meta, _) = download_sync_meta(app, folder_id)?;
+    let original_path = meta.as_ref().and_then(|m| m.files.iter().find(|e| e.drive_file_id.as_deref() == Some(file_id)))
+        .map(|e| e.path_file.as_str());
+    let record = serde_json::json!({
+        "createdTime": now, "originalFileId": file_id, "originalFolderId": folder_id,
+        "pathFile": original_path, "recoveryFileId": copy.id, "name": copy.name, "size": copy.size,
+    });
+    upload_json_to_folder(app, &recovery, ".recovery-meta.json", record.to_string().as_bytes(), None)?;
     Ok(())
 }
