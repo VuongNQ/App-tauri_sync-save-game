@@ -16,9 +16,9 @@ export function AuthGuard() {
     );
   }
 
-  if (!authStatus?.authenticated) {
+  if (!authStatus?.authenticated || !authStatus.userId) {
     return <Navigate to="/login" replace />;
   }
 
-  return <Outlet />;
+  return <Outlet key={authStatus.userId} />;
 }

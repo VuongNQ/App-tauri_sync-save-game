@@ -11,3 +11,12 @@ export async function applyAuthStatus(queryClient: QueryClient, status: AuthStat
   }
   queryClient.setQueryData<AuthStatus>(AUTH_STATUS_KEY, status);
 }
+
+/** Mutations cannot be cancelled like queries. Ignore callbacks from old screens/accounts. */
+export function accountResult<T>(queryClient: QueryClient, apply: (data: T) => unknown) {
+  const owner = queryClient.getQueryData<AuthStatus>(AUTH_STATUS_KEY)?.userId;
+  return (data: T) => {
+    const current = queryClient.getQueryData<AuthStatus>(AUTH_STATUS_KEY);
+    if (owner && current?.authenticated && current.userId === owner) apply(data);
+  };
+}

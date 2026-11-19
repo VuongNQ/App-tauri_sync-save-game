@@ -12,16 +12,16 @@ export function LoginPage() {
   const resetSession = useLogoutMutation();
 
   useEffect(() => {
-    if (authStatus?.authenticated) {
+    if (authStatus?.authenticated && authStatus.userId) {
       navigate("/", { replace: true });
     }
-  }, [authStatus?.authenticated, navigate]);
+  }, [authStatus?.authenticated, authStatus?.userId, navigate]);
 
   async function handleLogin() {
     await login.mutateAsync();
   }
 
-  const isRedirecting = authStatus?.authenticated === true;
+  const isRedirecting = authStatus?.authenticated === true && !!authStatus.userId;
 
   return (
     <div className="grid min-h-screen place-items-center p-6">

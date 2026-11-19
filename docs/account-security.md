@@ -76,7 +76,10 @@ when accounts change and are rebuilt after the next library restore. A tracked
 running game must exit first so its playtime can be saved.
 
 On the frontend, an account change cancels in-flight queries and clears all
-account-specific caches before installing the new auth status. Role refreshes
+account-specific caches before installing the new auth status. Mutation cache
+callbacks also verify their original account; delayed mutation replies cannot
+repopulate another account's cache. Account route content remounts on ID changes
+to clear component-local state. Role refreshes
 for the same account keep its library cache. Rust sign-out succeeds before the
 Google plugin is asked to sign out; a busy backend does not clear plugin state.
 

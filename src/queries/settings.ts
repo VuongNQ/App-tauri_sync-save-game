@@ -1,3 +1,4 @@
+import { accountResult } from "./authCache";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { clearAllDriveData, getSettings, updateSettings } from "../services/tauri";
@@ -15,7 +16,7 @@ export function useUpdateSettingsMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (settings: AppSettings) => updateSettings(settings),
-    onSuccess: (data: AppSettings) => queryClient.setQueryData<AppSettings>(SETTINGS_KEY, data),
+    onSuccess: accountResult(queryClient, (data: AppSettings) => queryClient.setQueryData<AppSettings>(SETTINGS_KEY, data)),
   });
 }
 
@@ -23,6 +24,6 @@ export function useClearAllDriveMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: clearAllDriveData,
-    onSuccess: (data: DashboardData) => queryClient.setQueryData<DashboardData>(DASHBOARD_KEY, data),
+    onSuccess: accountResult(queryClient, (data: DashboardData) => queryClient.setQueryData<DashboardData>(DASHBOARD_KEY, data)),
   });
 }

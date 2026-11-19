@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { QueryClient } from '@tanstack/react-query';
-import { applyAuthStatus } from '../src/queries/authCache.ts';
+import { applyAuthStatus, accountResult } from '../src/queries/authCache.ts';
 
 test('switching accounts clears library, devices, admin and per-game caches',async()=>{
   const q=new QueryClient();
@@ -31,4 +31,23 @@ test('role refresh for the same account preserves its library cache',async()=>{
   q.setQueryData(['dashboard'],{owner:'A'});
   await applyAuthStatus(q,{authenticated:true,userId:'A',role:'admin'});
   assert.deepEqual(q.getQueryData(['dashboard']),{owner:'A'}); q.clear();
+});
+
+test('late mutation completion cannot restore a previous account library',async()=>{
+  const q=new QueryClient();
+  q.setQueryData(['auth-status'],{authenticated:true,userId:'A',role:'user'});
+  const apply=accountResult(q,data=>q.setQueryData(['dashboard'],data));
+  apply({owner:'A'});
+  assert.deepEqual(q.getQueryData(['dashboard']),{owner:'A'});
+  let finish,started;
+  const ready=new Promise(resolve=>{started=resolve});
+  const mutation=q.getMutationCache().build(q,{
+    mutationFn:()=>new Promise(resolve=>{finish=resolve;started()}),
+    onSuccess:apply,
+  });
+  const pending=mutation.execute(undefined); await ready;
+  await applyAuthStatus(q,{authenticated:true,userId:'B',role:'user'});
+  finish({owner:'A'}); await pending;
+  assert.equal(q.getQueryData(['dashboard']),undefined);
+  assert.equal(q.getQueryData(['auth-status']).userId,'B');q.clear();
 });
