@@ -438,6 +438,20 @@ pub struct LocalSyncState {
 /// Snapshot of a single file's state at the time of the last successful sync.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CloudFileState {
+    pub modified_time: Option<String>,
+    pub size: u64,
+    pub drive_file_id: Option<String>,
+}
+
+impl From<&SyncFileEntry> for CloudFileState {
+    fn from(entry: &SyncFileEntry) -> Self {
+        Self { modified_time: entry.modified_time.clone(), size: entry.size, drive_file_id: entry.drive_file_id.clone() }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LocalFileRecord {
     /// Relative path within the save folder (forward slashes).
     pub path_file: String,
@@ -445,6 +459,10 @@ pub struct LocalFileRecord {
     pub size: u64,
     /// ISO 8601 UTC timestamp of the file's last modification at the time of last sync.
     pub modified_time: String,
+    /// Exact cloud state observed at the last successful sync. Legacy trackers
+    /// lack this baseline and are handled conservatively on their next sync.
+    #[serde(default)]
+    pub cloud_state: Option<CloudFileState>,
 }
 
 /// Diff between local save files and Drive sync metadata.
@@ -463,6 +481,8 @@ pub struct SyncStructureDiff {
     pub local_newer_files: Vec<String>,
     /// Paths where the Drive version is newer than local.
     pub cloud_newer_files: Vec<String>,
+    #[serde(default)]
+    pub conflict_files: Vec<String>,
     /// `true` when any of the four lists is non-empty.
     pub has_diff: bool,
 }

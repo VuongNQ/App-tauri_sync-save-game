@@ -113,6 +113,7 @@ pub fn rename_game_drive_file(
     new_name: &str,
     is_folder: bool,
 ) -> Result<(), String> {
+    let _operation = crate::game_operations::acquire(game_id)?;
     if old_name == SYNC_META_NAME || old_name == BACKUP_FOLDER_NAME {
         return Err(format!("Cannot rename protected item '{old_name}'"));
     }
@@ -165,6 +166,7 @@ pub fn move_game_drive_file(
     new_parent_id: &str,
     old_parent_id: &str,
 ) -> Result<(), String> {
+    let _operation = crate::game_operations::acquire(game_id)?;
     if file_name == SYNC_META_NAME {
         return Err("Cannot move '.sync-meta.json'".to_string());
     }
@@ -225,6 +227,7 @@ pub fn delete_game_drive_file(
     file_name: &str,
     is_folder: bool,
 ) -> Result<(), String> {
+    let _operation = crate::game_operations::acquire(game_id)?;
     if file_name == SYNC_META_NAME {
         return Err("Cannot delete '.sync-meta.json'".to_string());
     }
@@ -296,6 +299,7 @@ pub fn create_version_backup(
     game_id: &str,
     label: Option<String>,
 ) -> Result<DriveVersionBackup, String> {
+    let _operation = crate::game_operations::acquire(game_id)?;
     let game_folder_id = require_game_folder(app, game_id)?;
 
     // 1. Ensure backups/ subfolder exists.
@@ -417,6 +421,8 @@ pub fn restore_version_backup(
     game_id: &str,
     backup_folder_id: &str,
 ) -> Result<SyncResult, String> {
+    crate::watcher::ensure_game_stopped(app, game_id)?;
+    let _operation = crate::game_operations::acquire(game_id)?;
     let state = settings::load_state(app)?;
     let game = state
         .games
@@ -431,9 +437,17 @@ pub fn restore_version_backup(
         .ok_or("Game has no Drive folder")?
         .to_string();
 
-    let save_path = game.save_path.as_deref().ok_or("Game has no save path")?;
+    let effective_paths = settings::effective_save_paths(&game, &state.settings);
+    let save_path = effective_paths.first().and_then(|p| p.as_deref()).ok_or("Primary save path is not configured on this device")?;
     let expanded = settings::expand_env_vars(save_path);
     let save_dir = Path::new(&expanded);
+
+    let roots = gdrive::list_drive_items(app, &game_folder_id)?;
+    let backups_id = roots.iter().find(|f| f.is_folder && f.name == BACKUP_FOLDER_NAME)
+        .ok_or("No backups folder found for this game")?.id.clone();
+    if !gdrive::list_drive_items(app, &backups_id)?.iter().any(|f| f.is_folder && f.id == backup_folder_id) {
+        return Err("Backup does not belong to this game".into());
+    }
 
     // Snapshot files (excluding .backup-meta.json).
     let backup_items = gdrive::list_drive_items(app, backup_folder_id)?;
@@ -442,25 +456,25 @@ pub fn restore_version_backup(
         .filter(|f| !f.is_folder && f.name != BACKUP_META_NAME)
         .collect();
 
+    for backup_file in &backup_files {
+        crate::safe_files::safe_join(save_dir, &backup_file.name)?;
+    }
+
     // Current root items (for replacing duplicates).
     let root_items = gdrive::list_drive_items(app, &game_folder_id)?;
 
     let mut downloaded: u32 = 0;
 
     for backup_file in &backup_files {
-        // Delete any existing file with the same name from the game folder root.
-        if let Some(existing) = root_items
-            .iter()
-            .find(|f| !f.is_folder && f.name == backup_file.name)
-        {
+        // Create the replacement first. A failed copy must not delete the original.
+        gdrive::copy_drive_file(app, &backup_file.id, &game_folder_id)?;
+        if let Some(existing) = root_items.iter().find(|f| !f.is_folder && f.name == backup_file.name) {
+            gdrive::preserve_cloud_file(app, &game_folder_id, &existing.id)?;
             gdrive::delete_drive_file(app, &existing.id)?;
         }
 
-        // Server-side copy backup file → game root on Drive.
-        gdrive::copy_drive_file(app, &backup_file.id, &game_folder_id)?;
-
         // Download backup file → local save folder.
-        let local_dest = save_dir.join(&backup_file.name);
+        let local_dest = crate::safe_files::safe_join(save_dir, &backup_file.name)?;
         if let Some(parent) = local_dest.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Cannot create directory: {e}"))?;
@@ -514,6 +528,7 @@ pub fn delete_version_backup(
     game_id: &str,
     backup_folder_id: &str,
 ) -> Result<(), String> {
+    let _operation = crate::game_operations::acquire(game_id)?;
     let game_folder_id = require_game_folder(app, game_id)?;
 
     // Find backups/ folder under the game folder.

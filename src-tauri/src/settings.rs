@@ -297,7 +297,7 @@ pub fn save_state(app: &AppHandle, state: &StoredState) -> Result<(), String> {
     let serialized = serde_json::to_string_pretty(state)
         .map_err(|e| format!("Unable to serialize settings: {e}"))?;
 
-    fs::write(&settings_path, serialized).map_err(|e| format!("Unable to write settings file: {e}"))
+    crate::safe_files::atomic_write(&settings_path, serialized.as_bytes())
 }
 
 pub fn add_manual_game(app: &AppHandle, payload: AddGamePayload) -> Result<GameEntry, String> {
@@ -559,6 +559,7 @@ pub fn reconcile_playtime_with_firestore(app: &AppHandle) -> Result<bool, String
 /// Falls back to Drive `library.json` migration if Firestore has no data yet.
 /// Returns `Ok(true)` if data was loaded, `Ok(false)` if no data found anywhere.
 pub fn fetch_all_from_firestore(app: &AppHandle) -> Result<bool, String> {
+    let _operation = crate::game_operations::acquire_exclusive()?;
     let user_id = match crate::gdrive_auth::get_current_user_id(app) {
         Some(id) => id,
         None => {
@@ -567,10 +568,7 @@ pub fn fetch_all_from_firestore(app: &AppHandle) -> Result<bool, String> {
         }
     };
 
-    let firestore_games = firestore::load_all_games(app, &user_id).unwrap_or_else(|e| {
-        eprintln!("[firestore] load_all_games failed: {e}");
-        vec![]
-    });
+    let firestore_games = firestore::load_all_games(app, &user_id)?;
 
     // Migration path: if Firestore has no games, try Drive library.json once.
     if firestore_games.is_empty() {

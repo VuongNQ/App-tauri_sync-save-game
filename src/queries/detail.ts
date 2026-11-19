@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { launchGame, restoreFromCloud } from "../services/tauri";
+import { launchGame, syncAndLaunchGame } from "../services/tauri";
 import type { GameEntry } from "../types/dashboard";
 import { gamePlayingKey } from "./keys";
 
@@ -15,12 +15,8 @@ export const useGamePlaying = (id: string) => {
 
 // ── useSyncAndLaunchFlow ──────────────────────────────────────────────────────
 //
-// Sequence when the user clicks Play:
-//   1. If the game has never been synced (gdriveFolderId is null) → skip restore,
-//      go straight to launch.
-//   2. Otherwise: restore saves from Drive → on success, launch the game.
-//   3. If the restore step fails, surface the error and offer a `forceLaunch`
-//      escape hatch so a network outage never blocks the user from playing.
+// Play checks both local and cloud state in Rust and launches under the same lock.
+// Force launch skips networking, but still respects the shared save-operation gate.
 
 type LaunchPhase = "idle" | "syncing" | "launching";
 
@@ -41,28 +37,19 @@ export function useSyncAndLaunchFlow({ onError }: SyncAndLaunchCallbacks = {}) {
     },
   });
 
-  const restoreMutation = useMutation({
-    mutationFn: (gameId: string) => restoreFromCloud(gameId),
-    onSuccess: (_data, gameId) => {
-      setPhase("launching");
-      launchMutation.mutate(gameId);
-    },
-    onError: (err, _gameId) => {
+  const prepareMutation = useMutation({
+    mutationFn: (gameId: string) => syncAndLaunchGame(gameId),
+    onSuccess: () => setPhase("idle"),
+    onError: (err) => {
       setPhase("idle");
       const message = err instanceof Error ? err.message : String(err);
-      onError?.(message, true);
+      onError?.(message, !message.includes("SAVE_BUSY") && !message.includes("SAVE_PLAYING"));
     },
   });
 
   function start(game: GameEntry) {
-    if (!game.gdriveFolderId) {
-      // No Drive folder yet — nothing to restore, launch directly.
-      setPhase("launching");
-      launchMutation.mutate(game.id);
-      return;
-    }
-    setPhase("syncing");
-    restoreMutation.mutate(game.id);
+    setPhase(game.gdriveFolderId ? "syncing" : "launching");
+    prepareMutation.mutate(game.id);
   }
 
   function forceLaunch(gameId: string) {

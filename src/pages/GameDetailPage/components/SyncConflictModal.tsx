@@ -18,18 +18,19 @@ function SyncConflictModal({ open, diff, onConfirm, onCancel }: SyncConflictModa
   if (!open) return null;
 
   const rows: Array<{ label: string; count: number; warn?: boolean }> = [
+    { label: "Files needing an explicit choice", count: diff.conflictFiles.length, warn: true },
     { label: "Local files not on Drive", count: diff.localOnlyFiles.length },
     {
       label: "Drive files not found locally",
       count: diff.cloudOnlyFiles.length,
     },
     {
-      label: "Local files newer than Drive",
+      label: "Files changed locally",
       count: diff.localNewerFiles.length,
       warn: true,
     },
     {
-      label: "Drive files newer than local",
+      label: "Files changed in Drive",
       count: diff.cloudNewerFiles.length,
       warn: true,
     },
@@ -42,18 +43,18 @@ function SyncConflictModal({ open, diff, onConfirm, onCancel }: SyncConflictModa
   }> = [
     {
       value: "auto",
-      label: "Auto-sync (newest wins)",
-      description: "Each file keeps whichever version was modified most recently.",
+      label: "Safe auto-sync",
+      description: "Sync changes from one side. Stop and keep both copies when both sides changed.",
     },
     {
       value: "restore",
       label: "Restore from Drive",
-      description: "Overwrite local files with the Drive version — even if local is newer.",
+      description: "Use the Drive version. Existing local files are backed up before replacement.",
     },
     {
       value: "push",
       label: "Push local to Drive",
-      description: "Overwrite Drive files with local versions — even if Drive is newer.",
+      description: "Use local versions. Existing cloud files are backed up before replacement.",
     },
   ];
 

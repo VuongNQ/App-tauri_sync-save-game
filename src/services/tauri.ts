@@ -138,6 +138,10 @@ export async function toggleAutoSync(gameId: string, enabled: boolean): Promise<
   return invoke<DashboardData>("toggle_auto_sync", { gameId, enabled });
 }
 
+export async function syncAndLaunchGame(gameId: string): Promise<void> {
+  return invoke<void>("sync_and_launch_game", { gameId });
+}
+
 export async function launchGame(gameId: string): Promise<void> {
   return invoke<void>("launch_game", { gameId });
 }

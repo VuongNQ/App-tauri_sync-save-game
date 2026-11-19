@@ -213,7 +213,7 @@ fn save_tokens(app: &AppHandle, tokens: &OAuthTokens) -> Result<(), String> {
     let path = tokens_path(app)?;
     let json = serde_json::to_string_pretty(tokens)
         .map_err(|e| format!("Cannot serialize tokens: {e}"))?;
-    fs::write(&path, json).map_err(|e| format!("Cannot write token file: {e}"))
+    crate::safe_files::atomic_write(&path, json.as_bytes())
 }
 
 fn delete_tokens(app: &AppHandle) -> Result<(), String> {

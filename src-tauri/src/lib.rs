@@ -4,6 +4,9 @@ mod drive_mgmt;
 mod firestore;
 mod gdrive;
 mod gdrive_auth;
+mod game_operations;
+mod safe_files;
+mod sync_policy;
 mod http_client;
 mod models;
 mod settings;
@@ -64,6 +67,7 @@ fn add_manual_game(
     app: tauri::AppHandle,
     payload: AddGamePayload,
 ) -> Result<DashboardData, String> {
+    let _operation = game_operations::acquire_exclusive()?;
     settings::add_manual_game(&app, payload)?;
     let mut state = settings::load_state(&app)?;
     settings::apply_path_overrides(&mut state.games, &state.settings);
@@ -75,21 +79,16 @@ fn update_game(
     app: tauri::AppHandle,
     payload: UpdateGamePayload,
 ) -> Result<DashboardData, String> {
+    let _operation = game_operations::acquire(&payload.game.id)?;
     // Capture old game state before updating so we can diff.
     let old_game = settings::load_state(&app)
         .ok()
         .and_then(|s| s.games.into_iter().find(|g| g.id == payload.game.id));
 
-    let old_path_includes: Vec<Vec<String>> = old_game
-        .as_ref()
-        .map(|g| g.save_paths.iter().map(|e| e.sync_includes.clone()).collect())
-        .unwrap_or_default();
     let old_track_changes = old_game.map(|g| g.track_changes).unwrap_or(false);
 
-    let new_save_paths = payload.game.save_paths.clone();
     let new_track_changes = payload.game.track_changes;
     let game_id = payload.game.id.clone();
-    let root_drive_folder_id = payload.game.gdrive_folder_id.clone();
 
     settings::upsert_game(&app, payload.game)?;
 
@@ -100,46 +99,8 @@ fn update_game(
         }
     }
 
-    // Build cleanup tasks: (drive_folder_id, new_includes) per path where includes changed.
-    // The cleanup function will remove Drive files not covered by the new inclusion list.
-    // When new_includes is empty (sync-all) the cleanup function is a no-op.
-    let mut cleanup_tasks: Vec<(String, Vec<String>)> = Vec::new();
-    for (i, path_entry) in new_save_paths.iter().enumerate() {
-        let old_includes = old_path_includes.get(i).cloned().unwrap_or_default();
-        if path_entry.sync_includes == old_includes {
-            continue; // No change to this path's filter
-        }
-        let folder_id = if i == 0 {
-            match root_drive_folder_id.clone() {
-                Some(id) => id,
-                None => continue, // Not synced to Drive yet
-            }
-        } else {
-            match path_entry.gdrive_folder_id.clone() {
-                Some(id) => id,
-                None => continue, // Path folder not yet created on Drive
-            }
-        };
-        cleanup_tasks.push((folder_id, path_entry.sync_includes.clone()));
-    }
-
-    if !cleanup_tasks.is_empty() {
-        let app_clone = app.clone();
-        let game_id_clone = game_id.clone();
-        std::thread::spawn(move || {
-            for (folder_id, new_includes) in cleanup_tasks {
-                if let Err(e) = sync::cleanup_not_included_from_cloud(
-                    &app_clone,
-                    &game_id_clone,
-                    &folder_id,
-                    new_includes,
-                ) {
-                    eprintln!("[sync] cleanup_not_included_from_cloud failed: {e}");
-                }
-                // Return value (deleted count) is intentionally ignored here
-            }
-        });
-    }
+    // Changing a selection only changes future sync. Cloud deletion is an
+    // explicit action through clean_excluded_drive_files.
 
     let mut state = settings::load_state(&app)?;
     settings::apply_path_overrides(&mut state.games, &state.settings);
@@ -148,6 +109,7 @@ fn update_game(
 
 #[tauri::command]
 fn remove_game(app: tauri::AppHandle, game_id: String) -> Result<DashboardData, String> {
+    let _operation = game_operations::acquire(&game_id)?;
     // Capture the Drive folder ID before removing from local state.
     let drive_folder_id = settings::load_state(&app)
         .ok()
@@ -174,6 +136,7 @@ fn remove_game(app: tauri::AppHandle, game_id: String) -> Result<DashboardData, 
 
 #[tauri::command]
 fn clear_all_drive_data(app: tauri::AppHandle) -> Result<DashboardData, String> {
+    let _operation = game_operations::acquire_exclusive()?;
     // Delete the entire game-processing-sync root folder on Drive.
     let root_folder_id = gdrive::ensure_root_folder(&app)?;
     gdrive::delete_drive_file(&app, &root_folder_id)?;
@@ -217,7 +180,9 @@ fn save_auth_tokens(
     app: tauri::AppHandle,
     payload: SaveTokensPayload,
 ) -> Result<AuthStatus, String> {
+    let _operation = game_operations::acquire_exclusive()?;
     let status = gdrive_auth::save_tokens_from_plugin(&app, payload)?;
+    drop(_operation);
 
     // After every login: restore library + settings from Firestore (with Drive migration
     // fallback), then sync all save files.
@@ -287,6 +252,7 @@ fn get_oauth_credentials() -> Result<OAuthCredentials, String> {
 
 #[tauri::command]
 fn logout(app: tauri::AppHandle) -> Result<AuthStatus, String> {
+    let _operation = game_operations::acquire_exclusive()?;
     gdrive_auth::logout(&app)
 }
 
@@ -603,6 +569,12 @@ async fn clean_excluded_drive_files(
 
 #[tauri::command]
 fn launch_game(app: tauri::AppHandle, game_id: String) -> Result<(), String> {
+    let _operation = game_operations::acquire(&game_id)?;
+    launch_game_locked(&app, &game_id)
+}
+
+fn launch_game_locked(app: &tauri::AppHandle, game_id: &str) -> Result<(), String> {
+    watcher::ensure_game_stopped(app, game_id)?;
     use tauri_plugin_opener::OpenerExt;
 
     let state = settings::load_state(&app)?;
@@ -627,12 +599,26 @@ fn launch_game(app: tauri::AppHandle, game_id: String) -> Result<(), String> {
     if game.track_changes {
         if let Some(exe) = &game.exe_name {
             if !exe.is_empty() {
-                watcher::arm_on_launch(&app, &game_id, exe);
+                watcher::arm_on_launch(app, game_id, exe);
             }
         }
     }
 
     Ok(())
+}
+
+/// Hold the same gate from preparation through launch. No force-restore here.
+#[tauri::command]
+async fn sync_and_launch_game(app: tauri::AppHandle, game_id: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let _operation = game_operations::acquire(&game_id)?;
+        let state = settings::load_state(&app)?;
+        let game = settings::find_game(&state, &game_id)?;
+        if game.gdrive_folder_id.is_some() {
+            sync::sync_game_locked(&app, &game_id)?;
+        }
+        launch_game_locked(&app, &game_id)
+    }).await.map_err(|e| e.to_string())?
 }
 
 // ── Watcher commands ──────────────────────────────────────
@@ -759,6 +745,7 @@ pub fn run() {
             toggle_track_changes,
             toggle_auto_sync,
             launch_game,
+            sync_and_launch_game,
             validate_save_paths,
             get_browse_default_path,
             expand_save_path,

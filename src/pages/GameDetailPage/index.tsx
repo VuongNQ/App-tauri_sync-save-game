@@ -1,7 +1,7 @@
 import { CARD } from "@/components/styles";
 import { useDashboardQuery } from "@/queries";
 import { useGameSyncingQuery, useGameSyncResultQuery } from "@/queries/sync";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useParams } from "react-router";
 import Header from "./components/Header";
 import { SyncProgressModal } from "./components/SyncProgressModal";
@@ -23,9 +23,11 @@ export function GameDetailPage() {
 
   // Show the progress modal whenever a sync begins; let the modal handle close.
   const [showSyncModal, setShowSyncModal] = useState(false);
-  useEffect(() => {
+  const [previousSyncing, setPreviousSyncing] = useState(isSyncing);
+  if (isSyncing !== previousSyncing) {
+    setPreviousSyncing(isSyncing);
     if (isSyncing) setShowSyncModal(true);
-  }, [isSyncing]);
+  }
 
   const game = dashboard?.games.find((g) => g.id === id) ?? null;
 

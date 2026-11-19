@@ -181,6 +181,7 @@ export interface SyncStructureDiff {
   cloudOnlyFiles: string[];
   localNewerFiles: string[];
   cloudNewerFiles: string[];
+  conflictFiles: string[];
   hasDiff: boolean;
 }
 
