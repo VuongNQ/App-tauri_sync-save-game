@@ -95,7 +95,7 @@ Before releasing, use disposable save folders and a test Google account:
 
 | Milestone | Work | Exit condition |
 |---|---|---|
-| Account security | Inspect live IAM/auth; separate Drive OAuth and Firestore identity; migrate Google ID/Firebase UID safely; trusted admin bootstrap; OS-protected token storage | Two accounts cannot read each other's data or self-promote; existing data survives migration |
+| Account security | Code/Rules, DPAPI and tests prepared in [phase 2](account-security.md); existing Google ID namespaces retained | Activate and verify live project IAM/Auth/Rules and two-account access before release |
 | Cross-device sync | Content hashes, conditional metadata writes, versioned deletion records, multi-path snapshots and recoverable transactions | Concurrent writes and clock skew do not silently discard progress |
 | Background/offline | Persistent task queue, idempotent playtime increments, working interval scheduler, 401 refresh, bounded retry, refresh caching | Restart/network loss retains pending work and does not duplicate playtime |
 | Release | Unified version source, migration rollback, signed-updater upgrade check | Verified upgrade from 0.1.30 with recoverable state |

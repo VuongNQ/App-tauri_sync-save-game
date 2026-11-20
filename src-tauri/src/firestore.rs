@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use crate::{
-    http_client,
+    firestore_http as http_client,
     models::{
         AdminConfig, AppSettings, DeviceInfo, GameEntry, GoogleUserInfo, SyncMeta,
         UserProfile, UserRole, DEFAULT_DRIVE_QUOTA_BYTES,
@@ -142,12 +142,8 @@ pub fn ensure_current_user_profile(
         return Ok(updated);
     }
 
-    let existing_users = load_all_user_profiles(app)?;
-    let role = if existing_users.is_empty() {
-        UserRole::Admin
-    } else {
-        UserRole::User
-    };
+    // First login never grants administration. Only protected role documents do.
+    let role = UserRole::User;
     let now = chrono::Utc::now().to_rfc3339();
     let profile = UserProfile {
         user_id: user_id.to_string(),
@@ -162,17 +158,30 @@ pub fn ensure_current_user_profile(
     Ok(profile)
 }
 
-/// Load the current user's role if a profile exists; defaults to `user` on error.
-pub fn current_user_role(app: &AppHandle) -> UserRole {
-    let user_id = match crate::gdrive_auth::get_current_user_id(app) {
-        Some(id) => id,
-        None => return UserRole::User,
-    };
-    load_user_profile(app, &user_id)
-        .ok()
-        .flatten()
-        .map(|p| p.role)
-        .unwrap_or(UserRole::User)
+/// Only roles/{google_id} is authoritative. Editable legacy profile.role is ignored.
+pub fn current_user_role(app:&AppHandle)->UserRole {
+    crate::gdrive_auth::get_current_user_id(app)
+        .and_then(|id| load_protected_role(app,&id).ok()).unwrap_or(UserRole::User)
+}
+
+pub fn load_protected_role(app:&AppHandle,user_id:&str)->Result<UserRole,String> {
+    let url=format!("{}/roles/{}",base_url(),urlencoding::encode(user_id));
+    let (status,body)=http_client::authed_get(app,&url)?;
+    if status==404 {return Ok(UserRole::User)}
+    if status!=200 {return Err(format!("Cannot load account role (HTTP {status})"))}
+    let doc:Value=serde_json::from_str(&body).map_err(|_| "Invalid role response")?;
+    serde_json::from_value(extract_doc_fields(&doc)["role"].clone()).map_err(|_| "Invalid protected role".into())
+}
+
+pub fn save_protected_role(app:&AppHandle,user_id:&str,role:UserRole)->Result<(),String> {
+    if crate::gdrive_auth::get_current_user_id(app).as_deref()==Some(user_id) {
+        return Err("Administrators cannot change their own role".into());
+    }
+    let body=json!({"fields":{"role":json_to_firestore(&serde_json::to_value(role).map_err(|_| "Invalid role")?)}}).to_string();
+    let url=format!("{}/roles/{}",base_url(),urlencoding::encode(user_id));
+    let (status,_)=http_client::authed_patch_json(app,&url,&body)?;
+    if status!=200 {return Err(format!("Cannot update account role (HTTP {status})"))}
+    Ok(())
 }
 
 /// Write (upsert) a user profile to the global directory collection.
@@ -239,7 +248,10 @@ pub fn load_all_user_profiles(app: &AppHandle) -> Result<Vec<UserProfile>, Strin
     for doc in docs {
         let plain = extract_doc_fields(doc);
         match serde_json::from_value::<UserProfile>(plain) {
-            Ok(p) => profiles.push(p),
+            Ok(mut p) => {
+                p.role=load_protected_role(app,&p.user_id)?;
+                profiles.push(p);
+            },
             Err(e) => eprintln!("[firestore] Skipping malformed user profile doc: {e}"),
         }
     }

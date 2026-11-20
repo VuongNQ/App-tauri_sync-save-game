@@ -110,6 +110,8 @@ pub fn start_poll_thread(app: AppHandle) {
 
         loop {
             std::thread::sleep(Duration::from_secs(7));
+            let Some(expected)=crate::session::capture(&app) else {continue};
+            let Ok(_session)=crate::session::lease(&app,&expected) else {continue};
 
             // 1. Snapshot tracked games (lock → collect → unlock immediately).
             let manager_state = app.state::<Arc<Mutex<WatcherManager>>>();
@@ -267,7 +269,7 @@ pub fn start_poll_thread(app: AppHandle) {
 
 /// Initialize process tracking for all games that have it enabled.
 /// Called once at app startup via `Builder::setup()`.
-pub fn init_watchers(app: &AppHandle) {
+pub fn refresh_watchers(app: &AppHandle) {
     let state = match settings::load_state(app) {
         Ok(s) => s,
         Err(e) => {
@@ -317,6 +319,10 @@ pub fn init_watchers(app: &AppHandle) {
         }
     } // release lock before spawning thread
 
+}
+
+pub fn init_watchers(app:&AppHandle) {
+    refresh_watchers(app);
     start_poll_thread(app.clone());
 }
 
@@ -415,5 +421,24 @@ pub fn ensure_game_stopped(app: &AppHandle, game_id: &str) -> Result<(), String>
         }
     }
     let _ = game;
+    Ok(())
+}
+
+/// Called under the account-change gate. Never retain old account game IDs or
+/// session timers when another account becomes active.
+pub fn reset_for_account(app:&AppHandle) {
+    let state=app.state::<Arc<Mutex<WatcherManager>>>();
+    if let Ok(mut manager)=state.lock() {
+        manager.tracked_games.clear(); manager.playing_games.clear();
+        manager.playing_since.clear(); manager.sync_locks.clear();
+    };
+}
+
+pub fn ensure_no_active_sessions(app:&AppHandle)->Result<(),String> {
+    let state=app.state::<Arc<Mutex<WatcherManager>>>();
+    let manager=state.lock().map_err(|_| "Game tracking unavailable")?;
+    if manager.playing_games.values().any(|playing| *playing) {
+        return Err("ACCOUNT_BUSY: Close tracked games before signing out or switching accounts so playtime can be saved".into());
+    }
     Ok(())
 }

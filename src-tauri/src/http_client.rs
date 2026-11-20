@@ -56,9 +56,10 @@ fn do_authed_get(app: &AppHandle, url: &str) -> Result<(u16, String), String> {
 
 /// Authenticated GET with automatic 401 retry (token refresh + one retry).
 pub fn authed_get(app: &AppHandle, url: &str) -> Result<(u16, String), String> {
+    let _session = crate::session::current(app)?;
     let resp = do_authed_get(app, url)?;
     if resp.0 == 401 {
-        let _ = gdrive_auth::get_access_token(app)?;
+        let _ = gdrive_auth::force_refresh_access_token(app)?;
         return do_authed_get(app, url);
     }
     Ok(resp)
@@ -79,9 +80,10 @@ fn do_authed_post_json(app: &AppHandle, url: &str, body: &str) -> Result<(u16, S
 
 /// Authenticated POST with JSON body and automatic 401 retry.
 pub fn authed_post_json(app: &AppHandle, url: &str, body: &str) -> Result<(u16, String), String> {
+    let _session = crate::session::current(app)?;
     let resp = do_authed_post_json(app, url, body)?;
     if resp.0 == 401 {
-        let _ = gdrive_auth::get_access_token(app)?;
+        let _ = gdrive_auth::force_refresh_access_token(app)?;
         return do_authed_post_json(app, url, body);
     }
     Ok(resp)
@@ -102,9 +104,10 @@ fn do_authed_patch_json(app: &AppHandle, url: &str, body: &str) -> Result<(u16, 
 
 /// Authenticated PATCH with JSON body and automatic 401 retry.
 pub fn authed_patch_json(app: &AppHandle, url: &str, body: &str) -> Result<(u16, String), String> {
+    let _session = crate::session::current(app)?;
     let resp = do_authed_patch_json(app, url, body)?;
     if resp.0 == 401 {
-        let _ = gdrive_auth::get_access_token(app)?;
+        let _ = gdrive_auth::force_refresh_access_token(app)?;
         return do_authed_patch_json(app, url, body);
     }
     Ok(resp)
@@ -124,9 +127,10 @@ fn do_authed_delete(app: &AppHandle, url: &str) -> Result<(u16, String), String>
 
 /// Authenticated DELETE with automatic 401 retry.
 pub fn authed_delete(app: &AppHandle, url: &str) -> Result<(u16, String), String> {
+    let _session = crate::session::current(app)?;
     let resp = do_authed_delete(app, url)?;
     if resp.0 == 401 {
-        let _ = gdrive_auth::get_access_token(app)?;
+        let _ = gdrive_auth::force_refresh_access_token(app)?;
         return do_authed_delete(app, url);
     }
     Ok(resp)

@@ -1,3 +1,4 @@
+import { accountResult } from "./authCache";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getAdminConfig, listUsers, updateAdminConfig, updateUserRole } from "../services/tauri";
@@ -27,7 +28,7 @@ export function useUpdateAdminConfigMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (config: AdminConfig) => updateAdminConfig(config),
-    onSuccess: (data: AdminConfig) => queryClient.setQueryData<AdminConfig>(ADMIN_CONFIG_KEY, data),
+    onSuccess: accountResult(queryClient, (data: AdminConfig) => queryClient.setQueryData<AdminConfig>(ADMIN_CONFIG_KEY, data)),
   });
 }
 
@@ -35,9 +36,9 @@ export function useUpdateUserRoleMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: UserRole }) => updateUserRole(userId, role),
-    onSuccess: (data: UserProfile[]) => {
+    onSuccess: accountResult(queryClient, (data: UserProfile[]) => {
       queryClient.setQueryData<UserProfile[]>(ADMIN_USERS_KEY, data);
       void queryClient.invalidateQueries({ queryKey: AUTH_STATUS_KEY });
-    },
+    }),
   });
 }

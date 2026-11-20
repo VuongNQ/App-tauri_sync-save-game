@@ -22,6 +22,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run test:auth
       - run: npm run lint
       - run: npm run build
 
@@ -53,3 +54,30 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: cargo test --locked --lib --manifest-path src-tauri/Cargo.toml
+
+  firestore-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: security/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci --prefix security
+      - run: npm test --prefix security
+      - run: node --test security/admin-policy.test.mjs
+
+  account-core:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --locked --manifest-path security/rust-tests/Cargo.toml

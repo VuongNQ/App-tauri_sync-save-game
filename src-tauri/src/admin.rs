@@ -1,8 +1,7 @@
 use tauri::AppHandle;
 
 use crate::{
-    firestore,
-    gdrive_auth,
+    firestore, gdrive_auth,
     models::{AdminConfig, UserProfile, UserRole},
 };
 
@@ -19,17 +18,23 @@ fn require_admin(app: &AppHandle) -> Result<String, String> {
 }
 
 pub fn get_admin_config_cmd(app: &AppHandle) -> Result<AdminConfig, String> {
+    let _session = crate::session::current(app)?;
     let _ = require_admin(app)?;
     firestore::load_admin_config(app)
 }
 
-pub fn update_admin_config_cmd(app: &AppHandle, config: AdminConfig) -> Result<AdminConfig, String> {
+pub fn update_admin_config_cmd(
+    app: &AppHandle,
+    config: AdminConfig,
+) -> Result<AdminConfig, String> {
+    let _session = crate::session::current(app)?;
     let _ = require_admin(app)?;
     firestore::save_admin_config(app, &config)?;
     Ok(config)
 }
 
 pub fn list_users_cmd(app: &AppHandle) -> Result<Vec<UserProfile>, String> {
+    let _session = crate::session::current(app)?;
     let _ = require_admin(app)?;
     firestore::load_all_user_profiles(app)
 }
@@ -39,10 +44,10 @@ pub fn update_user_role_cmd(
     user_id: String,
     role: UserRole,
 ) -> Result<Vec<UserProfile>, String> {
+    let _session = crate::session::current(app)?;
     let _ = require_admin(app)?;
-    let mut profile = firestore::load_user_profile(app, &user_id)?
+    firestore::load_user_profile(app, &user_id)?
         .ok_or_else(|| format!("User profile '{user_id}' not found"))?;
-    profile.role = role;
-    firestore::save_user_profile(app, &profile)?;
+    firestore::save_protected_role(app, &user_id, role)?;
     firestore::load_all_user_profiles(app)
 }

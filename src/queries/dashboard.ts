@@ -2,16 +2,17 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/r
 
 import { addManualGame, loadDashboard, removeGame, updateGame, validateSavePaths } from "../services/tauri";
 import type { AddGamePayload, DashboardData, GameEntry } from "../types/dashboard";
+import { accountResult } from "./authCache";
 import { DASHBOARD_KEY, VALIDATE_PATHS_KEY } from "./keys";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function useSetDashboardCache() {
   const queryClient = useQueryClient();
-  return (data: DashboardData) => {
+  return accountResult(queryClient, (data: DashboardData) => {
     queryClient.setQueryData<DashboardData>(DASHBOARD_KEY, data);
-    queryClient.invalidateQueries({ queryKey: VALIDATE_PATHS_KEY });
-  };
+    void queryClient.invalidateQueries({ queryKey: VALIDATE_PATHS_KEY });
+  });
 }
 
 // ─── Query ────────────────────────────────────────────────────────────────────

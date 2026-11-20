@@ -653,17 +653,14 @@ pub fn fetch_all_from_firestore(app: &AppHandle) -> Result<bool, String> {
 
 /// Run a Firestore operation in a background thread.
 /// Skips silently if the user is not authenticated (no `user_id`).
-pub(crate) fn spawn_firestore_task<F>(app: &AppHandle, f: F)
-where
-    F: FnOnce(&AppHandle, &str) -> Result<(), String> + Send + 'static,
-{
-    let app = app.clone();
+pub(crate) fn spawn_firestore_task<F>(app:&AppHandle,f:F)
+where F:FnOnce(&AppHandle,&str)->Result<(),String>+Send+'static {
+    let Some(expected)=crate::session::capture(app) else {return};
+    let Some(user_id)=crate::gdrive_auth::get_current_user_id(app) else {return};
+    let app=app.clone();
     std::thread::spawn(move || {
-        if let Some(user_id) = crate::gdrive_auth::get_current_user_id(&app) {
-            if let Err(e) = f(&app, &user_id) {
-                eprintln!("[firestore] background task failed: {e}");
-            }
-        }
+        let Ok(_lease)=crate::session::lease(&app,&expected) else {return};
+        if let Err(e)=f(&app,&user_id) {eprintln!("[firestore] Background account task failed: {e}")}
     });
 }
 

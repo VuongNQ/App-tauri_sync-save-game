@@ -61,6 +61,7 @@ export interface UpdateGamePayload {
 
 export interface AuthStatus {
   authenticated: boolean;
+  userId: string | null;
   role: UserRole;
 }
 

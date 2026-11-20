@@ -4,7 +4,7 @@ import { signIn, signOut } from "@choochmeque/tauri-plugin-google-auth-api";
 import { checkAuthStatus, getGoogleUserInfo, getOAuthCredentials, logout, saveAuthTokens } from "../services/tauri";
 import type { AuthStatus } from "../types/dashboard";
 import { AUTH_STATUS_KEY, GOOGLE_USER_INFO_KEY } from "./keys";
-import { ADMIN_CONFIG_KEY, ADMIN_USERS_KEY } from "./admin";
+import { applyAuthStatus } from "./authCache";
 
 const SCOPES = [
   "openid",
@@ -12,7 +12,6 @@ const SCOPES = [
   "profile",
   "https://www.googleapis.com/auth/drive.file",
   "https://www.googleapis.com/auth/drive.appdata",
-  "https://www.googleapis.com/auth/datastore",
 ];
 
 export function useAuthStatusQuery() {
@@ -92,7 +91,7 @@ export function useLoginMutation() {
         expiresAt: tokenResponse.expiresAt ?? null,
       });
     },
-    onSuccess: (data: AuthStatus) => queryClient.setQueryData<AuthStatus>(AUTH_STATUS_KEY, data),
+    onSuccess: (data: AuthStatus) => applyAuthStatus(queryClient, data),
   });
 }
 
@@ -100,15 +99,12 @@ export function useLogoutMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (): Promise<AuthStatus> => {
-      await signOut();
-      return logout();
+      // Rust may refuse while work is active. Do not clear plugin state first.
+      const status = await logout();
+      await signOut().catch(() => undefined);
+      return status;
     },
-    onSuccess: (data: AuthStatus) => {
-      queryClient.setQueryData<AuthStatus>(AUTH_STATUS_KEY, data);
-      queryClient.removeQueries({ queryKey: GOOGLE_USER_INFO_KEY });
-      queryClient.removeQueries({ queryKey: ADMIN_USERS_KEY });
-      queryClient.removeQueries({ queryKey: ADMIN_CONFIG_KEY });
-    },
+    onSuccess: (data: AuthStatus) => applyAuthStatus(queryClient, data),
   });
 }
 

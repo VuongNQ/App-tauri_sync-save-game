@@ -569,14 +569,7 @@ pub fn delete_version_backup(
 /// After every successful `upload_sync_meta` to Drive, spawn a background thread
 /// to mirror the same data to Firestore. Drive remains the authoritative read
 /// source — this is a write-only mirror for future cross-device querying.
-fn spawn_sync_meta_mirror(app: &AppHandle, game_id: &str, meta: SyncMeta) {
-    let app = app.clone();
-    let game_id = game_id.to_string();
-    std::thread::spawn(move || {
-        if let Some(user_id) = crate::gdrive_auth::get_current_user_id(&app) {
-            if let Err(e) = crate::firestore::save_sync_meta(&app, &user_id, &game_id, &meta) {
-                eprintln!("[firestore] SyncMeta mirror failed for '{game_id}': {e}");
-            }
-        }
-    });
+fn spawn_sync_meta_mirror(app:&AppHandle,game_id:&str,meta:SyncMeta) {
+    let game_id=game_id.to_owned();
+    settings::spawn_firestore_task(app,move |app,user_id| crate::firestore::save_sync_meta(app,user_id,&game_id,&meta));
 }
