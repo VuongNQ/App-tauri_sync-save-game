@@ -21,7 +21,7 @@ import {
   toggleAutoSync,
   toggleTrackChanges,
 } from "../services/tauri";
-import type { DashboardData, SyncResult } from "../types/dashboard";
+import type { DashboardData, SyncProgress, SyncResult } from "../types/dashboard";
 import {
   DASHBOARD_KEY,
   VALIDATE_PATHS_KEY,
@@ -29,6 +29,7 @@ import {
   driveFilesFlatKey,
   driveFilesFolderKey,
   gameSyncingKey,
+  gameSyncProgressKey,
   gameSyncResultKey,
   saveInfoKey,
   versionBackupsKey,
@@ -262,6 +263,17 @@ export function useGameSyncingQuery(gameId: string): boolean {
 export function useGameSyncResultQuery(gameId: string): SyncResult | null {
   const { data } = useQuery<SyncResult | null>({
     queryKey: gameSyncResultKey(gameId),
+    queryFn: () => null,
+    enabled: false,
+    staleTime: Infinity,
+  });
+  return data ?? null;
+}
+
+/** Live progress of the running sync for the given game, or `null` when idle. Driven by the sync-progress event. */
+export function useGameSyncProgressQuery(gameId: string): SyncProgress | null {
+  const { data } = useQuery<SyncProgress | null>({
+    queryKey: gameSyncProgressKey(gameId),
     queryFn: () => null,
     enabled: false,
     staleTime: Infinity,

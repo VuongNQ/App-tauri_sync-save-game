@@ -4,13 +4,27 @@ use crate::gdrive_auth;
 
 // ── Agent factory ─────────────────────────────────────────
 
-/// Build a ureq Agent that never treats HTTP status codes as errors.
+/// Shared ureq Agent that never treats HTTP status codes as errors.
 /// All callers must inspect `status` themselves.
+///
+/// One process-wide agent keeps a pool of keep-alive connections, so repeated
+/// Drive/Firestore calls reuse an open TLS connection instead of paying a new
+/// TCP + TLS handshake (often 100-300 ms) per request. Cloning an agent shares
+/// the same pool.
 pub fn make_agent() -> ureq::Agent {
-    let config = ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .build();
-    ureq::Agent::new_with_config(config)
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT
+        .get_or_init(|| {
+            let config = ureq::Agent::config_builder()
+                .http_status_as_error(false)
+                .max_idle_connections(16)
+                // Parallel save transfers open several connections to the same host.
+                .max_idle_connections_per_host(8)
+                .timeout_connect(Some(std::time::Duration::from_secs(20)))
+                .build();
+            ureq::Agent::new_with_config(config)
+        })
+        .clone()
 }
 
 // ── Unauthenticated helper ────────────────────────────────

@@ -21,6 +21,8 @@ mod sync_v2;
 mod save_transaction;
 mod cross_device;
 mod drive_gc;
+mod drive_transfer;
+pub mod sync_progress;
 mod tray;
 mod watcher;
 
