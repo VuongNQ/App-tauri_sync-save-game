@@ -48,14 +48,26 @@ struct State {
     last_emit: Option<Instant>,
 }
 
+/// Where progress goes. Type-erased so code paths that never create an
+/// emitting reporter (unit tests) do not link the Tauri event runtime; on
+/// Windows that runtime needs the app manifest and a bare test binary fails to
+/// start without it.
+type Sink = Box<dyn Fn(&SyncProgress) + Send + Sync>;
+
 pub struct Reporter {
-    app: Option<AppHandle>,
+    sink: Option<Sink>,
     state: Mutex<State>,
 }
 
 impl Reporter {
     pub fn new(app: &AppHandle, game_id: &str) -> Self {
-        Self::build(Some(app.clone()), game_id)
+        let app = app.clone();
+        Self::build(
+            Some(Box::new(move |progress: &SyncProgress| {
+                let _ = app.emit(EVENT, progress);
+            })),
+            game_id,
+        )
     }
 
     /// A reporter that only tracks numbers without emitting (tests, callers
@@ -64,9 +76,9 @@ impl Reporter {
         Self::build(None, game_id)
     }
 
-    fn build(app: Option<AppHandle>, game_id: &str) -> Self {
+    fn build(sink: Option<Sink>, game_id: &str) -> Self {
         Self {
-            app,
+            sink,
             state: Mutex::new(State {
                 progress: SyncProgress {
                     game_id: game_id.to_owned(),
@@ -149,8 +161,8 @@ impl Reporter {
             return;
         }
         state.last_emit = Some(now);
-        if let Some(app) = &self.app {
-            let _ = app.emit(EVENT, &state.progress);
+        if let Some(sink) = &self.sink {
+            sink(&state.progress);
         }
     }
 }
