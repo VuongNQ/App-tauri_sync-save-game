@@ -149,9 +149,15 @@ export function SettingsPage() {
               checked={settings.runOnStartup}
               onChange={(v) => toggleSetting("runOnStartup", v)}
             />
+            <ToggleRow
+              label="Pull newer cloud saves on startup"
+              description="Shortly after the app starts, download saves changed on another device if this PC has no unsynced edits. Conflicts are never resolved automatically. Skipped on battery."
+              checked={settings.autoPullOnStartup}
+              onChange={(v) => toggleSetting("autoPullOnStartup", v)}
+            />
           </div>
         ) : (
-          <SettingsSectionSkeleton rows={3} />
+          <SettingsSectionSkeleton rows={4} />
         )}
       </div>
 

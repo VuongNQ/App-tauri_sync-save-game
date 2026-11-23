@@ -1,10 +1,18 @@
 //! Public sync entry points. Every direction uses the same versioned engine.
 use crate::{
-    models::{PathSaveInfo, SaveFileInfo, SaveInfo, SyncResult, SyncStructureDiff},
+    models::{
+        CloudState, CloudStatus, PathSaveInfo, SaveFileInfo, SaveInfo, SyncResult,
+        SyncStructureDiff,
+    },
     settings,
     sync_v2::Mode,
 };
-use std::{fs, path::Path};
+use std::{
+    collections::HashMap,
+    fs,
+    path::Path,
+    sync::{Mutex, OnceLock},
+};
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 struct LocalFileInfo {
@@ -147,6 +155,7 @@ fn run(app: &AppHandle, game_id: &str, mode: Mode) -> Result<SyncResult, String>
     let result = crate::cross_device::execute(app, game_id, mode);
     match &result {
         Ok(value) => {
+            set_cloud_state(game_id, CloudState::UpToDate);
             let _ = app.emit("sync-completed", value);
         }
         Err(error) => {
@@ -204,6 +213,73 @@ pub fn sync_all_games(app: &AppHandle) -> Result<Vec<SyncResult>, String> {
         })
         .collect())
 }
+// ── Startup cloud check ───────────────────────────────────
+
+/// Latest known cloud state per game for this app run (not persisted).
+fn cloud_states() -> &'static Mutex<HashMap<String, CloudState>> {
+    static STATES: OnceLock<Mutex<HashMap<String, CloudState>>> = OnceLock::new();
+    STATES.get_or_init(Default::default)
+}
+
+fn set_cloud_state(game_id: &str, state: CloudState) {
+    if let Ok(mut map) = cloud_states().lock() {
+        map.insert(game_id.to_owned(), state);
+    }
+}
+
+pub fn cloud_statuses() -> Vec<CloudStatus> {
+    cloud_states()
+        .lock()
+        .map(|map| {
+            map.iter()
+                .map(|(game_id, state)| CloudStatus {
+                    game_id: game_id.clone(),
+                    state: *state,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Account switched: forget the previous account's states.
+pub fn clear_cloud_statuses() {
+    if let Ok(mut map) = cloud_states().lock() {
+        map.clear();
+    }
+}
+
+/// Check every game once, one at a time, and fast-forward safe ones when allowed.
+/// Busy or running games are skipped; their own sync paths still cover them.
+pub fn startup_check_all(app: &AppHandle) {
+    let Ok(state) = settings::load_state(app) else {
+        return;
+    };
+    let on_battery = crate::power::on_battery();
+    let auto_pull = state.settings.auto_pull_on_startup && !on_battery;
+    if state.settings.auto_pull_on_startup && on_battery {
+        println!("[startup-check] On battery: checking only, not pulling");
+    }
+    for game in state.games.iter().filter(|g| !g.save_paths.is_empty()) {
+        let Ok(_operation) = crate::game_operations::acquire(&game.id) else {
+            continue;
+        };
+        let outcome = crate::cross_device::startup_check(app, &game.id, auto_pull);
+        match outcome {
+            Ok((cloud_state, result)) => {
+                println!("[startup-check] {}: {:?}", game.id, cloud_state);
+                set_cloud_state(&game.id, cloud_state);
+                if let Some(result) = result {
+                    let _ = app.emit("sync-completed", &result);
+                }
+            }
+            Err(e) => {
+                eprintln!("[startup-check] {} skipped: {e}", game.id);
+            }
+        }
+    }
+    let _ = app.emit("cloud-status-changed", cloud_statuses());
+}
+
 pub fn clean_not_included_from_cloud_all_paths(
     app: &AppHandle,
     game_id: &str,

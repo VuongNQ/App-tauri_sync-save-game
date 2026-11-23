@@ -432,6 +432,7 @@ pub fn reset_for_account(app:&AppHandle) {
         manager.tracked_games.clear(); manager.playing_games.clear();
         manager.playing_since.clear(); manager.sync_locks.clear();
     };
+    crate::sync::clear_cloud_statuses();
 }
 
 pub fn ensure_no_active_sessions(app:&AppHandle)->Result<(),String> {

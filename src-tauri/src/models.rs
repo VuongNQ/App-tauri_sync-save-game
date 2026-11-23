@@ -267,6 +267,11 @@ pub struct AppSettings {
     pub sync_interval_minutes: u32,
     pub start_minimised: bool,
     pub run_on_startup: bool,
+    /// Shortly after the app starts, pull saves that changed on another device when
+    /// this device has no unsynced edits (fast-forward only). Conflicts are never
+    /// resolved automatically. Defaults to on; skipped while running on battery.
+    #[serde(default = "default_auto_pull_on_startup")]
+    pub auto_pull_on_startup: bool,
     /// Device-specific save-path overrides keyed by `game_id` for `save_paths[0]`.
     /// Populated when a path cannot be represented as a portable `%VAR%` token.
     /// **Local-only — never written to Firestore.**
@@ -284,12 +289,17 @@ pub struct AppSettings {
     pub exe_path_overrides: HashMap<String, String>,
 }
 
+fn default_auto_pull_on_startup() -> bool {
+    true
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             sync_interval_minutes: 0,
             start_minimised: false,
             run_on_startup: false,
+            auto_pull_on_startup: true,
             path_overrides: HashMap::new(),
             path_overrides_indexed: HashMap::new(),
             exe_path_overrides: HashMap::new(),
@@ -298,6 +308,29 @@ impl Default for AppSettings {
 }
 
 // ── Sync ──────────────────────────────────────────────────
+
+/// What the startup cloud check found for one game on this device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CloudState {
+    /// The cloud has nothing this device has not already applied.
+    UpToDate,
+    /// No versioned cloud save exists yet.
+    NoCloud,
+    /// Another device published newer saves; this device has no unsynced edits.
+    CloudNewer,
+    /// Both sides changed (or the cloud moved backwards): the user must choose.
+    NeedsReview,
+    /// Newer cloud saves were pulled automatically (fast-forward).
+    Pulled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudStatus {
+    pub game_id: String,
+    pub state: CloudState,
+}
 
 // ── Save Info ─────────────────────────────────────────────
 
