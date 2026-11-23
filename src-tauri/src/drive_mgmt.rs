@@ -45,6 +45,7 @@ pub fn list_game_drive_files_flat(
     app: &AppHandle,
     game_id: &str,
 ) -> Result<Vec<DriveFileFlatItem>, String> {
+    if let Some(items) = crate::cross_device::list_files(app, game_id)? { return Ok(items); }
     let folder_id = require_game_folder(app, game_id)?;
     let mut items = gdrive::list_drive_items_recursive(app, &folder_id, "")?;
 
@@ -114,6 +115,9 @@ pub fn rename_game_drive_file(
     is_folder: bool,
 ) -> Result<(), String> {
     let _operation = crate::game_operations::acquire(game_id)?;
+    if crate::cross_device::has_manifest(app, game_id)? {
+        return Err("Versioned save files cannot be renamed or moved in Drive. Change the local save layout and sync instead.".into());
+    }
     if old_name == SYNC_META_NAME || old_name == BACKUP_FOLDER_NAME {
         return Err(format!("Cannot rename protected item '{old_name}'"));
     }
@@ -167,6 +171,9 @@ pub fn move_game_drive_file(
     old_parent_id: &str,
 ) -> Result<(), String> {
     let _operation = crate::game_operations::acquire(game_id)?;
+    if crate::cross_device::has_manifest(app, game_id)? {
+        return Err("Versioned save files cannot be renamed or moved in Drive. Change the local save layout and sync instead.".into());
+    }
     if file_name == SYNC_META_NAME {
         return Err("Cannot move '.sync-meta.json'".to_string());
     }
@@ -228,6 +235,7 @@ pub fn delete_game_drive_file(
     is_folder: bool,
 ) -> Result<(), String> {
     let _operation = crate::game_operations::acquire(game_id)?;
+    if crate::cross_device::delete_file(app, game_id, file_id)? { return Ok(()); }
     if file_name == SYNC_META_NAME {
         return Err("Cannot delete '.sync-meta.json'".to_string());
     }
@@ -294,67 +302,9 @@ pub fn delete_game_drive_file(
 /// Create a manual version backup: server-side copy all current save files to a
 /// timestamped subfolder inside `backups/` under the game's Drive folder.
 /// Returns the new `DriveVersionBackup` descriptor.
-pub fn create_version_backup(
-    app: &AppHandle,
-    game_id: &str,
-    label: Option<String>,
-) -> Result<DriveVersionBackup, String> {
+pub fn create_version_backup(app: &AppHandle, game_id: &str, label: Option<String>) -> Result<DriveVersionBackup, String> {
     let _operation = crate::game_operations::acquire(game_id)?;
-    let game_folder_id = require_game_folder(app, game_id)?;
-
-    // 1. Ensure backups/ subfolder exists.
-    let backups_folder_id = gdrive::ensure_subfolder(app, &game_folder_id, BACKUP_FOLDER_NAME)?;
-
-    // 2. Build backup folder name: ISO timestamp (+ optional label).
-    let now_iso = chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
-    let backup_folder_name = match label.as_deref() {
-        Some(l) if !l.trim().is_empty() => format!("{now_iso} — {}", l.trim()),
-        _ => now_iso.clone(),
-    };
-
-    // 3. Create timestamped backup subfolder (always unique because of ISO timestamp).
-    let backup_folder_id =
-        gdrive::ensure_subfolder(app, &backups_folder_id, &backup_folder_name)?;
-
-    // 4. List root files in the game folder (exclude .sync-meta.json and folders).
-    let root_items = gdrive::list_drive_items(app, &game_folder_id)?;
-    let files_to_copy: Vec<&DriveFileItem> = root_items
-        .iter()
-        .filter(|f| !f.is_folder && f.name != SYNC_META_NAME)
-        .collect();
-
-    // 5. Server-side copy each file into the backup folder.
-    let total_files = files_to_copy.len() as u32;
-    let mut total_size: u64 = 0;
-
-    for file_item in &files_to_copy {
-        let copied = gdrive::copy_drive_file(app, &file_item.id, &backup_folder_id)?;
-        total_size += copied.size.unwrap_or(0);
-        println!("[gdrive] Backup: copied '{}' to {backup_folder_id}", file_item.name);
-    }
-
-    // 6. Write .backup-meta.json into the backup folder.
-    let backup_meta = BackupMeta {
-        created_time: now_iso.clone(),
-        label: label.map(|l| l.trim().to_string()).filter(|l| !l.is_empty()),
-        total_files,
-        total_size,
-    };
-    let meta_bytes = serde_json::to_vec_pretty(&backup_meta)
-        .map_err(|e| format!("Cannot serialize BackupMeta: {e}"))?;
-    gdrive::upload_json_to_folder(app, &backup_folder_id, BACKUP_META_NAME, &meta_bytes, None)?;
-
-    println!(
-        "[gdrive] Version backup '{backup_folder_name}' created for game {game_id} ({total_files} files)"
-    );
-
-    Ok(DriveVersionBackup {
-        id: backup_folder_id,
-        name: backup_folder_name,
-        created_time: now_iso,
-        total_files,
-        total_size,
-    })
+    crate::cross_device::create_backup(app, game_id, label)
 }
 
 /// List all version backups for a game, sorted newest-first.
@@ -423,6 +373,7 @@ pub fn restore_version_backup(
 ) -> Result<SyncResult, String> {
     crate::watcher::ensure_game_stopped(app, game_id)?;
     let _operation = crate::game_operations::acquire(game_id)?;
+    if let Some(result) = crate::cross_device::restore_backup(app, game_id, backup_folder_id)? { return Ok(result); }
     let state = settings::load_state(app)?;
     let game = state
         .games

@@ -183,6 +183,8 @@ export interface SyncStructureDiff {
   localNewerFiles: string[];
   cloudNewerFiles: string[];
   conflictFiles: string[];
+  localDeletedFiles: string[];
+  cloudDeletedFiles: string[];
   hasDiff: boolean;
 }
 
@@ -222,6 +224,7 @@ export interface DriveFileItem {
  */
 export interface DriveFileFlatItem {
   id: string;
+  contentProtected?: boolean;
   name: string;
   /** Relative path within the game's Drive folder, e.g. `"76561197960271872/Default_0.sav"`. */
   relativePath: string;

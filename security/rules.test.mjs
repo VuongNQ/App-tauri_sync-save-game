@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { before, after, beforeEach, test } from 'node:test';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
 import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc, increment } from 'firebase/firestore';
+import assert from 'node:assert/strict';
 
 let env;
 const A='111111111111111111111', B='222222222222222222222', ADMIN='999999999999999999999';
@@ -78,4 +79,36 @@ test('owner can save settings, device paths and metadata; hidden role paths stay
   await assertSucceeds(setDoc(doc(db(A),`users/${A}/syncMeta/game-a`),{json:'{}'}));
   await assertFails(setDoc(doc(db(A),`users/${A}/roles/admin`),{role:'admin'}));
   await assertFails(updateDoc(doc(db(A),`users/${A}/games/game-a`),{totalPlayTimeSeconds:-1}));
+});
+
+// Exercise the exact REST preconditions used by the Rust publisher. Emulator
+// accepts unsigned test ID tokens; these never leave localhost or a demo project.
+function restToken(id) {
+  const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const now = Math.floor(Date.now()/1000);
+  return `${encode({alg:'none',typ:'JWT'})}.${encode({sub:`firebase-${id}`,user_id:`firebase-${id}`,aud:'demo-save-game-sync',iss:'https://securetoken.google.com/demo-save-game-sync',iat:now,exp:now+3600,auth_time:now,email:`${id}@example.com`,firebase:{sign_in_provider:'google.com',identities:{'google.com':[id]}}})}.`;
+}
+async function restManifest(owner, identity, condition, value) {
+  const url = 'http://127.0.0.1:8080/v1/projects/demo-save-game-sync/databases/(default)/documents:commit';
+  const name = `projects/demo-save-game-sync/databases/(default)/documents/users/${owner}/syncMeta/v2-test`;
+  const response = await fetch(url, {method:'POST', headers:{Authorization:`Bearer ${restToken(identity)}`,'Content-Type':'application/json'}, body:JSON.stringify({writes:[{update:{name,fields:{data:{stringValue:value},gameId:{stringValue:'game-a'},protocol:{integerValue:'2'}}},currentDocument:condition}]})});
+  const body = await response.json();
+  return {status:response.status,body,updateTime:body.writeResults?.[0]?.updateTime};
+}
+test('REST first-sync race has exactly one create winner',async()=>{
+  const results = await Promise.all([restManifest(A,A,{exists:false},'pc'),restManifest(A,A,{exists:false},'handheld')]);
+  assert.equal(results.filter(r=>r.status===200).length,1,JSON.stringify(results));
+  assert.equal(results.filter(r=>r.body.error?.status==='FAILED_PRECONDITION' || r.body.error?.status==='ALREADY_EXISTS').length,1);
+});
+test('REST stale updateTime cannot overwrite another device publication',async()=>{
+  const initial = await restManifest(A,A,{exists:false},'baseline');
+  assert.equal(initial.status,200);
+  assert.equal(typeof initial.updateTime,'string');
+  const condition = {updateTime:initial.updateTime};
+  const results = await Promise.all([restManifest(A,A,condition,'pc-progress'),restManifest(A,A,condition,'handheld-progress')]);
+  assert.equal(results.filter(r=>r.status===200).length,1,JSON.stringify(results));
+  assert.equal(results.filter(r=>r.body.error?.status==='FAILED_PRECONDITION').length,1);
+});
+test('REST versioned manifests remain account-isolated',async()=>{
+  assert.equal((await restManifest(B,A,{exists:false},'forged')).status,403);
 });

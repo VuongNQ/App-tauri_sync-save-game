@@ -4,6 +4,14 @@ description: "Use when: syncing save-game files to Google Drive, implementing sy
 
 # Save-Game Sync Service
 
+Current sync behavior is defined by `docs/cross-device-sync.md` and the
+`cross_device.rs`, `sync_v2.rs`, `save_transaction.rs` modules. The older
+per-path timestamp/mirror descriptions below are migration context only.
+Normal sync, Push, Restore and versioned snapshot restore share the v2
+engine. Do not add a bypass around immutable blobs, Firestore CAS, journaled
+application or versioned deletion records.
+
+
 ## Architecture Overview
 
 The sync system spans five Rust modules and their frontend counterparts:

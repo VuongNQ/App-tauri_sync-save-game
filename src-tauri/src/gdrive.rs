@@ -24,6 +24,8 @@ const CONFIG_FILE_NAME: &str = "config.json";
 
 #[derive(Deserialize)]
 struct FileListResponse {
+    #[serde(rename = "nextPageToken")]
+    next_page_token: Option<String>,
     files: Option<Vec<DriveFileRaw>>,
 }
 
@@ -178,29 +180,29 @@ pub fn ensure_game_folders(app: &AppHandle, game_id: &str) -> Result<(String, St
 
 /// List all files in a Drive folder.
 pub fn list_files(app: &AppHandle, folder_id: &str) -> Result<Vec<DriveFile>, String> {
-    let url = format!(
-        "{DRIVE_FILES_URL}?q=%27{folder_id}%27+in+parents+and+trashed%3Dfalse&spaces=appDataFolder&fields=files(id,name,modifiedTime,size)"
-    );
-    let (status, body) = http_client::authed_get(app, &url)?;
-    if status != 200 {
-        return Err(format!("Failed to list files (HTTP {status}): {body}"));
+    let base = format!("{DRIVE_FILES_URL}?q=%27{folder_id}%27+in+parents+and+trashed%3Dfalse&spaces=appDataFolder&pageSize=1000&fields=nextPageToken,files(id,name,modifiedTime,size)");
+    let mut result = Vec::new();
+    let mut page = String::new();
+    let mut seen = std::collections::BTreeSet::new();
+    loop {
+        let url = format!("{base}{page}");
+        let (status, body) = http_client::authed_get(app, &url)?;
+        if status != 200 { return Err(format!("Cannot list complete Drive save set (HTTP {status})")); }
+        let list: FileListResponse = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+        result.extend(list.files.unwrap_or_default().into_iter().map(DriveFile::from));
+        let Some(next) = list.next_page_token.filter(|s| !s.is_empty()) else { break; };
+        if !seen.insert(next.clone()) { return Err("Drive repeated a pagination token".into()); }
+        page = format!("&pageToken={}", urlencoding::encode(&next));
     }
-
-    let list: FileListResponse =
-        serde_json::from_str(&body).map_err(|e| format!("Parse error: {e}"))?;
-
-    Ok(list
-        .files
-        .unwrap_or_default()
-        .into_iter()
-        .map(DriveFile::from)
-        .collect())
+    Ok(result)
 }
 
 // ── Drive item listing (files + folders with mimeType) ────────────────────────
 
 #[derive(Deserialize)]
 struct DriveItemListResponse {
+    #[serde(rename = "nextPageToken")]
+    next_page_token: Option<String>,
     files: Option<Vec<DriveItemRaw>>,
 }
 
@@ -230,21 +232,20 @@ impl From<DriveItemRaw> for DriveFileItem {
 
 /// List all items (files AND folders) in a Drive folder, with MIME type.
 pub fn list_drive_items(app: &AppHandle, folder_id: &str) -> Result<Vec<DriveFileItem>, String> {
-    let url = format!(
-        "{DRIVE_FILES_URL}?q=%27{folder_id}%27+in+parents+and+trashed%3Dfalse&spaces=appDataFolder&fields=files(id,name,mimeType,modifiedTime,size)"
-    );
-    let (status, body) = http_client::authed_get(app, &url)?;
-    if status != 200 {
-        return Err(format!("Failed to list drive items (HTTP {status}): {body}"));
+    let base = format!("{DRIVE_FILES_URL}?q=%27{folder_id}%27+in+parents+and+trashed%3Dfalse&spaces=appDataFolder&pageSize=1000&fields=nextPageToken,files(id,name,mimeType,modifiedTime,size)");
+    let mut result = Vec::new();
+    let mut page = String::new();
+    let mut seen = std::collections::BTreeSet::new();
+    loop {
+        let (status, body) = http_client::authed_get(app, &format!("{base}{page}"))?;
+        if status != 200 { return Err(format!("Cannot list complete Drive folder (HTTP {status})")); }
+        let list: DriveItemListResponse = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+        result.extend(list.files.unwrap_or_default().into_iter().map(DriveFileItem::from));
+        let Some(next) = list.next_page_token.filter(|s| !s.is_empty()) else { break; };
+        if !seen.insert(next.clone()) { return Err("Drive repeated a pagination token".into()); }
+        page = format!("&pageToken={}", urlencoding::encode(&next));
     }
-    let list: DriveItemListResponse =
-        serde_json::from_str(&body).map_err(|e| format!("Parse drive items error: {e}"))?;
-    Ok(list
-        .files
-        .unwrap_or_default()
-        .into_iter()
-        .map(DriveFileItem::from)
-        .collect())
+    Ok(result)
 }
 
 /// Recursively list every item inside a Drive folder, each carrying its relative path.
@@ -273,6 +274,7 @@ pub fn list_drive_items_recursive(
             is_folder: item.is_folder,
             parent_folder_id: folder_id.to_string(),
             sync_path: None,
+            content_protected: false,
         });
         if item.is_folder {
             let children = list_drive_items_recursive(app, &item.id, &relative_path)?;
@@ -341,7 +343,8 @@ pub fn copy_drive_file(
 
 /// Find or create a named subfolder inside `parent_id`. No caching — always queries Drive.
 pub fn ensure_subfolder(app: &AppHandle, parent_id: &str, name: &str) -> Result<String, String> {
-    let encoded = urlencoding::encode(name);
+    let literal = name.replace('\\', "\\\\").replace('\'', "\\'");
+    let encoded = urlencoding::encode(&literal);
     let url = format!(
         "{DRIVE_FILES_URL}?q=name%3D%27{encoded}%27+and+%27{parent_id}%27+in+parents+and+mimeType%3D%27application%2Fvnd.google-apps.folder%27+and+trashed%3Dfalse&spaces=appDataFolder&fields=files(id,name)"
     );

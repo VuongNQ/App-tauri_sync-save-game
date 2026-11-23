@@ -52,7 +52,10 @@ src-tauri/src/
   gdrive.rs                   # Google Drive API client (upload, download, list, folders)
   firestore.rs                # Firestore REST API client (game library, settings, SyncMeta mirror)
   watcher.rs                  # Process monitor / poller — detects game launch/exit, accumulates play time, triggers sync on exit
-  sync.rs                     # Sync logic: compare timestamps, upload/download newest save
+  sync.rs                     # Sync entry points and event emission
+  cross_device.rs             # Whole-game sync, immutable Drive objects and Firestore CAS
+  sync_v2.rs                  # SHA-256 identity and three-way reconciliation
+  save_transaction.rs         # Multi-path local journal and crash recovery
   drive_mgmt.rs               # Drive file manager + version backup commands
   tray.rs                     # System-tray setup and background lifecycle
   lib.rs                      # Tauri commands wired to handler functions
@@ -61,6 +64,11 @@ src-tauri/src/
 ---
 
 ## Save Safety
+
+Phase 3 introduces content-based, versioned multi-device sync and complete
+multi-path cloud snapshots. See [cross-device sync and upgrade requirements](docs/cross-device-sync.md).
+Upgrade every participating device together; older clients cannot read the v2
+manifest. Save-path ordering/labels must remain stable after migration.
 
 See [account security and activation](docs/account-security.md) and [save safety and rollout](docs/save-safety.md) for recovery locations, upgrade behavior, validation and the remaining account, cross-device and handheld-platform roadmap.
 
@@ -84,7 +92,8 @@ Game library and app settings are stored in **Firestore** — a fully managed No
 users/{user_id}/
   games/{game_id}       # GameEntry document (flat Firestore fields)
   settings/app          # AppSettings document
-  syncMeta/{game_id}    # SyncMeta JSON blob (write-only mirror for future cross-device use)
+  syncMeta/{game_id}    # Legacy per-path mirror (migration compatibility)
+  syncMeta/v2-{hash}     # Authoritative whole-game manifest, conditional publication
 ```
 
 - Writes happen in **background threads** — the UI never blocks on network calls.
@@ -141,6 +150,9 @@ Both save-folder paths and game executable paths are stored with Windows environ
 ---
 
 ## Dev Environment Requirements
+
+Use Rust 1.89 or newer (current stable recommended); the cross-process sync gate
+uses the standard library file-lock API.
 
 ### Google Cloud — OAuth 2.0 & Drive API Setup
 

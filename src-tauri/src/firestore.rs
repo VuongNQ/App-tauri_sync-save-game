@@ -20,6 +20,54 @@ fn base_url() -> String {
     )
 }
 
+// A separate document prevents legacy write-only mirrors from replacing the
+// authoritative v2 manifest. It uses the existing owner-only syncMeta Rules.
+fn v2_url(user_id: &str, game_id: &str) -> String {
+    format!("{}/users/{}/syncMeta/v2-{}", base_url(), urlencoding::encode(user_id), crate::sync_v2::hash_bytes(game_id.as_bytes()))
+}
+
+pub fn load_v2_manifest(app: &AppHandle, user_id: &str, game_id: &str) -> Result<Option<(crate::sync_v2::Manifest, String)>, String> {
+    let (status, body) = http_client::authed_get(app, &v2_url(user_id, game_id))?;
+    if status == 404 { return Ok(None); }
+    if status != 200 { return Err(format!("Cannot read versioned save manifest (HTTP {status})")); }
+    let doc: Value = serde_json::from_str(&body).map_err(|e| format!("Invalid manifest response: {e}"))?;
+    let data = doc["fields"]["data"]["stringValue"].as_str().ok_or("Save manifest is missing data")?;
+    let version = doc["updateTime"].as_str().ok_or("Save manifest is missing server updateTime")?;
+    let manifest = serde_json::from_str(data).map_err(|e| format!("Damaged save manifest; sync stopped: {e}"))?;
+    Ok(Some((manifest, version.to_owned())))
+}
+
+/// Compare-and-swap the WHOLE game's manifest, covering every save path.
+/// Drive objects are immutable and already uploaded before this publication.
+pub fn commit_v2_manifest(app: &AppHandle, user_id: &str, game_id: &str, expected_update: Option<&str>, manifest: &crate::sync_v2::Manifest) -> Result<(), String> {
+    let data = serde_json::to_string(manifest).map_err(|e| e.to_string())?;
+    if data.len() > 900_000 { return Err("Save manifest exceeds the supported document size; no cloud revision published".into()); }
+    let condition = match expected_update {
+        Some(version) => json!({"updateTime": version}),
+        None => json!({"exists": false}),
+    };
+    let name = format!("projects/{PROJECT_ID}/databases/(default)/documents/users/{user_id}/syncMeta/v2-{}", crate::sync_v2::hash_bytes(game_id.as_bytes()));
+    let body = json!({"writes": [{"update": {"name": name, "fields": {"data": {"stringValue": data}, "gameId": {"stringValue": game_id}, "protocol": {"integerValue": "2"}}}, "currentDocument": condition}]}).to_string();
+    let response = http_client::authed_post_json(app, &format!("{}:commit", base_url()), &body);
+    match response {
+        Ok((200 | 201, _)) => Ok(()),
+        Ok((status, ref body)) if matches!(status, 409 | 412)
+            || serde_json::from_str::<Value>(body).ok().is_some_and(|v| v["error"]["status"] == "FAILED_PRECONDITION") =>
+            Err("SAVE_CONFLICT: Another device published a save while this device was syncing. Both versions are retained. Refresh and retry.".into()),
+        other => {
+            // Lost response after a successful commit is not permission to
+            // publish again. Read the exact operation ID to resolve ambiguity.
+            if let Ok(Some((published, _))) = load_v2_manifest(app, user_id, game_id) {
+                if published.commit_id == manifest.commit_id { return Ok(()); }
+            }
+            match other {
+                Ok((status, _)) => Err(format!("Save publication failed (HTTP {status}); local saves unchanged")),
+                Err(error) => Err(format!("Save publication could not be confirmed; retry safely: {error}")),
+            }
+        }
+    }
+}
+
 // ── HTTP helpers delegated to http_client ────────────────
 
 // ── Type converters ───────────────────────────────────────
@@ -407,6 +455,10 @@ pub fn delete_sync_meta(app: &AppHandle, user_id: &str, game_id: &str) -> Result
     let (status, resp_body) = http_client::authed_delete(app, &url)?;
     if status != 200 && status != 204 && status != 404 {
         return Err(format!("[firestore] delete_sync_meta HTTP {status}: {resp_body}"));
+    }
+    let (status, _) = http_client::authed_delete(app, &v2_url(user_id, game_id))?;
+    if !matches!(status, 200 | 204 | 404) {
+        return Err(format!("Cannot remove versioned save manifest (HTTP {status})"));
     }
     println!("[firestore] Deleted syncMeta '{game_id}' for user {user_id}");
     Ok(())
