@@ -6,9 +6,9 @@ import { VersionBackupsSection } from "@/components/VersionBackupsSection";
 import { useGetSaveInfoQuery, useSyncGameMutation } from "@/queries";
 import { DashboardQuery } from "@/queries/dashboard";
 import { useGamePlaying } from "@/queries/detail";
-import { useCleanExcludedDriveFilesMutation } from "@/queries/sync";
+import { useCleanExcludedDriveFilesMutation, useCleanupDriveHistoryMutation } from "@/queries/sync";
 import { expandSavePath } from "@/services/tauri";
-import { msg } from "@/utils";
+import { formatBytes, msg } from "@/utils";
 import { useQueryClient } from "@tanstack/react-query";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
@@ -35,7 +35,9 @@ const TabStatus = () => {
 
   const cleanExcludedMutation = useCleanExcludedDriveFilesMutation();
 
-  const isSyncing = syncMutation.isPending || cleanExcludedMutation.isPending;
+  const cleanupHistoryMutation = useCleanupDriveHistoryMutation();
+
+  const isSyncing = syncMutation.isPending || cleanExcludedMutation.isPending || cleanupHistoryMutation.isPending;
 
   const hasIncludes = game?.savePaths.some((sp) => sp.syncIncludes.length > 0) ?? false;
 
@@ -75,6 +77,30 @@ const TabStatus = () => {
             {cleanExcludedMutation.isPending ? "Cleaning…" : "Remove non-included from Drive"}
           </button>
           <button
+            className={`${SECONDARY_BTN} col-span-full`}
+            type="button"
+            disabled={isSyncing || isGamePlaying}
+            title="Delete old save versions that no current save or kept snapshot uses. Named snapshots are never removed."
+            onClick={() =>
+              cleanupHistoryMutation.mutate(id ?? "", {
+                onSuccess: (r) => {
+                  const parts = [
+                    r.objectsDeleted > 0
+                      ? `Freed ${formatBytes(r.bytesFreed)} (${r.objectsDeleted} old version(s))`
+                      : "Nothing to delete yet",
+                  ];
+                  if (r.snapshotsPruned > 0) parts.push(`${r.snapshotsPruned} expired automatic snapshot(s) removed`);
+                  if (r.objectsPending > 0)
+                    parts.push(`${r.objectsPending} unused version(s) will be deleted by a cleanup after 24 h`);
+                  setToast({ message: parts.join(" · "), type: "success" });
+                },
+                onError: (err) => setToast({ message: msg(err, "Cleanup failed."), type: "error" }),
+              })
+            }
+          >
+            {cleanupHistoryMutation.isPending ? "Cleaning up…" : "Clean up old save versions on Drive"}
+          </button>
+          <button
             className={`${PRIMARY_BTN} col-span-full inline-flex items-center justify-center gap-2`}
             type="button"
             disabled={!primarySavePath || isSyncing}
@@ -100,7 +126,7 @@ const TabStatus = () => {
               })
             }
           >
-            {isSyncing && !cleanExcludedMutation.isPending ? (
+            {syncMutation.isPending ? (
               <>
                 <svg
                   className="animate-spin h-4 w-4 shrink-0"

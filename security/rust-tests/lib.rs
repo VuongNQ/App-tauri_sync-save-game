@@ -25,6 +25,9 @@ pub use v2_harness::{AppHandle, Manager};
 #[path = "../../src-tauri/src/cross_device.rs"]
 mod cross_device;
 #[cfg(test)]
+#[path = "../../src-tauri/src/drive_gc.rs"]
+mod drive_gc;
+#[cfg(test)]
 #[path = "../../src-tauri/src/models.rs"]
 mod models;
 #[cfg(test)]

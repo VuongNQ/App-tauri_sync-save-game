@@ -7,6 +7,7 @@ import type {
   AuthStatus,
   DashboardData,
   DeviceInfo,
+  DriveCleanupReport,
   DriveFileFlatItem,
   DriveFileItem,
   DriveVersionBackup,
@@ -126,6 +127,14 @@ export async function pushToCloud(gameId: string): Promise<SyncResult> {
 /** Delete all Drive files matching the game's current sync exclusions across all save paths. */
 export async function cleanExcludedDriveFiles(gameId: string): Promise<DashboardData> {
   return invoke<DashboardData>("clean_excluded_drive_files", { gameId });
+}
+
+/**
+ * Prune expired automatic snapshots and delete old, unreferenced save versions.
+ * Two-phase: newly found orphans are only deleted by a later cleanup (24 h+).
+ */
+export async function cleanupDriveHistory(gameId: string): Promise<DriveCleanupReport> {
+  return invoke<DriveCleanupReport>("cleanup_drive_history", { gameId });
 }
 
 // ── Watcher toggles ──────────────────────────────────────────────────────────
