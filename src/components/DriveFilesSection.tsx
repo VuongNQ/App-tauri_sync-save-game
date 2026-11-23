@@ -86,9 +86,7 @@ export function DriveFilesSection({ gameId, gameFolderId, savePaths, pathMode = 
               ) : (
                 <ul className="list-none p-0 rounded-[14px] bg-[rgba(255,255,255,0.02)] border border-[rgba(165,185,255,0.06)] overflow-hidden">
                   {/* Root save-path section (save_paths[0]) */}
-                  {otherRoots.length > 0 && savePaths?.[0] && (
-                    <SavePathSectionLabel savePath={savePaths[0]} pathMode={pathMode} />
-                  )}
+                  {otherRoots.length > 0 && savePaths?.[0] && <SavePathSectionLabel savePath={savePaths[0]} pathMode={pathMode} />}
                   {otherRoots.map((node, i) => (
                     <DriveTreeNode
                       key={i}
@@ -154,6 +152,7 @@ type DriveTreeLeaf = {
   modifiedTime: string | null;
   id: string;
   parentFolderId: string;
+  contentProtected: boolean;
 };
 
 type DriveTreeDir = {
@@ -185,6 +184,7 @@ function buildDriveTree(items: DriveFileFlatItem[]): DriveTreeItem[] {
         name: parts[0],
         relativePath: item.relativePath,
         syncPath: item.syncPath ?? null,
+        contentProtected: item.contentProtected ?? false,
         size: item.size,
         modifiedTime: item.modifiedTime,
         id: item.id,
@@ -527,13 +527,13 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders, saveP
                 <button
                   type="button"
                   title="Rename"
-                  disabled={isBusy}
+                  disabled={isBusy || node.contentProtected}
                   className="p-1 rounded-lg text-[#7dc9ff] hover:bg-[rgba(125,201,255,0.1)] transition-colors disabled:opacity-40"
                   onClick={startRename}
                 >
                   ✏️
                 </button>
-                {isAtRoot && (
+                {isAtRoot && !node.contentProtected && (
                   <button
                     type="button"
                     title="Move to subfolder"
@@ -546,7 +546,7 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders, saveP
                 )}
                 <button
                   type="button"
-                  title="Delete from Drive"
+                  title={node.contentProtected ? "Record deletion for all devices" : "Delete from Drive"}
                   disabled={isBusy}
                   className="p-1 rounded-lg text-[#ff9e9e] hover:bg-[rgba(255,100,100,0.1)] transition-colors disabled:opacity-40"
                   onClick={() => setShowDeleteModal(true)}
@@ -581,7 +581,11 @@ function DriveTreeNode({ node, depth, gameId, gameFolderId, topSubfolders, saveP
         <ConfirmModal
           open={showDeleteModal}
           title={`Delete "${node.name}"?`}
-          message={`Delete "${node.name}" from Google Drive? The file will no longer be synced and cannot be recovered.`}
+          message={
+            node.contentProtected
+              ? `Record deletion of "${node.name}" for all devices? Devices apply it on their next sync. Edited copies require conflict resolution, and a recovery snapshot is kept.`
+              : `Delete "${node.name}" from Google Drive? The file will no longer be synced and cannot be recovered.`
+          }
           confirmLabel="Delete"
           onConfirm={handleDeleteConfirm}
           onCancel={() => setShowDeleteModal(false)}

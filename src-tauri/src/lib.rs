@@ -16,6 +16,9 @@ mod http_client;
 mod models;
 mod settings;
 mod sync;
+mod sync_v2;
+mod save_transaction;
+mod cross_device;
 mod tray;
 mod watcher;
 
@@ -125,6 +128,7 @@ fn remove_game(app: tauri::AppHandle, game_id: String) -> Result<DashboardData, 
         .and_then(|s| s.games.into_iter().find(|g| g.id == game_id))
         .and_then(|g| g.gdrive_folder_id);
 
+    cross_device::reset_local_baseline(&app, &game_id)?;
     settings::remove_game(&app, &game_id)?;
 
     // Delete the game's Drive folder (and all saves inside it) in the background.
@@ -161,6 +165,8 @@ fn clear_all_drive_data(app: tauri::AppHandle) -> Result<DashboardData, String> 
             if let Err(e) = firestore::delete_game(&app, &user_id, &game.id) {
                 eprintln!("[firestore] clear_all_drive_data: delete game '{}' failed: {e}", game.id);
             }
+            firestore::delete_sync_meta(&app, &user_id, &game.id)?;
+            cross_device::reset_local_baseline(&app, &game.id)?;
         }
     }
 

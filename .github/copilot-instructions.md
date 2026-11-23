@@ -1,5 +1,18 @@
 # Copilot Instructions — Save Game Sync Tool (Tauri 2 + React 19 + Rust)
 
+## Current protocol authority
+
+The phase-3 save protocol is documented in `docs/cross-device-sync.md`; account
+security is documented in `docs/account-security.md`. These supersede legacy
+flow descriptions below. All sync directions must use `cross_device.rs` through
+`sync.rs`: SHA-256 identity, immutable Drive objects, whole-game Firestore
+compare-and-swap, versioned deletions and recoverable multi-path journals.
+Never restore newest-timestamp-wins, overwrite a published blob, bypass CAS,
+or use Drive OAuth/IAM credentials for Firestore. Protected Google/Firebase
+sessions use Windows DPAPI; Firestore requires Firebase ID tokens. Existing
+numeric Google-ID data namespaces remain unchanged.
+
+
 ## Product Overview
 
 This is a **Windows desktop tool** built with Tauri 2 that tracks and syncs save-game files to Google Drive. Every game's information is **manually input by the user** — the tool does not auto-detect games from launchers. The tool runs in the **system tray** at Windows startup so it can monitor save-game file changes in the background.

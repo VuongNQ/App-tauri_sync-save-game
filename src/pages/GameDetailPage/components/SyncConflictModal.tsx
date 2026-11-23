@@ -20,6 +20,8 @@ function SyncConflictModal({ open, diff, onConfirm, onCancel }: SyncConflictModa
   const rows: Array<{ label: string; count: number; warn?: boolean }> = [
     { label: "Files needing an explicit choice", count: diff.conflictFiles.length, warn: true },
     { label: "Local files not on Drive", count: diff.localOnlyFiles.length },
+    { label: "Local deletions to sync to Drive", count: diff.localDeletedFiles?.length ?? 0, warn: true },
+    { label: "Cloud deletions to apply on this device", count: diff.cloudDeletedFiles?.length ?? 0, warn: true },
     {
       label: "Drive files not found locally",
       count: diff.cloudOnlyFiles.length,
@@ -49,12 +51,12 @@ function SyncConflictModal({ open, diff, onConfirm, onCancel }: SyncConflictModa
     {
       value: "restore",
       label: "Restore from Drive",
-      description: "Use the Drive version. Existing local files are backed up before replacement.",
+      description: "Use the Drive version, including recorded deletions. Existing local files are kept in recovery copies.",
     },
     {
       value: "push",
       label: "Push local to Drive",
-      description: "Use local versions. Existing cloud files are backed up before replacement.",
+      description: "Use local versions and tracked local deletions. Previous cloud versions remain recoverable.",
     },
   ];
 

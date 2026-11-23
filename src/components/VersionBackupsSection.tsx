@@ -57,7 +57,10 @@ export function VersionBackupsSection({ gameId }: Props) {
 
       {isOpen && (
         <div className="mt-5 grid gap-4">
-          <p className={`m-0 text-xs ${MUTED}`}>These snapshots cover root files in the primary save path. Nested saves and additional paths require separate recovery.</p>
+          <p className={`m-0 text-xs ${MUTED}`}>
+            New snapshots include nested files and every save path. Previous versions remain available for recovery. Legacy snapshots have
+            limited coverage.
+          </p>
           {/* Create backup area */}
           {!showCreateForm ? (
             <button
@@ -228,8 +231,8 @@ function BackupRow({ backup, gameId }: BackupRowProps) {
         open={showRestoreModal}
         title="Restore this backup?"
         message={
-          `This will overwrite your current save files — both on Google Drive and locally at your configured save path — with the files from this snapshot.\n\n` +
-          `This action cannot be undone once completed. Make sure you have a recent backup of your current save if needed.`
+          `Restore this snapshot to the configured save folders and cloud? A complete snapshot can also remove tracked files added after it was created.\n\n` +
+          `Previous save versions are retained for recovery. Unconfigured folders and excluded files are preserved.`
         }
         confirmLabel="Restore"
         onConfirm={handleRestoreConfirm}

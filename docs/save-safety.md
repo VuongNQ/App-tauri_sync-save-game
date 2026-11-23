@@ -1,5 +1,11 @@
 # Save safety and rollout
 
+The foundation below describes phase 1. Normal sync, Push and Restore now use
+the [phase 3 versioned engine](cross-device-sync.md), with SHA-256 identity,
+whole-game cloud CAS, tombstones and recoverable multi-path local application.
+Legacy baseline/cloud metadata is preserved for migration, not used as the new
+authoritative sync protocol.
+
 ## Implemented foundation
 
 - Play invokes a single Rust `sync_and_launch_game` command. The operation gate
@@ -96,7 +102,7 @@ Before releasing, use disposable save folders and a test Google account:
 | Milestone | Work | Exit condition |
 |---|---|---|
 | Account security | Code/Rules, DPAPI and tests prepared in [phase 2](account-security.md); existing Google ID namespaces retained | Activate and verify live project IAM/Auth/Rules and two-account access before release |
-| Cross-device sync | Content hashes, conditional metadata writes, versioned deletion records, multi-path snapshots and recoverable transactions | Concurrent writes and clock skew do not silently discard progress |
+| Cross-device sync | Implemented in [phase 3](cross-device-sync.md): content hashes, whole-game CAS, tombstones, multi-path snapshots and recovery journals | Complete the documented live two-device Windows acceptance checks before release |
 | Background/offline | Persistent task queue, idempotent playtime increments, working interval scheduler, 401 refresh, bounded retry, refresh caching | Restart/network loss retains pending work and does not duplicate playtime |
 | Release | Unified version source, migration rollback, signed-updater upgrade check | Verified upgrade from 0.1.30 with recoverable state |
 | Platform expansion | Separate Windows process/path/startup/device adapters, then validate Linux handheld/SteamOS paths and controller-friendly UI | A tested compatibility matrix per OS and save format |

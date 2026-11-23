@@ -479,24 +479,29 @@ pub struct LocalFileRecord {
 }
 
 /// Diff between local save files and Drive sync metadata.
-/// Returned by `check_sync_structure_diff` — no file transfers are performed.
+/// Returned by `check_sync_structure_diff`; live saves and cloud manifests are not changed.
+/// Legacy metadata may require downloading remote bytes to establish content hashes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncStructureDiff {
     pub game_id: String,
-    /// `false` when no `.sync-meta.json` exists on Drive (game never synced).
+    /// `false` when the cloud has no live files or versioned deletion records.
     pub cloud_has_data: bool,
     /// Relative paths that exist locally but have no Drive counterpart.
     pub local_only_files: Vec<String>,
     /// Relative paths present in Drive meta but missing from local.
     pub cloud_only_files: Vec<String>,
-    /// Paths where local `modified_time` is newer than the Drive version.
+    /// Files with local content changes relative to the shared baseline.
     pub local_newer_files: Vec<String>,
-    /// Paths where the Drive version is newer than local.
+    /// Files with cloud content changes relative to the shared baseline.
     pub cloud_newer_files: Vec<String>,
     #[serde(default)]
     pub conflict_files: Vec<String>,
-    /// `true` when any of the four lists is non-empty.
+    #[serde(default)]
+    pub local_deleted_files: Vec<String>,
+    #[serde(default)]
+    pub cloud_deleted_files: Vec<String>,
+    /// `true` when any change, deletion or conflict list is non-empty.
     pub has_diff: bool,
 }
 
@@ -541,6 +546,8 @@ pub struct DriveFileFlatItem {
     /// `"76561198241997832/UserMetaData.sav"`. `None` when the file is not
     /// tracked in SyncMeta (e.g. folders, unsynced files).
     pub sync_path: Option<String>,
+    #[serde(default)]
+    pub content_protected: bool,
 }
 
 /// Metadata written as `.backup-meta.json` inside each version-backup folder on Drive.
