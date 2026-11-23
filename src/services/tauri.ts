@@ -146,6 +146,33 @@ export async function launchGame(gameId: string): Promise<void> {
   return invoke<void>("launch_game", { gameId });
 }
 
+// ── Play shortcuts ───────────────────────────────────────────────────────────
+
+export interface LaunchTarget {
+  gameId: string;
+  name: string;
+  thumbnail: string | null;
+  hasCloud: boolean;
+  canLaunch: boolean;
+}
+
+export async function getLaunchTarget(gameId: string): Promise<LaunchTarget> {
+  return invoke<LaunchTarget>("get_launch_target", { gameId });
+}
+
+export async function getLaunchShortcutUrl(gameId: string): Promise<string> {
+  return invoke<string>("get_launch_shortcut_url", { gameId });
+}
+
+/** Writes `<Game>.url` to the Desktop and returns its path. */
+export async function createDesktopShortcut(gameId: string): Promise<string> {
+  return invoke<string>("create_desktop_shortcut", { gameId });
+}
+
+export async function showDashboard(route?: string): Promise<void> {
+  return invoke<void>("show_dashboard", { route: route ?? null });
+}
+
 // ── Path Validation ──────────────────────────────────────────────────────────
 
 export async function validateSavePaths(): Promise<PathValidation[]> {
@@ -281,4 +308,3 @@ export async function renameDevice(deviceId: string, name: string): Promise<Devi
 export async function removeDevice(deviceId: string): Promise<DeviceInfo[]> {
   return invoke<DeviceInfo[]>("remove_device", { deviceId });
 }
-

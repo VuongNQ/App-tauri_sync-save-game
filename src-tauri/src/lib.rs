@@ -10,6 +10,7 @@ mod session;
 mod gdrive;
 mod gdrive_auth;
 mod game_operations;
+mod launch_shortcut;
 mod safe_files;
 mod sync_policy;
 mod http_client;
@@ -689,6 +690,36 @@ async fn sync_and_launch_game(app: tauri::AppHandle, game_id: String) -> Result<
     }).await.map_err(|e| e.to_string())?
 }
 
+// ── Play shortcut commands ────────────────────────────────
+
+/// `syncsave://launch/<gameId>` for this game, for Steam/Playnite or a custom shortcut.
+#[tauri::command]
+fn get_launch_shortcut_url(game_id: String) -> String {
+    launch_shortcut::launch_url(&game_id)
+}
+
+/// Write a Desktop `.url` shortcut that syncs saves and then starts the game.
+#[tauri::command]
+fn create_desktop_shortcut(app: tauri::AppHandle, game_id: String) -> Result<String, String> {
+    let _session = session::current(&app)?;
+    launch_shortcut::create_desktop_shortcut(&app, &game_id)
+}
+
+#[tauri::command]
+fn get_launch_target(
+    app: tauri::AppHandle,
+    game_id: String,
+) -> Result<launch_shortcut::LaunchTarget, String> {
+    let _session = session::current(&app)?;
+    launch_shortcut::launch_target(&app, &game_id)
+}
+
+/// Show the dashboard from the launcher window, optionally on a route.
+#[tauri::command]
+fn show_dashboard(app: tauri::AppHandle, route: Option<String>) -> Result<(), String> {
+    launch_shortcut::show_main(&app, route.as_deref())
+}
+
 // ── Watcher commands ──────────────────────────────────────
 
 #[tauri::command]
@@ -758,6 +789,14 @@ async fn remove_device(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be first: a second launch (shortcut, deep link, Start menu) hands
+        // its argv to the running tray app instead of starting another copy.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if !launch_shortcut::handle_args(app, &argv) {
+                let _ = launch_shortcut::show_main(app, None);
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_google_auth::init())
@@ -782,12 +821,26 @@ pub fn run() {
             // Set up system tray icon and context menu
             tray::setup_tray(app).map_err(|e| e.to_string())?;
 
+            // Register syncsave:// for this user. The installer registers it too;
+            // this keeps dev builds and moved installs pointing at this exe.
+            #[cfg(windows)]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(e) = app.deep_link().register_all() {
+                    eprintln!("[shortcut] Failed to register {} scheme: {e}", launch_shortcut::URL_SCHEME);
+                }
+            }
+
+            // Started from a play shortcut: open the launcher, keep the dashboard in the tray.
+            let launched_from_shortcut = launch_shortcut::handle_args(app.handle(), std::env::args());
+
             // If "start minimised" is enabled, hide the main window
-            if let Ok(s) = settings::get_settings(app.handle()) {
-                if s.start_minimised {
-                    if let Some(win) = app.get_webview_window("main") {
-                        let _ = win.hide();
-                    }
+            let start_minimised = settings::get_settings(app.handle())
+                .map(|s| s.start_minimised)
+                .unwrap_or(false);
+            if start_minimised || launched_from_shortcut {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.hide();
                 }
             }
 
@@ -821,6 +874,10 @@ pub fn run() {
             toggle_auto_sync,
             launch_game,
             sync_and_launch_game,
+            get_launch_shortcut_url,
+            create_desktop_shortcut,
+            show_dashboard,
+            get_launch_target,
             validate_save_paths,
             get_browse_default_path,
             expand_save_path,
@@ -843,6 +900,10 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() != "main" {
+                    // The launcher window closes normally.
+                    return;
+                }
                 // Hide the window instead of closing — app stays in system tray
                 let _ = window.hide();
                 api.prevent_close();
