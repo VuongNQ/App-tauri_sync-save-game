@@ -7,7 +7,12 @@ export async function applyAuthStatus(queryClient: QueryClient, status: AuthStat
   const previous = queryClient.getQueryData<AuthStatus>(AUTH_STATUS_KEY);
   if (previous?.userId !== status.userId || previous?.authenticated !== status.authenticated) {
     await queryClient.cancelQueries();
-    queryClient.clear();
+    // Keep the auth query attached to AuthGuard/LoginPage observers so they
+    // receive the new session and redirect. clear() would orphan those observers.
+    queryClient.removeQueries({
+      predicate: (query) => query.queryKey[0] !== AUTH_STATUS_KEY[0],
+    });
+    queryClient.getMutationCache().clear();
   }
   queryClient.setQueryData<AuthStatus>(AUTH_STATUS_KEY, status);
 }
