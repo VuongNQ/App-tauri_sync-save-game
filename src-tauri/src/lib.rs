@@ -21,6 +21,7 @@ mod sync;
 mod sync_v2;
 mod save_transaction;
 mod cross_device;
+mod drive_gc;
 mod tray;
 mod watcher;
 
@@ -643,6 +644,16 @@ async fn clean_excluded_drive_files(
     .map_err(|e| format!("Clean excluded task failed: {e}"))?
 }
 
+#[tauri::command]
+async fn cleanup_drive_history(
+    app: tauri::AppHandle,
+    game_id: String,
+) -> Result<models::DriveCleanupReport, String> {
+    session::spawn_blocking(app.clone(), move || sync::cleanup_drive_history(&app, &game_id))
+        .await
+        .map_err(|e| format!("Cleanup task failed: {e}"))?
+}
+
 // ── Launcher command ──────────────────────────────────────
 
 #[tauri::command]
@@ -894,6 +905,7 @@ pub fn run() {
             restore_from_cloud,
             push_to_cloud,
             clean_excluded_drive_files,
+            cleanup_drive_history,
             toggle_track_changes,
             toggle_auto_sync,
             launch_game,

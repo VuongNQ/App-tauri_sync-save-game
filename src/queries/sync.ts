@@ -3,6 +3,7 @@ import { mutationOptions, useMutation, useQuery, useQueryClient } from "@tanstac
 import {
   checkSyncStructureDiff,
   cleanExcludedDriveFiles,
+  cleanupDriveHistory,
   createVersionBackup,
   deleteGameDriveFile,
   deleteVersionBackup,
@@ -117,6 +118,12 @@ export function useCleanExcludedDriveFilesMutation() {
   return useMutation({
     mutationFn: (gameId: string) => cleanExcludedDriveFiles(gameId),
     onSuccess: setCache,
+  });
+}
+
+export function useCleanupDriveHistoryMutation() {
+  return useMutation({
+    mutationFn: (gameId: string) => cleanupDriveHistory(gameId),
   });
 }
 

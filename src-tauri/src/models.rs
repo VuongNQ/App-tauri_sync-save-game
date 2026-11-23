@@ -492,7 +492,11 @@ pub struct CloudFileState {
 
 impl From<&SyncFileEntry> for CloudFileState {
     fn from(entry: &SyncFileEntry) -> Self {
-        Self { modified_time: entry.modified_time.clone(), size: entry.size, drive_file_id: entry.drive_file_id.clone() }
+        Self {
+            modified_time: entry.modified_time.clone(),
+            size: entry.size,
+            drive_file_id: entry.drive_file_id.clone(),
+        }
     }
 }
 
@@ -591,6 +595,18 @@ pub struct BackupMeta {
     pub label: Option<String>,
     pub total_files: u32,
     pub total_size: u64,
+}
+
+/// Result of cleaning up old immutable save objects and automatic snapshots.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveCleanupReport {
+    pub snapshots_pruned: u32,
+    pub objects_deleted: u32,
+    pub bytes_freed: u64,
+    /// Unreferenced objects marked now; deleted by a later run if still unused.
+    pub objects_pending: u32,
+    pub pending_since: Option<String>,
 }
 
 /// A version-backup snapshot shown in the frontend.

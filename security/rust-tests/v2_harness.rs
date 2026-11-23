@@ -19,6 +19,8 @@ pub struct Cloud {
     corrupt_download: bool,
     http_responses: std::collections::VecDeque<Result<(u16, String), String>>,
     http_requests: Vec<(String, String, String)>,
+    deletes: usize,
+    uploads: usize,
 }
 #[derive(Clone)]
 pub struct AppHandle {
@@ -155,6 +157,15 @@ pub mod firestore_http {
 pub mod gdrive {
     use super::*;
     use std::path::Path;
+    /// Every mocked object is "old"; GC tests pass a later `now`.
+    pub const BLOB_TIME: &str = "2026-01-01T00:00:00Z";
+    pub fn delete_drive_file(app: &AppHandle, id: &str) -> Result<(), String> {
+        let mut cloud = app.cloud.lock().unwrap();
+        cloud.deletes += 1;
+        cloud.blobs.remove(id);
+        cloud.folders.retain(|_, v| v != id);
+        Ok(())
+    }
     pub fn ensure_game_folders(_: &AppHandle, _: &str) -> Result<(String, String), String> {
         Ok(("root".into(), "game-folder".into()))
     }
@@ -191,7 +202,7 @@ pub mod gdrive {
                     name: name.clone(),
                     mime_type: "application/octet-stream".into(),
                     size: Some(bytes.len() as u64),
-                    modified_time: None,
+                    modified_time: Some(BLOB_TIME.into()),
                     is_folder: false,
                 });
             }
@@ -257,6 +268,7 @@ pub mod gdrive {
     ) -> Result<String, String> {
         let mut cloud = app.cloud.lock().unwrap();
         cloud.sequence += 1;
+        cloud.uploads += 1;
         let id = format!("blob-{}", cloud.sequence);
         cloud
             .blobs
@@ -593,6 +605,174 @@ mod tests {
         );
         assert_eq!(sync::clean_excluded(&d.a, "game-a").unwrap(), 1);
         assert!(Devices::file(&d.a, 0, "other").exists());
+    }
+
+    fn current_ids(app: &AppHandle) -> Vec<String> {
+        app.cloud
+            .lock()
+            .unwrap()
+            .manifest
+            .as_ref()
+            .unwrap()
+            .0
+            .files
+            .iter()
+            .filter_map(|e| e.object_id.clone())
+            .collect()
+    }
+    fn exists(app: &AppHandle, id: &str) -> bool {
+        app.cloud.lock().unwrap().blobs.contains_key(id)
+    }
+    #[test]
+    fn identical_content_reuses_the_existing_immutable_object() {
+        let d = Devices::new();
+        Devices::write(&d.a, 0, "slot", b"v1");
+        sync::execute(&d.a, "game-a", Mode::Merge).unwrap();
+        let first = current_ids(&d.a)[0].clone();
+        Devices::write(&d.a, 0, "slot", b"v2");
+        sync::execute(&d.a, "game-a", Mode::Merge).unwrap();
+        assert_ne!(current_ids(&d.a)[0], first);
+        // Back to v1: only the "Before sync" snapshot pins the old object.
+        Devices::write(&d.a, 0, "slot", b"v1");
+        let uploads = d.a.cloud.lock().unwrap().uploads;
+        sync::execute(&d.a, "game-a", Mode::Merge).unwrap();
+        assert_eq!(current_ids(&d.a)[0], first);
+        // Only the two snapshot JSON files were written, no save object.
+        assert_eq!(d.a.cloud.lock().unwrap().uploads - uploads, 2);
+        // Two identical files in one sync share one object too.
+        Devices::write(&d.a, 1, "copy", b"same");
+        Devices::write(&d.a, 1, "copy2", b"same");
+        sync::execute(&d.a, "game-a", Mode::Merge).unwrap();
+        let cloud = d.a.cloud.lock().unwrap();
+        let files = &cloud.manifest.as_ref().unwrap().0.files;
+        let a = files
+            .iter()
+            .find(|e| e.key.relative_path == "copy")
+            .unwrap();
+        let b = files
+            .iter()
+            .find(|e| e.key.relative_path == "copy2")
+            .unwrap();
+        assert_eq!(a.object_id, b.object_id);
+        drop(cloud);
+        sync::execute(&d.b, "game-a", Mode::Merge).unwrap();
+        assert_eq!(fs::read(Devices::file(&d.b, 0, "slot")).unwrap(), b"v1");
+    }
+    #[test]
+    fn cleanup_prunes_auto_snapshots_then_deletes_only_confirmed_orphans() {
+        let d = Devices::new();
+        Devices::write(&d.a, 0, "slot", b"version-0");
+        sync::execute(&d.a, "game-a", Mode::Merge).unwrap();
+        let boss = sync::create_backup(&d.a, "game-a", Some("boss".into())).unwrap();
+        let boss_object = current_ids(&d.a)[0].clone();
+        let mut history = vec![boss_object.clone()];
+        for i in 1..=14 {
+            Devices::write(&d.a, 0, "slot", format!("version-{i}").as_bytes());
+            sync::execute(&d.a, "game-a", Mode::Merge).unwrap();
+            history.push(current_ids(&d.a)[0].clone());
+        }
+        let current = history.last().unwrap().clone();
+        let now = chrono::Utc::now() + chrono::Duration::days(30);
+
+        let first = sync::collect_garbage_at(&d.a, "game-a", now).unwrap();
+        assert_eq!(first.snapshots_pruned, 4); // 14 automatic, keep newest 10
+        assert_eq!(first.objects_deleted, 0); // phase 1 only marks
+        assert!(history.iter().all(|id| exists(&d.a, id)));
+        // 15 versions: current + 10 snapshots pin 11 (boss pins version-0
+        // which the oldest auto snapshot also pinned) -> versions 1..=3 orphaned.
+        assert_eq!(first.objects_pending, 3);
+
+        let early =
+            sync::collect_garbage_at(&d.a, "game-a", now + chrono::Duration::hours(2)).unwrap();
+        assert_eq!(early.objects_deleted, 0);
+
+        let second =
+            sync::collect_garbage_at(&d.a, "game-a", now + chrono::Duration::hours(25)).unwrap();
+        assert_eq!(second.objects_deleted, 3);
+        assert!(second.bytes_freed > 0);
+        assert!(exists(&d.a, &current));
+        assert!(
+            exists(&d.a, &boss_object),
+            "user-named snapshot objects are kept"
+        );
+        assert!(history[1..=3].iter().all(|id| !exists(&d.a, id)));
+        assert!(history[4..].iter().all(|id| exists(&d.a, id)));
+
+        // Everything still works afterwards: other device and snapshot restore.
+        sync::execute(&d.b, "game-a", Mode::Merge).unwrap();
+        assert_eq!(
+            fs::read(Devices::file(&d.b, 0, "slot")).unwrap(),
+            b"version-14"
+        );
+        sync::restore_backup(&d.a, "game-a", &boss.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            fs::read(Devices::file(&d.a, 0, "slot")).unwrap(),
+            b"version-0"
+        );
+    }
+    #[test]
+    fn cleanup_keeps_an_object_republished_between_mark_and_sweep() {
+        let d = Devices::new();
+        Devices::write(&d.a, 0, "slot", b"old");
+        sync::execute(&d.a, "game-a", Mode::Merge).unwrap();
+        let old = current_ids(&d.a)[0].clone();
+        Devices::write(&d.a, 0, "slot", b"new");
+        sync::execute(&d.a, "game-a", Mode::Merge).unwrap();
+        // Remove the "Before sync" snapshot so `old` is unreferenced.
+        let backups: Vec<String> = {
+            let cloud = d.a.cloud.lock().unwrap();
+            let backups = cloud
+                .folders
+                .iter()
+                .find(|((_, n), _)| n == "backups")
+                .unwrap()
+                .1
+                .clone();
+            cloud
+                .folders
+                .iter()
+                .filter(|((p, _), _)| *p == backups)
+                .map(|(_, id)| id.clone())
+                .collect()
+        };
+        for id in backups {
+            gdrive::delete_drive_file(&d.a, &id).unwrap();
+        }
+        let now = chrono::Utc::now() + chrono::Duration::days(30);
+        assert_eq!(
+            sync::collect_garbage_at(&d.a, "game-a", now)
+                .unwrap()
+                .objects_pending,
+            1
+        );
+        // Another device publishes a manifest that references `old` again.
+        {
+            let mut cloud = d.a.cloud.lock().unwrap();
+            let (manifest, version) = cloud.manifest.as_mut().unwrap();
+            manifest.files[0].object_id = Some(old.clone());
+            manifest.files[0].hash = Some(sync_v2::hash_bytes(b"old"));
+            manifest.files[0].size = 3;
+            *version = "republished".into();
+        }
+        let sweep =
+            sync::collect_garbage_at(&d.a, "game-a", now + chrono::Duration::hours(25)).unwrap();
+        assert!(exists(&d.a, &old));
+        assert_eq!(
+            sweep.objects_pending, 1,
+            "the replaced `new` object is marked instead"
+        );
+    }
+    #[test]
+    fn cleanup_without_v2_manifest_touches_nothing() {
+        let d = Devices::new();
+        let report = sync::collect_garbage_at(&d.a, "game-a", chrono::Utc::now()).unwrap();
+        assert_eq!(
+            report.objects_deleted + report.objects_pending + report.snapshots_pruned,
+            0
+        );
+        assert_eq!(d.a.cloud.lock().unwrap().deletes, 0);
     }
     #[test]
     fn protocol_transport_uses_server_cas_and_handles_ambiguous_success() {

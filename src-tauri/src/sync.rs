@@ -157,6 +157,7 @@ fn run(app: &AppHandle, game_id: &str, mode: Mode) -> Result<SyncResult, String>
         Ok(value) => {
             set_cloud_state(game_id, CloudState::UpToDate);
             let _ = app.emit("sync-completed", value);
+            schedule_storage_cleanup(app, game_id);
         }
         Err(error) => {
             let _ = app.emit(
@@ -173,6 +174,31 @@ fn run(app: &AppHandle, game_id: &str, mode: Mode) -> Result<SyncResult, String>
     }
     result
 }
+/// Reclaim old Drive objects in the background, at most once per interval per
+/// game. Waits for the caller's operation to finish and skips if the game is
+/// running or another save operation holds the game.
+fn schedule_storage_cleanup(app: &AppHandle, game_id: &str) {
+    let app = app.clone();
+    let game_id = game_id.to_owned();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        let Ok(_operation) = crate::game_operations::acquire(&game_id) else {
+            return;
+        };
+        if let Err(e) = crate::cross_device::collect_garbage_if_due(&app, &game_id) {
+            eprintln!("[sync-v2] Background cleanup skipped for {game_id}: {e}");
+        }
+    });
+}
+
+pub fn cleanup_drive_history(
+    app: &AppHandle,
+    game_id: &str,
+) -> Result<crate::models::DriveCleanupReport, String> {
+    let _operation = crate::game_operations::acquire(game_id)?;
+    crate::cross_device::collect_garbage(app, game_id)
+}
+
 pub fn sync_game(app: &AppHandle, game_id: &str) -> Result<SyncResult, String> {
     let _operation = crate::game_operations::acquire(game_id)?;
     sync_game_locked(app, game_id)

@@ -15,7 +15,7 @@ fastrand = "2"
 sha2 = "0.10"
 
 [dev-dependencies]
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 walkdir = "2"
 urlencoding = "2"
 

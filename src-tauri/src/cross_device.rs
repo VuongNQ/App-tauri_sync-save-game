@@ -1,14 +1,17 @@
 //! V2 orchestration: immutable Drive blobs + one Firestore CAS per whole game.
 use crate::{
+    drive_gc::{self, PendingSweep, Policy},
     firestore, gdrive, gdrive_auth,
     models::{
-        BackupMeta, CloudState, DriveFileFlatItem, DriveVersionBackup, GameEntry, SyncResult, SyncStructureDiff,
+        BackupMeta, CloudState, DriveCleanupReport, DriveFileFlatItem, DriveVersionBackup, GameEntry,
+        SyncResult, SyncStructureDiff,
     },
     safe_files,
     save_transaction::{self, Change},
     settings,
     sync_v2::{self, Action, Baseline, BaselineFile, Entry, Key, Manifest, Mode, PROTOCOL},
 };
+use chrono::{DateTime, Utc};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
@@ -18,6 +21,12 @@ use tauri::{AppHandle, Manager};
 
 const SNAPSHOT: &str = ".snapshot-v2.json";
 const OBJECTS: &str = ".save-sync-v2";
+const BACKUPS: &str = "backups";
+/// Only the newest snapshots are consulted for upload deduplication, which
+/// bounds the cost of the first scan on games with a long snapshot history.
+const DEDUP_SNAPSHOT_LIMIT: usize = 30;
+/// (hash, object ID, size) of each live file pinned by an immutable snapshot.
+type SnapshotRefs = Vec<(String, String, u64)>;
 fn operation_id() -> String {
     format!("{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..))
 }
@@ -328,13 +337,93 @@ impl<'a> Context<'a> {
         }
         Ok(target)
     }
+    /// Snapshot folders currently present on Drive, as (folder ID, name).
+    fn snapshot_folders(&self) -> Result<Vec<(String, String)>, String> {
+        let (_, folder) = gdrive::ensure_game_folders(self.app, &self.game.id)?;
+        let root = gdrive::list_drive_items(self.app, &folder)?;
+        let Some(backups) = root.iter().find(|e| e.is_folder && e.name == BACKUPS) else {
+            return Ok(Vec::new());
+        };
+        Ok(gdrive::list_drive_items(self.app, &backups.id)?
+            .into_iter()
+            .filter(|e| e.is_folder)
+            .map(|e| (e.id, e.name))
+            .collect())
+    }
+    /// Objects pinned by one snapshot. Snapshots are immutable, so the result is
+    /// cached locally per folder ID. None = legacy or not-yet-complete snapshot.
+    fn snapshot_refs(&self, folder_id: &str) -> Result<Option<SnapshotRefs>, String> {
+        let cache = self.store.join("snapshot-cache").join(format!(
+            "{}.json",
+            sync_v2::hash_bytes(folder_id.as_bytes())
+        ));
+        if let Ok(bytes) = fs::read(&cache) {
+            if let Ok(refs) = serde_json::from_slice::<SnapshotRefs>(&bytes) {
+                return Ok(Some(refs));
+            }
+        }
+        let items = gdrive::list_drive_items(self.app, folder_id)?;
+        let Some(file) = items.iter().find(|e| !e.is_folder && e.name == SNAPSHOT) else {
+            return Ok(None);
+        };
+        let manifest: Manifest =
+            serde_json::from_str(&gdrive::download_json_from_drive(self.app, &file.id)?)
+                .map_err(|e| format!("Damaged snapshot {folder_id}: {e}"))?;
+        let refs: SnapshotRefs = manifest
+            .files
+            .iter()
+            .filter(|e| !e.deleted)
+            .filter_map(|e| Some((e.hash.clone()?, e.object_id.clone()?, e.size)))
+            .collect();
+        if let Some(parent) = cache.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        safe_files::atomic_write(
+            &cache,
+            &serde_json::to_vec(&refs).map_err(|e| e.to_string())?,
+        )?;
+        Ok(Some(refs))
+    }
+    /// Map content hash -> existing immutable object, from the manifests in hand
+    /// and the newest snapshots that exist on Drive right now. Cleanup keeps an
+    /// object for at least `confirm_hours` after its last snapshot disappears,
+    /// far longer than any sync, so reusing one of these objects is safe.
+    fn reusable_objects(&self, manifests: &[&Manifest]) -> BTreeMap<String, (String, u64)> {
+        let mut map = BTreeMap::new();
+        for manifest in manifests {
+            for e in manifest.files.iter().filter(|e| !e.deleted) {
+                if let (Some(hash), Some(id)) = (&e.hash, &e.object_id) {
+                    map.entry(hash.clone()).or_insert((id.clone(), e.size));
+                }
+            }
+        }
+        let snapshots = self.snapshot_folders().and_then(|mut folders| {
+            // Engine names start with an RFC 3339 timestamp: newest first.
+            folders.sort_by(|a, b| b.1.cmp(&a.1));
+            let mut refs = Vec::new();
+            for (id, _) in folders.iter().take(DEDUP_SNAPSHOT_LIMIT) {
+                refs.extend(self.snapshot_refs(id)?.unwrap_or_default());
+            }
+            Ok(refs)
+        });
+        match snapshots {
+            Ok(refs) => {
+                for (hash, id, size) in refs {
+                    map.entry(hash).or_insert((id, size));
+                }
+            }
+            // Best effort: without the snapshot index we simply upload.
+            Err(e) => eprintln!("[sync-v2] Snapshot index unavailable for dedup: {e}"),
+        }
+        map
+    }
     fn snapshot(
         &self,
         manifest: &Manifest,
         label: Option<String>,
     ) -> Result<DriveVersionBackup, String> {
         let (_, folder) = gdrive::ensure_game_folders(self.app, &self.game.id)?;
-        let backups = gdrive::ensure_subfolder(self.app, &folder, "backups")?;
+        let backups = gdrive::ensure_subfolder(self.app, &folder, BACKUPS)?;
         let now = chrono::Utc::now().to_rfc3339();
         let label = label
             .map(|s| s.trim().chars().take(80).collect::<String>())
@@ -513,6 +602,11 @@ fn execute_context(
             }
         }
     }
+    let mut reusable = if actions.iter().any(|(_, a)| *a == Action::Upload) {
+        context.reusable_objects(&[&cloud, &desired])
+    } else {
+        BTreeMap::new()
+    };
     let mut changes = Vec::new();
     let mut uploaded = 0;
     let mut downloaded = 0;
@@ -521,7 +615,15 @@ fn execute_context(
         match action {
             Action::Upload => {
                 let file = local.get(key).ok_or("Local upload disappeared")?;
-                let id = context.upload_verified(&file.path, &file.hash)?;
+                // Identical bytes already stored as an immutable object: reuse it.
+                let id = match reusable.get(&file.hash) {
+                    Some((id, size)) if *size == file.size => id.clone(),
+                    _ => {
+                        let id = context.upload_verified(&file.path, &file.hash)?;
+                        reusable.insert(file.hash.clone(), (id.clone(), file.size));
+                        id
+                    }
+                };
                 next.files.retain(|e| e.key != *key);
                 next.files.push(Entry {
                     key: key.clone(),
@@ -986,6 +1088,174 @@ pub fn reset_local_baseline(app: &AppHandle, game_id: &str) -> Result<(), String
         .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+// ── Storage cleanup (retention + two-phase garbage collection) ────────────────
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GcState {
+    last_run_at: Option<DateTime<Utc>>,
+}
+
+fn read_json<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
+    fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    safe_files::atomic_write(path, &serde_json::to_vec(value).map_err(|e| e.to_string())?)
+}
+
+fn manifest_objects(manifest: &Manifest) -> impl Iterator<Item = String> + '_ {
+    manifest
+        .files
+        .iter()
+        .filter(|e| !e.deleted)
+        .filter_map(|e| e.object_id.clone())
+}
+
+/// Explicit "Clean up history now". Still two-phase: objects found now are
+/// deleted on a later run, at least `confirm_hours` from now.
+pub fn collect_garbage(app: &AppHandle, game_id: &str) -> Result<DriveCleanupReport, String> {
+    let context = Context::new(app, game_id)?;
+    run_gc(&context, Utc::now(), &drive_gc::DEFAULT_POLICY)
+}
+
+/// Background cleanup after a successful sync, at most once per interval.
+pub fn collect_garbage_if_due(
+    app: &AppHandle,
+    game_id: &str,
+) -> Result<Option<DriveCleanupReport>, String> {
+    let context = Context::new(app, game_id)?;
+    let now = Utc::now();
+    let policy = drive_gc::DEFAULT_POLICY;
+    let state: GcState = read_json(&context.store.join("gc-state.json"));
+    let pending: PendingSweep = read_json(&context.store.join("gc-pending.json"));
+    if !drive_gc::auto_run_due(state.last_run_at, &pending, now, &policy) {
+        return Ok(None);
+    }
+    run_gc(&context, now, &policy).map(Some)
+}
+
+#[cfg(test)]
+pub(crate) fn collect_garbage_at(
+    app: &AppHandle,
+    game_id: &str,
+    now: DateTime<Utc>,
+) -> Result<DriveCleanupReport, String> {
+    let context = Context::new(app, game_id)?;
+    run_gc(&context, now, &drive_gc::DEFAULT_POLICY)
+}
+
+fn run_gc(
+    context: &Context<'_>,
+    now: DateTime<Utc>,
+    policy: &Policy,
+) -> Result<DriveCleanupReport, String> {
+    let app = context.app;
+    let game_id = &context.game.id;
+    let mut report = DriveCleanupReport::default();
+    // Games that never adopted v2 have no immutable objects to collect.
+    let Some((manifest, version)) = firestore::load_v2_manifest(app, &context.user, game_id)?
+    else {
+        return Ok(report);
+    };
+    sync_v2::validate(&manifest, game_id, &context.labels)?;
+    let mut live: BTreeSet<String> = manifest_objects(&manifest).collect();
+
+    // 1. Retention: remove expired AUTOMATIC snapshot metadata only. Their
+    //    objects merely become candidates for a later confirmed sweep.
+    let folders = context.snapshot_folders()?;
+    let prune: BTreeSet<String> = drive_gc::snapshots_to_prune(&folders, now, policy)
+        .into_iter()
+        .collect();
+    for id in &prune {
+        for item in gdrive::list_drive_items(app, id)?
+            .iter()
+            .filter(|e| !e.is_folder)
+        {
+            gdrive::delete_drive_file(app, &item.id)?;
+        }
+        gdrive::delete_drive_file(app, id)?;
+        report.snapshots_pruned += 1;
+    }
+    // 2. Every retained snapshot pins its objects. Any read failure aborts.
+    for (id, _) in folders.iter().filter(|(id, _)| !prune.contains(id)) {
+        if let Some(refs) = context.snapshot_refs(id)? {
+            live.extend(refs.into_iter().map(|(_, object, _)| object));
+        }
+    }
+
+    // 3. Mark & sweep the immutable object folder.
+    let (_, game_folder) = gdrive::ensure_game_folders(app, game_id)?;
+    let Some(objects_folder) = gdrive::list_drive_items(app, &game_folder)?
+        .into_iter()
+        .find(|e| e.is_folder && e.name == OBJECTS)
+    else {
+        write_json(
+            &context.store.join("gc-state.json"),
+            &GcState {
+                last_run_at: Some(now),
+            },
+        )?;
+        return Ok(report);
+    };
+    let items: Vec<_> = gdrive::list_drive_items(app, &objects_folder.id)?
+        .into_iter()
+        .filter(|e| !e.is_folder)
+        .collect();
+    let objects: Vec<_> = items
+        .iter()
+        .map(|e| {
+            let time = e
+                .modified_time
+                .as_deref()
+                .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
+                .map(|t| t.with_timezone(&Utc));
+            (e.id.clone(), time)
+        })
+        .collect();
+    let pending_path = context.store.join("gc-pending.json");
+    let pending: PendingSweep = read_json(&pending_path);
+    let mut plan = drive_gc::plan_sweep(&objects, &live, &pending, now, policy);
+    if !plan.delete.is_empty() {
+        // Another device may have published since step 1: re-read right before
+        // deleting and never remove anything the newest manifest references.
+        let (latest, latest_version) = firestore::load_v2_manifest(app, &context.user, game_id)?
+            .ok_or("Cloud manifest disappeared; cleanup stopped and nothing more was deleted")?;
+        if latest_version != version {
+            sync_v2::validate(&latest, game_id, &context.labels)?;
+            live.extend(manifest_objects(&latest));
+            plan.delete.retain(|id| !live.contains(id));
+            plan.next.objects.retain(|id| !live.contains(id));
+        }
+        for id in &plan.delete {
+            gdrive::delete_drive_file(app, id)?;
+            report.objects_deleted += 1;
+            report.bytes_freed += items
+                .iter()
+                .find(|e| &e.id == id)
+                .and_then(|e| e.size)
+                .unwrap_or(0);
+        }
+    }
+    write_json(&pending_path, &plan.next)?;
+    write_json(
+        &context.store.join("gc-state.json"),
+        &GcState {
+            last_run_at: Some(now),
+        },
+    )?;
+    report.objects_pending = plan.next.objects.len() as u32;
+    report.pending_since = plan.next.marked_at.map(|t| t.to_rfc3339());
+    println!(
+        "[sync-v2] Cleanup for {game_id}: {} snapshot(s) pruned, {} object(s) deleted, {} pending",
+        report.snapshots_pruned, report.objects_deleted, report.objects_pending
+    );
+    Ok(report)
 }
 
 #[cfg(test)]
