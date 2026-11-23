@@ -121,6 +121,7 @@ pub fn validate(manifest: &Manifest, game_id: &str, labels: &[String]) -> Result
         return Err("Unsupported save protocol or changed save-path order/labels. Restore the original path layout before syncing.".into());
     }
     let mut seen = BTreeSet::new();
+    let mut live_paths = BTreeSet::new();
     for entry in &manifest.files {
         crate::safe_files::safe_join(Path::new("."), &entry.key.relative_path)?;
         if entry
@@ -148,11 +149,14 @@ pub fn validate(manifest: &Manifest, game_id: &str, labels: &[String]) -> Result
         {
             return Err("Invalid save content hash or Drive object ID".into());
         }
+        if !entry.deleted {
+            live_paths.insert((entry.key.path_index, entry.key.relative_path.to_lowercase()));
+        }
     }
-    for (index, path) in &seen {
+    for (index, path) in &live_paths {
         let mut parent = path.as_str();
         while let Some((prefix, _)) = parent.rsplit_once('/') {
-            if seen.contains(&(*index, prefix.to_string())) {
+            if live_paths.contains(&(*index, prefix.to_string())) {
                 return Err("Cloud save paths contain a file/directory collision".into());
             }
             parent = prefix;

@@ -285,6 +285,51 @@ mod tests {
         cross_device as sync,
         sync_v2::{self, Mode},
     };
+
+    #[test]
+    fn explicit_restore_can_recreate_a_missing_save_folder() {
+        let d = Devices::new();
+        Devices::write(&d.a, 0, "nested/slot", b"original");
+        sync::execute(&d.a, "game-a", Mode::Merge).unwrap();
+        fs::remove_dir_all(
+            Devices::file(&d.a, 0, "nested/slot")
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(sync::execute(&d.a, "game-a", Mode::Merge).is_err());
+        sync::execute(&d.a, "game-a", Mode::Restore).unwrap();
+        assert_eq!(
+            fs::read(Devices::file(&d.a, 0, "nested/slot")).unwrap(),
+            b"original"
+        );
+    }
+
+    #[test]
+    fn another_app_process_cannot_enter_the_same_game_transaction() {
+        let d = Devices::new();
+        Devices::write(&d.a, 0, "slot", b"original");
+        let store =
+            d.a.root
+                .join("sync-v2")
+                .join(sync_v2::hash_bytes(b"111111111111111111111"))
+                .join(sync_v2::hash_bytes(b"game-a"));
+        fs::create_dir_all(&store).unwrap();
+        let lock = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(store.join("operation.lock"))
+            .unwrap();
+        lock.try_lock().unwrap();
+        assert!(sync::execute(&d.a, "game-a", Mode::Merge)
+            .unwrap_err()
+            .contains("another app process"));
+        assert!(d.a.cloud.lock().unwrap().manifest.is_none());
+    }
     struct Devices {
         a: AppHandle,
         b: AppHandle,

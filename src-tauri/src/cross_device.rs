@@ -399,7 +399,12 @@ fn execute_context(
         return Err("Save path is not set for this game".into());
     }
     let baseline = context.baseline()?;
-    let local = context.collect(baseline.as_ref())?;
+    let scan_baseline = if mode == Mode::Restore {
+        None
+    } else {
+        baseline.as_ref()
+    };
+    let local = context.collect(scan_baseline)?;
     let (mut cloud, version) = context.load_cloud()?;
     if baseline
         .as_ref()
@@ -579,7 +584,7 @@ fn execute_context(
     }
     // Re-scan after all network transfers to catch edits, new files and deletions.
     crate::watcher::ensure_game_stopped(context.app, &context.game.id)?;
-    let observed = context.collect(baseline.as_ref())?;
+    let observed = context.collect(scan_baseline)?;
     if observed.len() != local.len()
         || observed
             .iter()
@@ -637,7 +642,7 @@ fn execute_context(
         context.snapshot(&cloud, Some("Before sync".into()))?;
     }
     crate::watcher::ensure_game_stopped(context.app, &context.game.id)?;
-    let before_publish = context.collect(baseline.as_ref())?;
+    let before_publish = context.collect(scan_baseline)?;
     if before_publish.len() != local.len()
         || before_publish
             .iter()
@@ -675,7 +680,7 @@ fn execute_context(
 pub fn diff(app: &AppHandle, game_id: &str) -> Result<SyncStructureDiff, String> {
     let context = Context::new(app, game_id)?;
     let baseline = context.baseline()?;
-    let local = context.collect(baseline.as_ref())?;
+    let local = context.collect(None)?;
     let (mut cloud, _) = context.load_cloud()?;
     cloud.files.retain(|e| context.active(&e.key));
     let hashes = local
@@ -733,6 +738,12 @@ pub fn create_backup(
 ) -> Result<DriveVersionBackup, String> {
     let context = Context::new(app, game_id)?;
     let (mut cloud, version) = context.load_cloud()?;
+    if context
+        .baseline()?
+        .is_some_and(|b| b.revision > cloud.revision)
+    {
+        return Err("Cloud manifest was removed or moved backwards. Recovery snapshots were retained; no new cloud manifest was created.".into());
+    }
     if version.is_none() {
         context.materialize_legacy(&mut cloud)?;
         cloud.commit_id = operation_id();
