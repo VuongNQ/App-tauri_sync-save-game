@@ -2,6 +2,7 @@ import { CARD, EYEBROW, GHOST_BTN, PRIMARY_BTN, SOFT_BADGE, SOURCE_BADGE } from 
 import { GameThumbnail } from "@/components/GameThumbnail";
 import { DashboardQuery, ValidatePathsQuery } from "@/queries/dashboard";
 import { useGamePlaying, useSyncAndLaunchFlow } from "@/queries/detail";
+import { createDesktopShortcut, getLaunchShortcutUrl } from "@/services/tauri";
 import { formatBytes, formatDuration, formatLocalTime } from "@/utils";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -29,6 +30,7 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
     },
   });
   const { data: isGamePlaying = false } = useGamePlaying(id ?? "");
+  const [shortcutNote, setShortcutNote] = useState<{ ok: boolean; text: string } | null>(null);
 
   const sourceBadge = game ? SOURCE_BADGE[game.source] : SOFT_BADGE;
 
@@ -47,6 +49,27 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
     setLaunchError(null);
     setCanForceAfterError(false);
     flow.forceLaunch(game!.id);
+  }
+
+  async function handleCreateShortcut() {
+    setShortcutNote(null);
+    try {
+      const path = await createDesktopShortcut(game!.id);
+      setShortcutNote({ ok: true, text: `Shortcut created: ${path}` });
+    } catch (err) {
+      setShortcutNote({ ok: false, text: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  async function handleCopyLink() {
+    setShortcutNote(null);
+    try {
+      const url = await getLaunchShortcutUrl(game!.id);
+      await navigator.clipboard.writeText(url);
+      setShortcutNote({ ok: true, text: `Copied ${url}` });
+    } catch (err) {
+      setShortcutNote({ ok: false, text: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   const playLabel = flow.phase === "syncing" ? "Syncing saves…" : flow.phase === "launching" ? "Launching…" : "▶ Play";
@@ -81,7 +104,7 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
           </div>
           <details className="group [&_p]:group-open:line-clamp-none [&_p]:line-clamp-3">
             <summary className="text-sm text-[#9aa8c7] cursor-pointer pb-2">Click to view description</summary>
-            <p className="m-0 text-sm text-[#9aa8c7] whitespace-pre-wrap">{game.description}</p >
+            <p className="m-0 text-sm text-[#9aa8c7] whitespace-pre-wrap">{game.description}</p>
           </details>
         </div>
 
@@ -95,15 +118,40 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
               isGamePlaying
                 ? "Game is currently running"
                 : !game.exePath
-                ? "Set an executable path in Settings to enable launching"
-                : exePathValid === false
-                  ? "Executable not found on this machine — update the path in Settings"
-                  : "Sync saves from Drive then launch the game"
+                  ? "Set an executable path in Settings to enable launching"
+                  : exePathValid === false
+                    ? "Executable not found on this machine — update the path in Settings"
+                    : "Sync saves from Drive then launch the game"
             }
             onClick={handlePlay}
           >
             {isGamePlaying ? "🎮 Playing" : playLabel}
           </button>
+          {canLaunch && (
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                className={`${GHOST_BTN} text-xs min-h-8 px-3`}
+                title="Put a shortcut on the Desktop that syncs saves first, then starts the game"
+                onClick={() => void handleCreateShortcut()}
+              >
+                Desktop shortcut
+              </button>
+              <button
+                type="button"
+                className={`${GHOST_BTN} text-xs min-h-8 px-3`}
+                title="Copy the syncsave:// link (use it in Steam, Playnite or your own shortcut)"
+                onClick={() => void handleCopyLink()}
+              >
+                Copy link
+              </button>
+            </div>
+          )}
+          {shortcutNote && (
+            <span className={`text-xs text-right max-w-[240px] break-all ${shortcutNote.ok ? "text-[#8ff5c2]" : "text-[#ff9e9e]"}`}>
+              {shortcutNote.text}
+            </span>
+          )}
           {!game.exePath && <span className="text-xs text-[#9aa8c7] text-right max-w-[140px]">Set an exe path in Settings</span>}
           {game.exePath && exePathValid === false && (
             <span className="text-xs text-[#ff9e9e] text-right max-w-[160px]">⚠ Exe not found on this device</span>
@@ -133,9 +181,7 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
                 <ul className="m-0 p-0 list-none flex flex-col gap-2">
                   {game.savePaths.map((sp, i) => (
                     <li key={i} className="flex flex-col gap-0.5">
-                      {game.savePaths.length > 1 && (
-                        <span className="text-[0.78rem] text-[#c7d3f7] font-medium">{sp.label}</span>
-                      )}
+                      {game.savePaths.length > 1 && <span className="text-[0.78rem] text-[#c7d3f7] font-medium">{sp.label}</span>}
                       <span>{sp.path ?? <em className="not-italic text-[#ff9e9e] text-xs">Not set on this device</em>}</span>
                     </li>
                   ))}

@@ -72,6 +72,10 @@ manifest. Save-path ordering/labels must remain stable after migration.
 
 See [account security and activation](docs/account-security.md) and [save safety and rollout](docs/save-safety.md) for recovery locations, upgrade behavior, validation and the remaining account, cross-device and handheld-platform roadmap.
 
+## Play Shortcuts
+
+Each game page can put a Steam-style shortcut on the Desktop (or copy a `syncsave://launch/<gameId>` link). Opening it syncs saves first and then starts the game; conflicts and offline cases stop and ask. See [play shortcuts](docs/play-shortcuts.md).
+
 ## Play Time Tracking
 
 - Stored in `GameEntry.totalPlayTimeSeconds` as a cumulative counter in seconds.

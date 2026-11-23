@@ -13,13 +13,33 @@ import type { SyncResult } from "./types/dashboard";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DevicesPage } from "./pages/DevicesPage";
 import { GameDetailPage } from "./pages/GameDetailPage";
+import { LaunchPage } from "./pages/LaunchPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AdminPage } from "./pages/AdminPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import type { AuthStatus } from "./types/dashboard";
 import "./App.css";
 
+// The play-shortcut launcher window loads the same bundle on #/launch/<id>.
+// It renders only the launcher, without dashboard-wide listeners or update checks.
+const IS_LAUNCHER_WINDOW = window.location.hash.startsWith("#/launch/");
+
 export function App() {
+  return IS_LAUNCHER_WINDOW ? <LauncherApp /> : <DashboardApp />;
+}
+
+function LauncherApp() {
+  return (
+    <HashRouter>
+      <Routes>
+        <Route path="/launch/:id" element={<LaunchPage />} />
+        <Route path="*" element={null} />
+      </Routes>
+    </HashRouter>
+  );
+}
+
+function DashboardApp() {
   useAuthStatusCallbacks();
   useAppUpdateQuery();
 

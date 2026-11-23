@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "launcher",
+  "description": "Play-shortcut launcher window: sync progress and close only",
+  "windows": ["launcher"],
+  "permissions": ["core:default", "core:window:allow-close"]
+}
