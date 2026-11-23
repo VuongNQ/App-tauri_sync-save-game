@@ -36,7 +36,10 @@ no new collection permissions and does not deploy Rules or change IAM.
 Legacy per-path Firestore mirrors cannot overwrite the v2 document.
 
 Every uploaded save is a NEW Drive object under the game's `.save-sync-v2/`
-folder. Published objects are never overwritten or physically deleted by sync.
+folder, unless identical bytes (same SHA-256 and size) are already stored as an
+object referenced by the current manifest or one of the newest snapshots; that
+object is then reused. Published objects are never overwritten, and sync itself
+never deletes them (see "Storage cleanup").
 Only after all uploads, downloads, integrity checks, quota checks and local
 rechecks succeed does a Firestore `documents:commit` publish the entire manifest.
 The write uses `currentDocument.updateTime`, or `exists: false` for first use.
@@ -45,8 +48,8 @@ is checked against the operation ID; the client never retries a blind overwrite.
 A failed CAS leaves local saves/baseline unchanged and preserves orphan uploads.
 
 The live-save quota remains based on active files. Immutable history, recovery
-copies and interrupted uploads also consume Drive storage. No automatic garbage
-collection or retention deletion is enabled in this phase. Manifests larger than
+snapshots and interrupted uploads also consume Drive storage until the storage
+cleanup below reclaims them. Manifests larger than
 900,000 UTF-8 bytes are rejected before publication to stay below Firestore's
 document limit; split unusually large file sets into separate game entries.
 
@@ -101,10 +104,40 @@ progress first if it should be part of a named snapshot.
 The file manager shows logical current files from the manifest instead of raw
 object/history folders. Delete publishes a tombstone and keeps a snapshot;
 other devices apply it on sync, with conflicts for edited copies. Rename/move
-are disabled for immutable saves. Deleting a named snapshot removes its metadata,
-not objects potentially referenced by another snapshot or current manifest.
+are disabled for immutable saves. Deleting a named snapshot removes its metadata;
+its objects are reclaimed later by storage cleanup only if nothing else uses them.
 Legacy snapshots remain listed; once v2 is active, legacy restore is refused
 because those backups cannot represent a complete multi-path save set.
+
+## Storage cleanup
+
+Saves live in each user's own Drive `appDataFolder`, so history consumes the
+user's Google storage, while Drive API calls are free. Cleanup runs on the
+device (`drive_gc.rs` decides, `cross_device::run_gc` executes) and costs one
+Firestore read per game (two if it deletes), and zero Firestore writes.
+
+- Retention: automatic snapshots ("Before sync", "Before cloud deletion",
+  "Before removing excluded files") keep the newest 10 plus all younger than
+  14 days. User-named and legacy snapshots are never pruned. Pruning deletes
+  only the snapshot folder; its objects become candidates.
+- Live set: objects in the current manifest, objects in every retained snapshot
+  (`.snapshot-v2.json`, cached locally per immutable folder ID), and every
+  object younger than 7 days (uploads awaiting another device's CAS).
+- Two phases: a run marks unreferenced objects in the local
+  `gc-pending.json`. A later run, at least 24 hours after marking, deletes only
+  marked objects that are still unreferenced, after re-reading the manifest
+  immediately before deleting. Objects marked later wait their own 24 hours.
+- Upload dedup only reuses objects of snapshots present at the start of that
+  sync. A snapshot that disappears keeps its objects at least 24 more hours, far
+  longer than any sync, so a reused object cannot be deleted under it.
+- Worst case for a race is a failed download or restore on another device
+  (SHA-256 verification stops it; local saves are untouched), never a broken
+  current manifest.
+- Schedule: in the background 30 s after a successful sync, at most once every
+  7 days per game (or when marked objects are due), skipped while the game runs
+  or another save operation holds it. "Clean up old save versions on Drive" in
+  the game's Status tab runs it on demand, still two-phase.
+- Not touched: legacy (pre-v2) files, `.sync-meta.json`, library/settings data.
 
 ## Upgrade and compatibility
 

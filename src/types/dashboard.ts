@@ -38,6 +38,16 @@ export interface GameEntry {
   pathMode: "auto" | "per_device";
 }
 
+/** Result of `cleanup_drive_history`. */
+export interface DriveCleanupReport {
+  snapshotsPruned: number;
+  objectsDeleted: number;
+  bytesFreed: number;
+  /** Unreferenced objects marked now; deleted by a later cleanup if still unused. */
+  objectsPending: number;
+  pendingSince: string | null;
+}
+
 export interface DashboardData {
   games: GameEntry[];
 }
