@@ -205,7 +205,11 @@ jobs:
           $cargo = $cargo -replace '^version = ".*"$', "version = `"$version`""
           $cargo | Set-Content src-tauri/Cargo.toml
 
-          git add src-tauri/Cargo.toml src-tauri/tauri.conf.json
+          # Refresh the workspace package version while keeping dependency versions pinned.
+          cargo update --workspace --manifest-path src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          git add src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
 
           if (git diff --cached --quiet) {
             Write-Host "No version changes to persist."

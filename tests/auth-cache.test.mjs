@@ -1,7 +1,50 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { applyAuthStatus, accountResult } from '../src/queries/authCache.ts';
+
+test('mounted auth guards receive logout and subsequent login updates', async () => {
+  const q = new QueryClient();
+  const signedIn = { authenticated: true, userId: 'A', role: 'user' };
+  const signedOut = { authenticated: false, userId: null, role: 'user' };
+  q.setQueryData(['auth-status'], signedIn);
+  // AuthGuard and LoginPage observe this query while the session changes.
+  const observer = new QueryObserver(q, { queryKey: ['auth-status'], enabled: false });
+  const received = [];
+  const unsubscribe = observer.subscribe(result => received.push(result.data));
+  try {
+    await applyAuthStatus(q, signedOut);
+    assert.deepEqual(observer.getCurrentResult().data, signedOut);
+    assert.deepEqual(received.at(-1), signedOut);
+
+    // The backend event and logout mutation may both publish the same status.
+    await applyAuthStatus(q, signedOut);
+    const nextAccount = { authenticated: true, userId: 'B', role: 'user' };
+    await applyAuthStatus(q, nextAccount);
+    assert.deepEqual(observer.getCurrentResult().data, nextAccount);
+    assert.deepEqual(received.at(-1), nextAccount);
+  } finally {
+    unsubscribe();
+    q.clear();
+  }
+});
+
+test('an auth check started before logout cannot restore the old session', async () => {
+  const q = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const signedIn = { authenticated: true, userId: 'A', role: 'user' };
+  const signedOut = { authenticated: false, userId: null, role: 'user' };
+  q.setQueryData(['auth-status'], signedIn);
+  let finish;
+  const pending = q.fetchQuery({
+    queryKey: ['auth-status'],
+    queryFn: () => new Promise(resolve => { finish = resolve; }),
+  }).catch(() => undefined);
+  await applyAuthStatus(q, signedOut);
+  finish(signedIn);
+  await pending;
+  assert.deepEqual(q.getQueryData(['auth-status']), signedOut);
+  q.clear();
+});
 
 test('switching accounts clears library, devices, admin and per-game caches',async()=>{
   const q=new QueryClient();
