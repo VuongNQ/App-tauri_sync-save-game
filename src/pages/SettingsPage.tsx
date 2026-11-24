@@ -4,6 +4,8 @@ import { useClearAllDriveMutation, useGoogleUserInfoQuery, useLogoutMutation } f
 import { useAppUpdateQuery } from "../queries/appUpdate";
 import { useSettingsQuery, useUpdateSettingsMutation } from "../queries/settings";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { LanguageSwitcher } from "../components/LanguageSwitcher";
+import { useT } from "../i18n";
 import {
   BTN,
   CARD,
@@ -27,6 +29,7 @@ export function SettingsPage() {
   const updateSettings = useUpdateSettingsMutation();
 
   const clearAllDrive = useClearAllDriveMutation();
+  const t = useT();
 
   const [showClearModal, setShowClearModal] = useState(false);
 
@@ -40,12 +43,23 @@ export function SettingsPage() {
   return (
     <>
       <div>
-        <p className={EYEBROW}>Configuration</p>
-        <h2 className="m-0">Settings</h2>
+        <p className={EYEBROW}>{t("settings.eyebrow")}</p>
+        <h2 className="m-0">{t("nav.settings")}</h2>
       </div>
 
       <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold">Google Account</h3>
+        <h3 className="m-0 mb-4 font-semibold">{t("language.title")}</h3>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="m-0 text-[0.92rem] text-[#c7d3f7]">{t("language.label")}</p>
+            <p className={`m-0 mt-0.5 text-xs ${MUTED}`}>{t("language.hint")}</p>
+          </div>
+          <LanguageSwitcher />
+        </div>
+      </div>
+
+      <div className={CARD}>
+        <h3 className="m-0 mb-4 font-semibold">{t("settings.account")}</h3>
         {isLoading ? (
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 shrink-0 rounded-full animate-pulse bg-[rgba(165,185,255,0.08)]" />
@@ -69,20 +83,20 @@ export function SettingsPage() {
               disabled={logoutMutation.isPending}
               onClick={() => logoutMutation.mutate()}
             >
-              {logoutMutation.isPending ? "Signing out…" : "Sign out"}
+              {logoutMutation.isPending ? t("settings.signingOut") : t("settings.signOut")}
             </button>
           </div>
         ) : (
           <div>
-            <p className={MUTED}>Unable to load account info.{error ? ` (${error.message})` : ""}</p>
-            <p className={`mt-2 text-xs ${MUTED}`}>You may need to sign out and sign back in to grant profile permissions.</p>
+            <p className={MUTED}>{t("settings.accountError")}{error ? ` (${error.message})` : ""}</p>
+            <p className={`mt-2 text-xs ${MUTED}`}>{t("settings.accountErrorHint")}</p>
             <div className="mt-3 flex gap-2">
               <button
                 type="button"
                 className={`${BTN} rounded-xl bg-white/10 px-4 py-2 text-sm font-medium text-[#eef4ff] hover:bg-white/15`}
                 onClick={() => refetch()}
               >
-                Retry
+                {t("common.retry")}
               </button>
               <button
                 type="button"
@@ -90,7 +104,7 @@ export function SettingsPage() {
                 disabled={logoutMutation.isPending}
                 onClick={() => logoutMutation.mutate()}
               >
-                {logoutMutation.isPending ? "Signing out…" : "Sign out & re-login"}
+                {logoutMutation.isPending ? t("settings.signingOut") : t("settings.signOutRelogin")}
               </button>
             </div>
           </div>
@@ -98,18 +112,19 @@ export function SettingsPage() {
       </div>
 
       <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold">Sync preferences</h3>
+        <h3 className="m-0 mb-4 font-semibold">{t("settings.syncPrefs")}</h3>
         {settings ? (
           <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="m-0 text-[0.92rem] text-[#c7d3f7]">Sync interval (minutes)</p>
-                <p className={`m-0 mt-0.5 text-xs ${MUTED}`}>Periodic sync interval. 0 = only sync on file change.</p>
+                <p className="m-0 text-[0.92rem] text-[#c7d3f7]">{t("settings.interval")}</p>
+                <p className={`m-0 mt-0.5 text-xs ${MUTED}`}>{t("settings.intervalHint")}</p>
               </div>
               <input
                 type="number"
                 min={0}
                 max={1440}
+                aria-label={t("settings.interval")}
                 className="w-20 rounded-lg border border-[rgba(140,165,241,0.16)] bg-[rgba(7,12,23,0.84)] px-2.5 py-1.5 text-center text-[#eef4ff] focus:outline-2 focus:outline-[rgba(122,180,255,0.35)] focus:outline-offset-1"
                 value={settings.syncIntervalMinutes}
                 onChange={(e) => {
@@ -125,33 +140,33 @@ export function SettingsPage() {
       </div>
 
       <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold">Startup &amp; Background</h3>
+        <h3 className="m-0 mb-4 font-semibold">{t("settings.startup")}</h3>
         {settings ? (
           <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="m-0 text-[0.92rem] text-[#c7d3f7]">Minimize to tray on close</p>
+                <p className="m-0 text-[0.92rem] text-[#c7d3f7]">{t("settings.tray")}</p>
                 <p className={`m-0 mt-0.5 text-xs ${MUTED}`}>
-                  The app hides to the system tray instead of quitting. Use the tray icon to reopen or right-click → Quit to exit.
+                  {t("settings.trayHint")}
                 </p>
               </div>
-              <span className="shrink-0 rounded-lg bg-[rgba(109,125,255,0.14)] px-3 py-1 text-xs text-[#a3b0ff]">Always on</span>
+              <span className="shrink-0 rounded-lg bg-[rgba(109,125,255,0.14)] px-3 py-1 text-xs text-[#a3b0ff]">{t("settings.alwaysOn")}</span>
             </div>
             <ToggleRow
-              label="Start minimized"
-              description="Launch the app hidden in the system tray"
+              label={t("settings.startMinimized")}
+              description={t("settings.startMinimizedHint")}
               checked={settings.startMinimised}
               onChange={(v) => toggleSetting("startMinimised", v)}
             />
             <ToggleRow
-              label="Launch on Windows startup"
-              description="Automatically start the app when you sign in to Windows"
+              label={t("settings.runOnStartup")}
+              description={t("settings.runOnStartupHint")}
               checked={settings.runOnStartup}
               onChange={(v) => toggleSetting("runOnStartup", v)}
             />
             <ToggleRow
-              label="Pull newer cloud saves on startup"
-              description="Shortly after the app starts, download saves changed on another device if this PC has no unsynced edits. Conflicts are never resolved automatically. Skipped on battery."
+              label={t("settings.autoPull")}
+              description={t("settings.autoPullHint")}
               checked={settings.autoPullOnStartup}
               onChange={(v) => toggleSetting("autoPullOnStartup", v)}
             />
@@ -163,11 +178,11 @@ export function SettingsPage() {
 
       {/* App Updates */}
       <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold">App Updates</h3>
+        <h3 className="m-0 mb-4 font-semibold">{t("settings.updates")}</h3>
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="m-0 text-[0.92rem] text-[#c7d3f7]">Current version</p>
+              <p className="m-0 text-[0.92rem] text-[#c7d3f7]">{t("settings.currentVersion")}</p>
               {currentVersion && <p className={`m-0 mt-0.5 font-mono text-xs ${MUTED}`}>v{currentVersion}</p>}
             </div>
             <button
@@ -176,7 +191,7 @@ export function SettingsPage() {
               disabled={status === "checking" || status === "downloading"}
               onClick={handleCheck}
             >
-              {status === "checking" ? "Checking…" : "Check for Updates"}
+              {status === "checking" ? t("status.checking") : t("settings.checkUpdates")}
             </button>
           </div>
 
@@ -184,7 +199,7 @@ export function SettingsPage() {
             <div className="rounded-xl border border-[rgba(140,165,241,0.2)] bg-[rgba(99,125,255,0.08)] p-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="m-0 text-sm font-semibold text-[#9effc3]">v{update?.version} is available</p>
+                  <p className="m-0 text-sm font-semibold text-[#9effc3]">{t("settings.updateAvailable", { version: update?.version ?? "" })}</p>
                   {update?.body && <p className={`m-0 mt-1 whitespace-pre-wrap text-xs ${MUTED}`}>{update.body}</p>}
                 </div>
                 <button
@@ -192,7 +207,7 @@ export function SettingsPage() {
                   className={`${BTN} shrink-0 rounded-xl bg-indigo-500/20 px-4 py-2 text-sm font-medium text-indigo-300 hover:bg-indigo-500/30`}
                   onClick={handleInstall}
                 >
-                  Download &amp; Install
+                  {t("settings.install")}
                 </button>
               </div>
             </div>
@@ -201,7 +216,7 @@ export function SettingsPage() {
           {status === "downloading" && (
             <div>
               <p className={`m-0 mb-1 text-sm ${MUTED}`}>
-                Downloading update…
+                {t("settings.downloading")}
                 {progress && progress.total > 0 ? ` ${Math.round((progress.downloaded / progress.total) * 100)}%` : ""}
               </p>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
@@ -215,9 +230,9 @@ export function SettingsPage() {
             </div>
           )}
 
-          {status === "installed" && <p className="m-0 text-sm text-[#9effc3]">Restarting to apply update…</p>}
+          {status === "installed" && <p className="m-0 text-sm text-[#9effc3]">{t("settings.restarting")}</p>}
 
-          {status === "up-to-date" && <p className={`m-0 text-sm ${MUTED}`}>You&apos;re up to date.</p>}
+          {status === "up-to-date" && <p className={`m-0 text-sm ${MUTED}`}>{t("settings.upToDate")}</p>}
 
           {updateError && <p className="m-0 text-sm text-[#ffd5d5]">{updateError}</p>}
         </div>
@@ -225,27 +240,26 @@ export function SettingsPage() {
 
       {/* Danger Zone */}
       <div className={CARD}>
-        <h3 className="m-0 mb-1 font-semibold text-[#ff9e9e]">Danger zone</h3>
+        <h3 className="m-0 mb-1 font-semibold text-[#ff9e9e]">{t("common.dangerZone")}</h3>
         <p className={`m-0 mb-4 text-sm ${MUTED}`}>
-          Permanently delete all synced save files, game folders, and configuration stored on Google Drive for this account. Your local game
-          library is not affected.
+          {t("settings.clearDriveBody")}
         </p>
         <button type="button" className={DANGER_BTN} disabled={clearAllDrive.isPending} onClick={() => setShowClearModal(true)}>
-          {clearAllDrive.isPending ? "Clearing…" : "Clear all Drive data"}
+          {clearAllDrive.isPending ? t("login.clearing") : t("settings.clearDrive")}
         </button>
         {clearAllDrive.isError && (
           <p className="m-0 mt-3 text-sm text-[#ffd5d5]">
-            {clearAllDrive.error instanceof Error ? clearAllDrive.error.message : "Failed to clear Drive data."}
+            {clearAllDrive.error instanceof Error ? clearAllDrive.error.message : t("settings.clearDriveFailed")}
           </p>
         )}
-        {clearAllDrive.isSuccess && <p className="m-0 mt-3 text-sm text-[#9effc3]">All Drive data has been cleared.</p>}
+        {clearAllDrive.isSuccess && <p className="m-0 mt-3 text-sm text-[#9effc3]">{t("settings.clearDriveDone")}</p>}
       </div>
 
       <ConfirmModal
         open={showClearModal}
-        title="Clear all Drive data"
-        message="This will permanently delete all synced save files, game folders, and library data from Google Drive for your account. This cannot be undone. Your local game list will be preserved."
-        confirmLabel="Clear all Drive data"
+        title={t("settings.clearDrive")}
+        message={t("settings.clearDriveMessage")}
+        confirmLabel={t("settings.clearDrive")}
         onConfirm={() => {
           setShowClearModal(false);
           clearAllDrive.mutate();
@@ -294,6 +308,7 @@ function ToggleRow({ label, description, checked, onChange }: ToggleRowProps) {
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-label={label}
         className={checked ? TOGGLE_TRACK_ON : TOGGLE_TRACK_OFF}
         onClick={() => onChange(!checked)}
       >

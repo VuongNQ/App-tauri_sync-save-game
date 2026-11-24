@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router";
+import { useT } from "../i18n";
 import { useRemoveGameMutation } from "../queries";
 import { useCloudStateQuery, useGameSyncingQuery } from "../queries/sync";
 import { SyncProgressBar } from "./SyncProgressBar";
@@ -29,6 +30,7 @@ interface Props {
 
 export function GamesList({ games, invalidGameIds, missingExeIds, unconfiguredExeIds }: Props) {
   const removeMutation = useRemoveGameMutation();
+  const t = useT();
 
   const [removeTarget, setRemoveTarget] = useState<GameEntry | null>(null);
 
@@ -42,15 +44,15 @@ export function GamesList({ games, invalidGameIds, missingExeIds, unconfiguredEx
   return (
     <section className={CARD}>
       <div className={SEC_HDR}>
-        <h3 className="m-0 font-semibold">Games</h3>
-        <span className="text-[0.85rem]">{games.length} entries</span>
+        <h3 className="m-0 font-semibold">{t("games.title")}</h3>
+        <span className="text-[0.85rem]">{t("games.count", { count: games.length })}</span>
       </div>
 
       <div className="grid gap-3.5">
         {games.length === 0 ? (
           <div className="grid place-items-center min-h-40 rounded-[18px] border border-dashed border-[rgba(165,185,255,0.16)] bg-[rgba(8,14,25,0.55)] text-center p-4.5">
-            <p className="m-0 text-[1.1rem]">No games yet.</p>
-            <span className={MUTED}>Add your first game using the form above.</span>
+            <p className="m-0 text-[1.1rem]">{t("games.emptyTitle")}</p>
+            <span className={MUTED}>{t("games.emptyBody")}</span>
           </div>
         ) : (
         games.map((g) => (
@@ -68,9 +70,9 @@ export function GamesList({ games, invalidGameIds, missingExeIds, unconfiguredEx
 
       <ConfirmModal
         open={removeTarget !== null}
-        title="Remove game"
-        message={`Are you sure you want to remove "${removeTarget?.name}" from your library? This cannot be undone.`}
-        confirmLabel="Remove"
+        title={t("games.removeTitle")}
+        message={t("games.removeMessage", { name: removeTarget?.name ?? "" })}
+        confirmLabel={t("common.remove")}
         onConfirm={handleConfirmRemove}
         onCancel={() => setRemoveTarget(null)}
       />
@@ -97,6 +99,7 @@ function GameCard({
   const cloudState = useCloudStateQuery(g.id);
   const { data: isGamePlaying = false } = useGamePlaying(g.id);
   const badge = SOURCE_BADGE[g.source] ?? SOFT_BADGE;
+  const t = useT();
 
   return (
     <div
@@ -134,47 +137,47 @@ function GameCard({
         <div className="grid gap-1 min-w-0">
           <strong className="truncate">{g.name}</strong>
           <div className="flex items-center gap-2">
-            <span className={badge}>{g.source}</span>
+            <span className={badge}>{t(g.source === "emulator" ? "source.emulator" : "source.manual")}</span>
             {isGamePlaying && (
               <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(120,230,170,0.35)] bg-[rgba(70,220,150,0.14)] px-2 py-0.5 text-[0.7rem] font-semibold uppercase tracking-[0.08em] text-[#8ff5c2]">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#8ff5c2] animate-pulse" />
-                Playing
+                {t("game.playing")}
               </span>
             )}
             {g.savePaths.length > 0 && g.savePaths[0].path && (
               <span className={`${MUTED} text-xs truncate`}>
-                {g.savePaths.length > 1 ? `${g.savePaths[0].path} (+${g.savePaths.length - 1} more)` : g.savePaths[0].path}
+                {g.savePaths.length > 1 ? t("games.pathMore", { path: g.savePaths[0].path, count: g.savePaths.length - 1 }) : g.savePaths[0].path}
               </span>
             )}
           </div>
           {isInvalid && (
             <p className="m-0 text-xs text-[#ff9e9e] flex items-center gap-1">
-              <span>⚠</span> Save path not found
+              <span>⚠</span> {t("games.warnSavePath")}
             </p>
           )}
           {isExeMissing && (
             <p className="m-0 text-xs text-[#ff9e9e] flex items-center gap-1">
-              <span>⚠</span> Executable not found on this device
+              <span>⚠</span> {t("games.warnExeMissing")}
             </p>
           )}
           {isExeUnconfigured && (
             <p className="m-0 text-xs text-[#ffd5a0] flex items-center gap-1">
-              <span>⚠</span> Exe path not set on this device
+              <span>⚠</span> {t("games.warnExeUnset")}
             </p>
           )}
           {g.trackChanges && !g.exeName && (
             <p className="m-0 text-xs text-[#ffd5a0] flex items-center gap-1">
-              <span>⚠</span> No executable set — process tracking inactive
+              <span>⚠</span> {t("games.warnNoExeName")}
             </p>
           )}
           {!isSyncing && cloudState === "cloudNewer" && (
-            <p className="m-0 text-xs text-[#7dc9ff] flex items-center gap-1" title="Another device saved newer progress. Sync or press Play to pull it.">
-              <span>⬇</span> Newer save in cloud
+            <p className="m-0 text-xs text-[#7dc9ff] flex items-center gap-1" title={t("games.cloudNewerHint")}>
+              <span>⬇</span> {t("games.cloudNewer")}
             </p>
           )}
           {!isSyncing && cloudState === "needsReview" && (
-            <p className="m-0 text-xs text-[#ffd5a0] flex items-center gap-1" title="Both this PC and the cloud changed. Open the game to choose which copy to keep.">
-              <span>⚠</span> Needs review: both copies changed
+            <p className="m-0 text-xs text-[#ffd5a0] flex items-center gap-1" title={t("games.needsReviewHint")}>
+              <span>⚠</span> {t("games.needsReview")}
             </p>
           )}
           {isSyncing ? (
@@ -183,11 +186,11 @@ function GameCard({
             <div className="grid gap-0.5">
               {g.cloudStorageBytes != null && (
                 <p className="m-0 text-xs text-[#7dc9ff] flex items-center gap-1">
-                  <span>☁</span> {formatBytes(g.cloudStorageBytes)} on Drive
+                  <span>☁</span> {t("games.onDrive", { size: formatBytes(g.cloudStorageBytes) })}
                 </p>
               )}
               <p className="m-0 text-xs text-[#9aa8c7] flex items-center gap-1">
-                <span>⏱</span> {formatDuration(g.totalPlayTimeSeconds)} played
+                <span>⏱</span> {t("games.played", { duration: formatDuration(g.totalPlayTimeSeconds) })}
               </p>
             </div>
           )}
@@ -200,7 +203,8 @@ function GameCard({
       {/* Remove button */}
       <button
         type="button"
-        title="Remove game"
+        title={t("games.removeTitle")}
+        aria-label={t("games.removeNamed", { name: g.name })}
         className="shrink-0 w-9 h-9 grid place-items-center rounded-xl border border-transparent text-[#9aa8c7] hover:text-[#ff9e9e] hover:bg-[rgba(255,80,80,0.12)] hover:border-[rgba(255,100,100,0.3)] transition-colors cursor-pointer bg-transparent"
         onClick={(e) => { e.preventDefault(); onRemove(); }}
       >
@@ -217,6 +221,7 @@ function GamePlayButton({ game, exeMissing, exeUnconfigured: _exeUnconfigured }:
 
   const [canForce, setCanForce] = useState(false);
   const { data: isGamePlaying = false } = useGamePlaying(game.id);
+  const t = useT();
 
   const flow = useSyncAndLaunchFlow({
     onError: (msg, canForceArg) => {
@@ -232,20 +237,21 @@ function GamePlayButton({ game, exeMissing, exeUnconfigured: _exeUnconfigured }:
   const label = flow.phase === "syncing" ? "⏳" : flow.phase === "launching" ? "▶" : isGamePlaying ? "🎮" : "▶";
 
   const title = isGamePlaying
-    ? "Game is currently running"
+    ? t("play.running")
     : exeMissing
-    ? "Executable not found on this device — update path in Settings"
+    ? t("play.exeMissingHint")
     : flow.phase === "syncing"
-      ? "Syncing saves…"
+      ? t("play.syncing")
       : flow.phase === "launching"
-        ? "Launching…"
-        : "Sync saves then launch game";
+        ? t("play.launching")
+        : t("play.hint");
 
   return (
     <div className="flex flex-col items-center gap-1 shrink-0">
       <button
         type="button"
         title={title}
+        aria-label={`${title}: ${game.name}`}
         disabled={isDisabled}
         className={`${BTN} w-9 h-9 grid place-items-center rounded-xl border transition-colors ${
           exeMissing
@@ -274,7 +280,7 @@ function GamePlayButton({ game, exeMissing, exeUnconfigured: _exeUnconfigured }:
                 flow.forceLaunch(game.id);
               }}
             >
-              Launch anyway
+              {t("play.launchAnyway")}
             </button>
           )}
         </div>

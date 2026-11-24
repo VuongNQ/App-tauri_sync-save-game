@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type { SyncResult } from "@/types/dashboard";
 import { GHOST_BTN } from "@/components/styles";
+import { useT } from "@/i18n";
 import { SyncProgressBar } from "@/components/SyncProgressBar";
 
 interface Props {
@@ -23,6 +24,7 @@ interface Props {
  *  - error    — red X + error message, requires manual close
  */
 export function SyncProgressModal({ gameId, isSyncing, result, onClose }: Props) {
+  const t = useT();
   // Auto-dismiss successful syncs after 3 s.
   useEffect(() => {
     if (!isSyncing && result && !result.error) {
@@ -61,7 +63,7 @@ export function SyncProgressModal({ gameId, isSyncing, result, onClose }: Props)
                 d="M4 12a8 8 0 018-8v4l3-3-3-3v4a10 10 0 100 10l-1.41-1.41A8 8 0 014 12z"
               />
             </svg>
-            <p className="m-0 text-base font-semibold text-white">Syncing save data…</p>
+            <p className="m-0 text-base font-semibold text-white">{t("syncModal.syncing")}</p>
             <SyncProgressBar gameId={gameId} />
           </div>
         )}
@@ -75,25 +77,25 @@ export function SyncProgressModal({ gameId, isSyncing, result, onClose }: Props)
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <p className="m-0 text-base font-semibold text-[#86efac]">Sync complete</p>
+              <p className="m-0 text-base font-semibold text-[#86efac]">{t("syncModal.complete")}</p>
             </div>
 
             <div className="grid gap-2 rounded-2xl bg-[rgba(8,14,25,0.7)] border border-[rgba(165,185,255,0.08)] p-4">
               <div className="flex justify-between text-sm">
-                <span className="text-[#9aa8c7]">↑ Uploaded</span>
-                <span className="font-semibold text-white">{result.uploaded} file{result.uploaded !== 1 ? "s" : ""}</span>
+                <span className="text-[#9aa8c7]">↑ {t("sync.uploaded")}</span>
+                <span className="font-semibold text-white">{t(result.uploaded === 1 ? "backups.fileOne" : "backups.fileOther", { count: result.uploaded })}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-[#9aa8c7]">↓ Downloaded</span>
-                <span className="font-semibold text-white">{result.downloaded} file{result.downloaded !== 1 ? "s" : ""}</span>
+                <span className="text-[#9aa8c7]">↓ {t("sync.downloaded")}</span>
+                <span className="font-semibold text-white">{t(result.downloaded === 1 ? "backups.fileOne" : "backups.fileOther", { count: result.downloaded })}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-[#9aa8c7]">— Skipped</span>
-                <span className="font-semibold text-white">{result.skipped} file{result.skipped !== 1 ? "s" : ""}</span>
+                <span className="text-[#9aa8c7]">— {t("sync.skipped")}</span>
+                <span className="font-semibold text-white">{t(result.skipped === 1 ? "backups.fileOne" : "backups.fileOther", { count: result.skipped })}</span>
               </div>
             </div>
 
-            <p className="m-0 text-xs text-[#9aa8c7] text-center">Closing automatically…</p>
+            <p className="m-0 text-xs text-[#9aa8c7] text-center">{t("syncModal.autoClose")}</p>
           </>
         )}
 
@@ -106,7 +108,7 @@ export function SyncProgressModal({ gameId, isSyncing, result, onClose }: Props)
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </div>
-              <p className="m-0 text-base font-semibold text-[#fca5a5]">Sync failed</p>
+              <p className="m-0 text-base font-semibold text-[#fca5a5]">{t("syncModal.failed")}</p>
             </div>
 
             <p className="m-0 text-sm text-[#9aa8c7] text-center leading-relaxed wrap-anywhere">{result.error}</p>
@@ -116,7 +118,7 @@ export function SyncProgressModal({ gameId, isSyncing, result, onClose }: Props)
               className={`${GHOST_BTN} w-full`}
               onClick={onClose}
             >
-              Close
+              {t("common.close")}
             </button>
           </>
         )}

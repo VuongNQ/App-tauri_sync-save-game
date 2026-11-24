@@ -1,5 +1,7 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 
+import { getLocale, translate } from "../i18n";
+
 /**
  * Convert a thumbnail path or URL to a safe <img src> value for both dev and release builds.
  * - http/https URLs → returned as-is
@@ -37,10 +39,10 @@ export function msg(e: unknown, fallback: string): string {
 
 /** Format an ISO 8601 timestamp to a local date/time string. */
 export function formatLocalTime(iso: string | null | undefined): string {
-  if (!iso) return "Never";
+  if (!iso) return translate("common.never");
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
+  return d.toLocaleString(getLocale());
 }
 
 /** Format a byte count into a human-readable string (B, KB, MB, GB). */
@@ -63,8 +65,8 @@ export function formatDuration(seconds: number | null | undefined): string {
   const minutes = Math.floor((total % 3600) / 60);
   const secs = total % 60;
 
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${secs}s`;
-  return `${secs}s`;
+  if (days > 0) return translate("duration.dh", { d: days, h: hours });
+  if (hours > 0) return translate("duration.hm", { h: hours, m: minutes });
+  if (minutes > 0) return translate("duration.ms", { m: minutes, s: secs });
+  return translate("duration.s", { s: secs });
 }

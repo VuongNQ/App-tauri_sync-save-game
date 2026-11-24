@@ -3,6 +3,7 @@ import { DriveFilesSection } from "@/components/DriveFilesSection";
 import { CARD, PRIMARY_BTN, SECONDARY_BTN } from "@/components/styles";
 import { Toast } from "@/components/Toast";
 import { VersionBackupsSection } from "@/components/VersionBackupsSection";
+import { useT } from "@/i18n";
 import { useGetSaveInfoQuery, useSyncGameMutation } from "@/queries";
 import { DashboardQuery } from "@/queries/dashboard";
 import { useGamePlaying } from "@/queries/detail";
@@ -20,6 +21,7 @@ import TrackingSyncCard from "../TrackingSyncCard";
 
 const TabStatus = () => {
   const { id } = useParams<{ id: string }>();
+  const t = useT();
 
   const { data: isGamePlaying = false } = useGamePlaying(id ?? "");
 
@@ -56,7 +58,7 @@ const TabStatus = () => {
     <>
       {/* Actions */}
       <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold">Actions</h3>
+        <h3 className="m-0 mb-4 font-semibold">{t("status.actions")}</h3>
 
         <div className="grid gap-4 grid-cols-2 max-[900px]:grid-cols-1">
           <button
@@ -65,40 +67,40 @@ const TabStatus = () => {
             disabled={!primarySavePath || isSyncing}
             onClick={() => primarySavePath && restoreFlow.start()}
           >
-            {restoreFlow.isChecking ? "Checking…" : "Restore from Drive"}
+            {restoreFlow.isChecking ? t("status.checking") : t("conflict.restoreLabel")}
           </button>
           <button
             className={SECONDARY_BTN}
             type="button"
             disabled={isSyncing || !hasIncludes}
-            title={!hasIncludes ? "No sync filter configured for this game" : undefined}
+            title={!hasIncludes ? t("status.noFilter") : undefined}
             onClick={() => setShowCleanConfirm(true)}
           >
-            {cleanExcludedMutation.isPending ? "Cleaning…" : "Remove non-included from Drive"}
+            {cleanExcludedMutation.isPending ? t("status.cleaning") : t("status.cleanExcluded")}
           </button>
           <button
             className={`${SECONDARY_BTN} col-span-full`}
             type="button"
             disabled={isSyncing || isGamePlaying}
-            title="Delete old save versions that no current save or kept snapshot uses. Named snapshots are never removed."
+            title={t("status.cleanupHint")}
             onClick={() =>
               cleanupHistoryMutation.mutate(id ?? "", {
                 onSuccess: (r) => {
                   const parts = [
                     r.objectsDeleted > 0
-                      ? `Freed ${formatBytes(r.bytesFreed)} (${r.objectsDeleted} old version(s))`
-                      : "Nothing to delete yet",
+                      ? t("status.cleanupFreed", { size: formatBytes(r.bytesFreed), count: r.objectsDeleted })
+                      : t("status.cleanupNothing"),
                   ];
-                  if (r.snapshotsPruned > 0) parts.push(`${r.snapshotsPruned} expired automatic snapshot(s) removed`);
+                  if (r.snapshotsPruned > 0) parts.push(t("status.cleanupPruned", { count: r.snapshotsPruned }));
                   if (r.objectsPending > 0)
-                    parts.push(`${r.objectsPending} unused version(s) will be deleted by a cleanup after 24 h`);
+                    parts.push(t("status.cleanupPending", { count: r.objectsPending }));
                   setToast({ message: parts.join(" · "), type: "success" });
                 },
-                onError: (err) => setToast({ message: msg(err, "Cleanup failed."), type: "error" }),
+                onError: (err) => setToast({ message: msg(err, t("status.cleanupFailed")), type: "error" }),
               })
             }
           >
-            {cleanupHistoryMutation.isPending ? "Cleaning up…" : "Clean up old save versions on Drive"}
+            {cleanupHistoryMutation.isPending ? t("status.cleaningUp") : t("status.cleanup")}
           </button>
           <button
             className={`${PRIMARY_BTN} col-span-full inline-flex items-center justify-center gap-2`}
@@ -112,14 +114,14 @@ const TabStatus = () => {
                     setToast({ message: data.error, type: "error" });
                   } else {
                     setToast({
-                      message: `Sync complete — ↑${data.uploaded} ↓${data.downloaded} file(s)`,
+                      message: t("sync.completeToast", { up: data.uploaded, down: data.downloaded }),
                       type: "success",
                     });
                   }
                 },
                 onError: (err) => {
                   setToast({
-                    message: msg(err, "Sync failed."),
+                    message: msg(err, t("sync.failed")),
                     type: "error",
                   });
                 },
@@ -138,10 +140,10 @@ const TabStatus = () => {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                Syncing…
+                {t("status.syncing")}
               </>
             ) : (
-              "Sync to Google Drive"
+              t("status.sync")
             )}
           </button>
         </div>
@@ -161,11 +163,11 @@ const TabStatus = () => {
             }}
           />
         )}
-        {saveInfoQuery.isError && <p className="m-0 mt-3 text-sm text-[#ffd5d5]">{msg(saveInfoQuery.error, "Unable to get save info.")}</p>}
+        {saveInfoQuery.isError && <p className="m-0 mt-3 text-sm text-[#ffd5d5]">{msg(saveInfoQuery.error, t("status.errorSaveInfo"))}</p>}
 
         {/* Sync Result */}
         {syncMutation.data && <SyncResultPanel result={syncMutation.data} />}
-        {syncMutation.isError && <p className="m-0 mt-3 text-sm text-[#ffd5d5]">{msg(syncMutation.error, "Sync failed.")}</p>}
+        {syncMutation.isError && <p className="m-0 mt-3 text-sm text-[#ffd5d5]">{msg(syncMutation.error, t("sync.failed"))}</p>}
       </div>
 
       {/* Tracking & Sync status */}
@@ -201,14 +203,14 @@ const TabStatus = () => {
 
       <ConfirmModal
         open={showCleanConfirm}
-        title="Remove excluded files from Drive"
-        message="This will permanently delete all Drive files matching your current sync exclusions. This cannot be undone."
-        confirmLabel="Delete from Drive"
+        title={t("status.cleanExcludedTitle")}
+        message={t("status.cleanExcludedMessage")}
+        confirmLabel={t("drive.delete")}
         onConfirm={() => {
           setShowCleanConfirm(false);
           cleanExcludedMutation.mutate(id ?? "", {
-            onSuccess: () => setToast({ message: "Excluded files removed from Drive.", type: "success" }),
-            onError: (err) => setToast({ message: msg(err, "Failed to clean excluded files."), type: "error" }),
+            onSuccess: () => setToast({ message: t("status.cleanExcludedDone"), type: "success" }),
+            onError: (err) => setToast({ message: msg(err, t("status.cleanExcludedFailed")), type: "error" }),
           });
         }}
         onCancel={() => setShowCleanConfirm(false)}

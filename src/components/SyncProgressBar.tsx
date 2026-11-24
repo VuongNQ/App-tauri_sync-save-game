@@ -1,3 +1,4 @@
+import { useT, type Translate } from "@/i18n";
 import { useGameSyncProgressQuery } from "@/queries/sync";
 import type { SyncProgress } from "@/types/dashboard";
 import { formatBytes } from "@/utils";
@@ -18,15 +19,15 @@ function syncPercent(progress: SyncProgress | null): number | null {
   return 100;
 }
 
-function phaseLabel(progress: SyncProgress | null): string {
-  if (!progress || progress.phase === "checking") return "Checking local and cloud saves…";
-  if (progress.phase !== "transferring" || progress.filesTotal === 0) return "Saving new version…";
+function phaseLabel(progress: SyncProgress | null, t: Translate): string {
+  if (!progress || progress.phase === "checking") return t("progress.checking");
+  if (progress.phase !== "transferring" || progress.filesTotal === 0) return t("progress.saving");
   const parts: string[] = [];
   if (progress.uploads > 0) parts.push(`↑ ${progress.uploads}`);
   if (progress.downloads > 0) parts.push(`↓ ${progress.downloads}`);
-  let verb = "Transferring";
-  if (progress.downloads === 0) verb = "Uploading";
-  else if (progress.uploads === 0) verb = "Downloading";
+  let verb = t("progress.transferring");
+  if (progress.downloads === 0) verb = t("progress.uploading");
+  else if (progress.uploads === 0) verb = t("progress.downloading");
   return `${verb} ${parts.join(" · ")}`.trim();
 }
 
@@ -37,6 +38,7 @@ function phaseLabel(progress: SyncProgress | null): string {
  */
 export function SyncProgressBar({ gameId, compact = false }: Props) {
   const progress = useGameSyncProgressQuery(gameId);
+  const t = useT();
   const percent = syncPercent(progress);
   const transferring = progress?.phase === "transferring";
 
@@ -48,7 +50,7 @@ export function SyncProgressBar({ gameId, compact = false }: Props) {
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={percent ?? undefined}
-        aria-label="Sync progress"
+        aria-label={t("progress.aria")}
       >
         {percent === null ? (
           <div className="absolute inset-y-0 w-1/3 rounded-full bg-linear-to-r from-[#6d7dff] to-[#55c5ff] animate-[sync-indeterminate_1.2s_ease-in-out_infinite]" />
@@ -60,7 +62,7 @@ export function SyncProgressBar({ gameId, compact = false }: Props) {
         )}
       </div>
       <div className={`flex items-center justify-between gap-2 ${compact ? "text-[0.7rem]" : "text-xs"} text-[#9aa8c7]`}>
-        <span className="truncate text-[#7dc9ff]">{phaseLabel(progress)}</span>
+        <span className="truncate text-[#7dc9ff]">{phaseLabel(progress, t)}</span>
         {transferring && progress && (
           <span className="shrink-0 tabular-nums">
             {progress.bytesTotal > 0
@@ -72,7 +74,7 @@ export function SyncProgressBar({ gameId, compact = false }: Props) {
       </div>
       {!compact && transferring && progress && (
         <p className="m-0 text-xs text-[#9aa8c7] truncate">
-          {progress.filesDone}/{progress.filesTotal} files
+          {t("progress.files", { done: progress.filesDone, total: progress.filesTotal })}
           {progress.currentFile ? ` · ${progress.currentFile}` : ""}
         </p>
       )}

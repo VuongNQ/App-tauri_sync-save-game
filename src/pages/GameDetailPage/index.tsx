@@ -1,4 +1,5 @@
 import { CARD } from "@/components/styles";
+import { useT } from "@/i18n";
 import { useDashboardQuery } from "@/queries";
 import { useGameSyncingQuery, useGameSyncResultQuery } from "@/queries/sync";
 import { useState } from "react";
@@ -16,6 +17,7 @@ export function GameDetailPage() {
   const { data: dashboard, isLoading: isDashboardLoading } = useDashboardQuery();
 
   const [activeTab, setActiveTab] = useState<TabId>("status");
+  const t = useT();
 
   // Per-game sync state driven by Tauri events (sync-started / sync-completed / sync-error).
   const isSyncing = useGameSyncingQuery(id ?? "");
@@ -38,9 +40,9 @@ export function GameDetailPage() {
   if (!game) {
     return (
       <div className={`${CARD} text-center`}>
-        <p className="text-[1.1rem]">Game not found.</p>
+        <p className="text-[1.1rem]">{t("detail.notFound")}</p>
         <Link to="/" className="text-[#7dc9ff] underline">
-          Back to dashboard
+          {t("detail.backToDashboard")}
         </Link>
       </div>
     );
@@ -51,7 +53,7 @@ export function GameDetailPage() {
       {/* Breadcrumb */}
       <div>
         <Link to="/" className="text-[#7dc9ff] text-sm hover:underline">
-          ← Back to library
+          ← {t("detail.backToLibrary")}
         </Link>
       </div>
 
@@ -60,16 +62,18 @@ export function GameDetailPage() {
 
       <div className="relative flex flex-col gap-4">
         {/* Tabs */}
-        <div className="flex gap-1 p-1 rounded-2xl bg-[rgba(9,14,28,0.6)] border border-white/[0.07] cursor-pointer">
+        <div role="tablist" className="flex gap-1 p-1 rounded-2xl bg-[rgba(9,14,28,0.6)] border border-white/[0.07] cursor-pointer">
           {(
             [
-              { id: "status", label: "Status & Sync" },
-              { id: "config", label: "Configuration" },
+              { id: "status", label: t("detail.tabStatus") },
+              { id: "config", label: t("detail.tabConfig") },
             ] as { id: TabId; label: string }[]
           ).map((tab) => (
             <button
               key={tab.id}
               type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={
                 activeTab === tab.id

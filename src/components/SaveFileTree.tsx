@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useT } from "../i18n";
 import type { SaveFileInfo, SaveInfo } from "../types/dashboard";
 
 // ── Types ─────────────────────────────────────────────────
@@ -95,6 +96,7 @@ interface SaveTreeNodeProps {
 
 function SaveTreeNode({ node, depth, checkable, included, onToggle, parentIncluded }: SaveTreeNodeProps) {
   const [open, setOpen] = useState(false);
+  const t = useT();
   const indent = depth * 14;
 
   if (node.kind === "file") {
@@ -114,7 +116,8 @@ function SaveTreeNode({ node, depth, checkable, included, onToggle, parentInclud
               className="shrink-0 accent-[#7dc9ff] cursor-pointer"
               checked={checked}
               onChange={() => onToggle(node.relativePath, false)}
-              title={checked ? "Remove from sync filter" : "Include in sync"}
+              title={checked ? t("tree.removeFile") : t("tree.includeFile")}
+              aria-label={`${checked ? t("tree.removeFile") : t("tree.includeFile")}: ${node.name}`}
             />
           )}
           {!checkable && <span className="text-[#9aa8c7] shrink-0 select-none">↳</span>}
@@ -148,7 +151,8 @@ function SaveTreeNode({ node, depth, checkable, included, onToggle, parentInclud
                 className="shrink-0 accent-[#7dc9ff] cursor-pointer"
                 checked={checked}
               onChange={() => onToggle(folderIncludePath, true)}
-              title={checked ? "Remove folder from sync filter" : "Include entire folder in sync"}
+              title={checked ? t("tree.removeFolder") : t("tree.includeFolder")}
+              aria-label={`${checked ? t("tree.removeFolder") : t("tree.includeFolder")}: ${node.name}`}
               />
               <span
                 className="text-[#9aa8c7] shrink-0 w-3 text-center text-[0.6rem] cursor-pointer"

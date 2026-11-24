@@ -933,3 +933,14 @@ This shows the portable relative path (forward-slash normalised) as small muted 
 | `@apply` in CSS | Inline Tailwind utilities in JSX |
 | Duplicate type definitions | All types in `src/types/dashboard.ts` |
 | Listen to Tauri events inside page components | Central listener in `App.tsx` only |
+
+---
+
+## Localization (English / Vietnamese)
+
+- All user-facing text lives in `src/i18n/en.ts` (source of truth) and `src/i18n/vi.ts`. TypeScript fails the build if a key is missing from `vi.ts`.
+- In components: `const t = useT();` then `t("section.key", { name })`. Placeholders are `{name}`.
+- Text with markup inside (bold, code, a button): translate the whole sentence with a `{slot}` placeholder and render it with `richText(t("key"), { slot: <strong>…</strong> })`.
+- Outside React (helpers, module-level code): `translate("key")`; dates/numbers use `getLocale()`.
+- Zod schemas defined at module scope use message **keys** as messages; render errors with `tx(errors.field.message)` from `useI18n()`.
+- The chosen language is stored per device in `localStorage` (`ui.language`); the default follows the OS language (`vi*` → Vietnamese, otherwise English). Backend (Rust) error strings and the tray menu stay English.

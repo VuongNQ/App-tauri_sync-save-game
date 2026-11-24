@@ -1,6 +1,7 @@
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { GameSettingsForm } from "@/components/GameSettingsForm";
 import { CARD, DANGER_BTN } from "@/components/styles";
+import { useT } from "@/i18n";
 import { useRemoveGameMutation } from "@/queries";
 import { DashboardQuery } from "@/queries/dashboard";
 import { SyncGameMutation } from "@/queries/sync";
@@ -11,6 +12,7 @@ import { useNavigate, useParams } from "react-router";
 
 const TabSettings = () => {
   const { id } = useParams<{ id: string }>();
+  const t = useT();
 
   const queryClient = useQueryClient();
 
@@ -36,23 +38,23 @@ const TabSettings = () => {
 
       {/* Danger zone */}
       <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold text-[#ff9e9e]">Danger zone</h3>
+        <h3 className="m-0 mb-4 font-semibold text-[#ff9e9e]">{t("common.dangerZone")}</h3>
         <button
           className={DANGER_BTN}
           type="button"
           disabled={removeMutation.isPending || isSyncing}
           onClick={() => setShowRemoveModal(true)}
         >
-          {removeMutation.isPending ? "Removing…" : "Remove game"}
+          {removeMutation.isPending ? t("common.removing") : t("games.removeTitle")}
         </button>
-        {removeMutation.isError && <p className="m-0 mt-3 text-sm text-[#ffd5d5]">{msg(removeMutation.error, "Unable to remove game.")}</p>}
+        {removeMutation.isError && <p className="m-0 mt-3 text-sm text-[#ffd5d5]">{msg(removeMutation.error, t("detail.errorRemove"))}</p>}
       </div>
 
       <ConfirmModal
         open={showRemoveModal}
-        title="Remove game"
-        message={`Are you sure you want to remove "${game?.name}" from your library? This cannot be undone.`}
-        confirmLabel="Remove"
+        title={t("games.removeTitle")}
+        message={t("games.removeMessage", { name: game?.name ?? "" })}
+        confirmLabel={t("common.remove")}
         onConfirm={() => {
           setShowRemoveModal(false);
           removeMutation.mutate(game?.id ?? "", {

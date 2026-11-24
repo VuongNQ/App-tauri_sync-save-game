@@ -1,5 +1,6 @@
 import { CARD, EYEBROW, GHOST_BTN, PRIMARY_BTN, SOFT_BADGE, SOURCE_BADGE } from "@/components/styles";
 import { GameThumbnail } from "@/components/GameThumbnail";
+import { richText, useT } from "@/i18n";
 import { DashboardQuery, ValidatePathsQuery } from "@/queries/dashboard";
 import { useGamePlaying, useSyncAndLaunchFlow } from "@/queries/detail";
 import { createDesktopShortcut, getLaunchShortcutUrl } from "@/services/tauri";
@@ -12,6 +13,7 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
   const { id } = useParams<{ id: string }>();
 
   const queryClient = useQueryClient();
+  const t = useT();
 
   const game = queryClient.getQueryData(DashboardQuery.queryKey)?.games.find((g) => g.id === id);
 
@@ -55,7 +57,7 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
     setShortcutNote(null);
     try {
       const path = await createDesktopShortcut(game!.id);
-      setShortcutNote({ ok: true, text: `Shortcut created: ${path}` });
+      setShortcutNote({ ok: true, text: t("header.shortcutCreated", { path }) });
     } catch (err) {
       setShortcutNote({ ok: false, text: err instanceof Error ? err.message : String(err) });
     }
@@ -66,13 +68,13 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
     try {
       const url = await getLaunchShortcutUrl(game!.id);
       await navigator.clipboard.writeText(url);
-      setShortcutNote({ ok: true, text: `Copied ${url}` });
+      setShortcutNote({ ok: true, text: t("header.linkCopied", { url }) });
     } catch (err) {
       setShortcutNote({ ok: false, text: err instanceof Error ? err.message : String(err) });
     }
   }
 
-  const playLabel = flow.phase === "syncing" ? "Syncing saves…" : flow.phase === "launching" ? "Launching…" : "▶ Play";
+  const playLabel = flow.phase === "syncing" ? t("play.syncing") : flow.phase === "launching" ? t("play.launching") : `▶ ${t("play.play")}`;
 
   return (
     <div className={CARD}>
@@ -87,25 +89,27 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
         </div>
 
         <div className="grid gap-2 flex-1 min-w-0">
-          <p className={EYEBROW}>Game details</p>
+          <p className={EYEBROW}>{t("header.eyebrow")}</p>
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="m-0">{game.name}</h2>
-            <span className={sourceBadge}>{game.source}</span>
+            <span className={sourceBadge}>{t(game.source === "emulator" ? "source.emulator" : "source.manual")}</span>
             {isGamePlaying && (
               <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(120,230,170,0.35)] bg-[rgba(70,220,150,0.14)] px-2 py-0.5 text-[0.7rem] font-semibold uppercase tracking-[0.08em] text-[#8ff5c2]">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#8ff5c2] animate-pulse" />
-                Playing
+                {t("game.playing")}
               </span>
             )}
           </div>
           <div className="flex items-center gap-2 flex-wrap text-sm text-[#9aa8c7]">
-            <span className="text-[#c7d3f7]">Total play time</span>
+            <span className="text-[#c7d3f7]">{t("header.totalPlayTime")}</span>
             <span>{formatDuration(game.totalPlayTimeSeconds)}</span>
           </div>
-          <details className="group [&_p]:group-open:line-clamp-none [&_p]:line-clamp-3">
-            <summary className="text-sm text-[#9aa8c7] cursor-pointer pb-2">Click to view description</summary>
-            <p className="m-0 text-sm text-[#9aa8c7] whitespace-pre-wrap">{game.description}</p>
-          </details>
+          {game.description && (
+            <details className="group [&_p]:group-open:line-clamp-none [&_p]:line-clamp-3">
+              <summary className="text-sm text-[#9aa8c7] cursor-pointer pb-2">{t("header.viewDescription")}</summary>
+              <p className="m-0 text-sm text-[#9aa8c7] whitespace-pre-wrap">{game.description}</p>
+            </details>
+          )}
         </div>
 
         {/* Play button */}
@@ -116,34 +120,34 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
             disabled={!canLaunch || flow.isPending || isGamePlaying}
             title={
               isGamePlaying
-                ? "Game is currently running"
+                ? t("play.running")
                 : !game.exePath
-                  ? "Set an executable path in Settings to enable launching"
+                  ? t("header.playNoExe")
                   : exePathValid === false
-                    ? "Executable not found on this machine — update the path in Settings"
-                    : "Sync saves from Drive then launch the game"
+                    ? t("play.exeMissingHint")
+                    : t("header.playHint")
             }
             onClick={handlePlay}
           >
-            {isGamePlaying ? "🎮 Playing" : playLabel}
+            {isGamePlaying ? `🎮 ${t("game.playing")}` : playLabel}
           </button>
           {canLaunch && (
             <div className="flex gap-1.5">
               <button
                 type="button"
                 className={`${GHOST_BTN} text-xs min-h-8 px-3`}
-                title="Put a shortcut on the Desktop that syncs saves first, then starts the game"
+                title={t("header.shortcutHint")}
                 onClick={() => void handleCreateShortcut()}
               >
-                Desktop shortcut
+                {t("header.shortcut")}
               </button>
               <button
                 type="button"
                 className={`${GHOST_BTN} text-xs min-h-8 px-3`}
-                title="Copy the syncsave:// link (use it in Steam, Playnite or your own shortcut)"
+                title={t("header.copyLinkHint")}
                 onClick={() => void handleCopyLink()}
               >
-                Copy link
+                {t("header.copyLink")}
               </button>
             </div>
           )}
@@ -152,16 +156,16 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
               {shortcutNote.text}
             </span>
           )}
-          {!game.exePath && <span className="text-xs text-[#9aa8c7] text-right max-w-[140px]">Set an exe path in Settings</span>}
+          {!game.exePath && <span className="text-xs text-[#9aa8c7] text-right max-w-[140px]">{t("header.setExe")}</span>}
           {game.exePath && exePathValid === false && (
-            <span className="text-xs text-[#ff9e9e] text-right max-w-[160px]">⚠ Exe not found on this device</span>
+            <span className="text-xs text-[#ff9e9e] text-right max-w-[160px]">⚠ {t("games.warnExeMissing")}</span>
           )}
           {launchError && (
             <div className="flex flex-col items-end gap-1.5 max-w-[220px]">
               <span className="text-xs text-[#ff9e9e] text-right">{launchError}</span>
               {canForceAfterError && (
                 <button type="button" className={`${GHOST_BTN} text-xs min-h-8 px-3`} onClick={handleForceLaunch}>
-                  Launch anyway
+                  {t("play.launchAnyway")}
                 </button>
               )}
             </div>
@@ -173,32 +177,32 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
       <dl className="grid gap-3.5 grid-cols-2 m-0 max-[720px]:grid-cols-1">
         {[
           {
-            label: "Save folder",
+            label: t("header.saveFolder"),
             value:
               game.savePaths.length === 0 ? (
-                "Not set"
+                t("header.notSet")
               ) : (
                 <ul className="m-0 p-0 list-none flex flex-col gap-2">
                   {game.savePaths.map((sp, i) => (
                     <li key={i} className="flex flex-col gap-0.5">
                       {game.savePaths.length > 1 && <span className="text-[0.78rem] text-[#c7d3f7] font-medium">{sp.label}</span>}
-                      <span>{sp.path ?? <em className="not-italic text-[#ff9e9e] text-xs">Not set on this device</em>}</span>
+                      <span>{sp.path ?? <em className="not-italic text-[#ff9e9e] text-xs">{t("header.notSetOnDevice")}</em>}</span>
                     </li>
                   ))}
                 </ul>
               ),
           },
           {
-            label: "Google Drive folder",
-            value: game.gdriveFolderId ?? "Not synced",
+            label: t("header.driveFolder"),
+            value: game.gdriveFolderId ?? t("header.notSynced"),
           },
           {
-            label: "Last cloud save",
+            label: t("header.lastCloudSave"),
             value: formatLocalTime(game.lastCloudModified),
           },
           {
-            label: "Drive storage used",
-            value: game.cloudStorageBytes != null ? formatBytes(game.cloudStorageBytes) : "Never synced",
+            label: t("header.driveStorage"),
+            value: game.cloudStorageBytes != null ? formatBytes(game.cloudStorageBytes) : t("header.neverSynced"),
           },
         ].map(({ label, value }) => (
           <div key={label} className="p-4.5 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]">
@@ -213,15 +217,18 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
         <div className="mt-4 px-4 py-3 rounded-2xl border border-[rgba(255,200,80,0.3)] bg-[rgba(62,45,12,0.55)] text-[#ffd5a0] text-sm flex items-center gap-2">
           <span>⚠</span>
           <span>
-            <strong>Process tracking is on but no executable is set.</strong> Switch to the{" "}
-            <button
-              type="button"
-              className="underline text-[#ffd5a0] bg-transparent border-0 p-0 cursor-pointer"
-              onClick={() => setActiveTab("config")}
-            >
-              Configuration
-            </button>{" "}
-            tab and enter the game&apos;s .exe name to activate tracking.
+            <strong>{t("header.warnNoExeNameTitle")}</strong>{" "}
+            {richText(t("header.warnNoExeNameBody"), {
+              tab: (
+                <button
+                  type="button"
+                  className="underline text-[#ffd5a0] bg-transparent border-0 p-0 cursor-pointer"
+                  onClick={() => setActiveTab("config")}
+                >
+                  {t("detail.tabConfig")}
+                </button>
+              ),
+            })}
           </span>
         </div>
       )}
@@ -231,15 +238,18 @@ const Header = ({ setActiveTab }: { setActiveTab: (tab: "status" | "config") => 
         <div className="mt-4 px-4 py-3 rounded-2xl border border-[rgba(255,200,80,0.3)] bg-[rgba(62,45,12,0.55)] text-[#ffd5a0] text-sm flex items-center gap-2">
           <span>⚠</span>
           <span>
-            <strong>Executable path not configured on this device.</strong> Set it in the{" "}
-            <button
-              type="button"
-              className="underline text-[#ffd5a0] bg-transparent border-0 p-0 cursor-pointer"
-              onClick={() => setActiveTab("config")}
-            >
-              Configuration
-            </button>{" "}
-            tab to enable process tracking and the ▶ Play button on this machine.
+            <strong>{t("header.warnNoExePathTitle")}</strong>{" "}
+            {richText(t("header.warnNoExePathBody"), {
+              tab: (
+                <button
+                  type="button"
+                  className="underline text-[#ffd5a0] bg-transparent border-0 p-0 cursor-pointer"
+                  onClick={() => setActiveTab("config")}
+                >
+                  {t("detail.tabConfig")}
+                </button>
+              ),
+            })}
           </span>
         </div>
       )}

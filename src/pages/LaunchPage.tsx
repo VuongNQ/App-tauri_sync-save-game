@@ -10,6 +10,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { GameThumbnail } from "@/components/GameThumbnail";
 import { GHOST_BTN, MUTED, PRIMARY_BTN, SECONDARY_BTN } from "@/components/styles";
+import { translate, useT } from "@/i18n";
 import { getLaunchTarget, launchGame, showDashboard, syncAndLaunchGame, type LaunchTarget } from "@/services/tauri";
 
 type Phase =
@@ -37,6 +38,7 @@ export function LaunchPage() {
   const { id = "" } = useParams<{ id: string }>();
   const [target, setTarget] = useState<LaunchTarget | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
+  const t = useT();
   const runId = useRef(0);
 
   const forceLaunch = useCallback(async () => {
@@ -75,7 +77,7 @@ export function LaunchPage() {
     if (!info.canLaunch) {
       setPhase({
         kind: "error",
-        message: "The game's executable is not set or not found on this device. Set it in the app first.",
+        message: translate("launch.noExe"),
         canForce: false,
       });
       return;
@@ -137,43 +139,40 @@ export function LaunchPage() {
   let busy = false;
   switch (phase.kind) {
     case "loading":
-      title = "Preparing…";
+      title = t("launch.preparing");
       busy = true;
       break;
     case "syncing":
-      title = "Syncing saves…";
-      detail = "Getting the latest save from the cloud before the game starts.";
+      title = t("play.syncing");
+      detail = t("launch.syncingDetail");
       busy = true;
       break;
     case "waiting":
-      title = "Waiting for another sync…";
-      detail = `A save operation is still running (try ${phase.attempt}/${BUSY_MAX_ATTEMPTS}).`;
+      title = t("launch.waiting");
+      detail = t("launch.waitingDetail", { attempt: phase.attempt, max: BUSY_MAX_ATTEMPTS });
       busy = true;
       break;
     case "launching":
-      title = "Launching…";
+      title = t("play.launching");
       busy = true;
       break;
     case "launched":
-      title = "Game started. Have fun!";
+      title = t("launch.launched");
       break;
     case "signin":
-      title = "Sign in to sync saves";
-      detail = "No account is signed in, so the cloud save can't be checked.";
+      title = t("launch.signin");
+      detail = t("launch.signinDetail");
       break;
     case "conflict":
-      title = "Saves changed on both sides";
-      detail =
-        "Local and cloud saves both changed since the last sync. Both copies are kept. Pick which one wins in the app, or play the local save now.";
+      title = t("launch.conflict");
+      detail = t("launch.conflictDetail");
       break;
     case "playing":
-      title = "The game is already running";
+      title = t("launch.playing");
       break;
     case "error":
-      title = offline ? "You're offline" : "Couldn't sync saves";
-      detail = offline
-        ? "The cloud save can't be checked. Playing now uses the save on this device; it will sync after you quit if auto-sync is on."
-        : phase.message;
+      title = offline ? t("launch.offline") : t("launch.error");
+      detail = offline ? t("launch.offlineDetail") : phase.message;
       break;
   }
 
@@ -202,10 +201,10 @@ export function LaunchPage() {
         {phase.kind === "conflict" && (
           <>
             <button type="button" className={`${GHOST_BTN} min-h-9 text-sm`} onClick={() => void forceLaunch()}>
-              Play local save
+              {t("launch.playLocal")}
             </button>
             <button type="button" className={`${PRIMARY_BTN} w-auto min-h-9 text-sm`} onClick={() => openInApp(`/game/${id}`)}>
-              Resolve in app
+              {t("launch.resolve")}
             </button>
           </>
         )}
@@ -213,28 +212,28 @@ export function LaunchPage() {
           <>
             {phase.canForce && target?.canLaunch && (
               <button type="button" className={`${GHOST_BTN} min-h-9 text-sm`} onClick={() => void forceLaunch()}>
-                Play without syncing
+                {t("launch.playWithoutSync")}
               </button>
             )}
             {target && !target.canLaunch ? (
               <button type="button" className={`${PRIMARY_BTN} w-auto min-h-9 text-sm`} onClick={() => openInApp(`/game/${id}`)}>
-                Open game settings
+                {t("launch.openSettings")}
               </button>
             ) : (
               <button type="button" className={`${PRIMARY_BTN} w-auto min-h-9 text-sm`} onClick={retry}>
-                Retry
+                {t("common.retry")}
               </button>
             )}
           </>
         )}
         {phase.kind === "signin" && (
           <button type="button" className={`${PRIMARY_BTN} w-auto min-h-9 text-sm`} onClick={() => openInApp("/login")}>
-            Open app to sign in
+            {t("launch.openToSignIn")}
           </button>
         )}
         {(phase.kind === "error" || phase.kind === "conflict" || phase.kind === "signin" || phase.kind === "playing") && (
           <button type="button" className={`${SECONDARY_BTN} min-h-9 text-sm`} onClick={closeWindow}>
-            Close
+            {t("common.close")}
           </button>
         )}
       </div>
