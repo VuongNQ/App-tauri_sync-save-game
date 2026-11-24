@@ -6,10 +6,10 @@ import { HashRouter, Routes, Route, Navigate } from "react-router";
 import { AppLayout } from "./components/AppLayout";
 import { AdminGuard } from "./components/AdminGuard";
 import { AuthGuard } from "./components/AuthGuard";
-import { CLOUD_STATUS_KEY, DASHBOARD_KEY, DEVICES_KEY, gamePlayingKey, gameSyncingKey, gameSyncResultKey } from "./queries/keys";
+import { CLOUD_STATUS_KEY, DASHBOARD_KEY, DEVICES_KEY, gamePlayingKey, gameSyncingKey, gameSyncProgressKey, gameSyncResultKey } from "./queries/keys";
 import { applyAuthStatus } from "./queries/authCache";
 import { useAppUpdateQuery } from "./queries";
-import type { SyncResult } from "./types/dashboard";
+import type { SyncProgress, SyncResult } from "./types/dashboard";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DevicesPage } from "./pages/DevicesPage";
 import { GameDetailPage } from "./pages/GameDetailPage";
@@ -98,12 +98,20 @@ function useAuthStatusCallbacks() {
     // Track per-game syncing state — set true when sync starts.
     const unlistenSyncStartedPromise = listen<string>("sync-started", ({ payload: gameId }) => {
       queryClient.setQueryData(gameSyncingKey(gameId), true);
+      queryClient.setQueryData(gameSyncProgressKey(gameId), null);
+    });
+
+    // Live per-game progress (phase, files, bytes). Any save operation can emit it,
+    // including background, watcher and startup syncs.
+    const unlistenSyncProgressPromise = listen<SyncProgress>("sync-progress", ({ payload }) => {
+      queryClient.setQueryData(gameSyncProgressKey(payload.gameId), payload.phase === "done" ? null : payload);
     });
 
     // Refresh dashboard after any background or watcher-triggered sync completes.
     // Also update per-game syncing state and persist the last SyncResult.
     const unlistenSyncCompletedPromise = listen<SyncResult>("sync-completed", ({ payload }) => {
       queryClient.setQueryData(gameSyncingKey(payload.gameId), false);
+      queryClient.setQueryData(gameSyncProgressKey(payload.gameId), null);
       queryClient.setQueryData(gameSyncResultKey(payload.gameId), payload);
       void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
       void queryClient.invalidateQueries({ queryKey: CLOUD_STATUS_KEY });
@@ -117,6 +125,7 @@ function useAuthStatusCallbacks() {
     // On sync error, clear the syncing flag and store the error result.
     const unlistenSyncErrorPromise = listen<SyncResult>("sync-error", ({ payload }) => {
       queryClient.setQueryData(gameSyncingKey(payload.gameId), false);
+      queryClient.setQueryData(gameSyncProgressKey(payload.gameId), null);
       queryClient.setQueryData(gameSyncResultKey(payload.gameId), payload);
     });
 
@@ -126,6 +135,7 @@ function useAuthStatusCallbacks() {
       void unlistenPostLoginSyncPromise.then((unlisten) => unlisten());
       void unlistenSyncPendingPromise.then((unlisten) => unlisten());
       void unlistenSyncStartedPromise.then((unlisten) => unlisten());
+      void unlistenSyncProgressPromise.then((unlisten) => unlisten());
       void unlistenSyncCompletedPromise.then((unlisten) => unlisten());
       void unlistenSyncErrorPromise.then((unlisten) => unlisten());
       void unlistenCloudStatusPromise.then((unlisten) => unlisten());

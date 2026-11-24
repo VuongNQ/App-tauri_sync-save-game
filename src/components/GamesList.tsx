@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { useRemoveGameMutation } from "../queries";
 import { useCloudStateQuery, useGameSyncingQuery } from "../queries/sync";
+import { SyncProgressBar } from "./SyncProgressBar";
 import { useGamePlaying, useSyncAndLaunchFlow } from "../queries/detail";
 import type { GameEntry } from "../types/dashboard";
 import { formatBytes, formatDuration } from "../utils";
@@ -177,9 +178,7 @@ function GameCard({
             </p>
           )}
           {isSyncing ? (
-            <p className="m-0 text-xs text-[#7dc9ff] animate-pulse flex items-center gap-1">
-              <span>↕</span> Syncing…
-            </p>
+            <SyncProgressBar gameId={g.id} compact />
           ) : (
             <div className="grid gap-0.5">
               {g.cloudStorageBytes != null && (

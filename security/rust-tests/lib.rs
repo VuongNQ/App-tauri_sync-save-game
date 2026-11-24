@@ -18,9 +18,14 @@ extern crate self as tauri;
 #[cfg(test)]
 mod v2_harness;
 #[cfg(test)]
-use v2_harness::{firestore, firestore_http, gdrive, gdrive_auth, settings, watcher};
+use v2_harness::{
+    drive_transfer, firestore, firestore_http, gdrive, gdrive_auth, settings, watcher,
+};
 #[cfg(test)]
-pub use v2_harness::{AppHandle, Manager};
+pub use v2_harness::{AppHandle, Emitter, Manager};
+#[cfg(test)]
+#[path = "../../src-tauri/src/sync_progress.rs"]
+mod sync_progress;
 #[cfg(test)]
 #[path = "../../src-tauri/src/cross_device.rs"]
 mod cross_device;

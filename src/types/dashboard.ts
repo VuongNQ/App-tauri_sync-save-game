@@ -200,6 +200,22 @@ export interface SyncStructureDiff {
   hasDiff: boolean;
 }
 
+/** Phase of a running save operation (mirrors Rust `sync_progress::Phase`). */
+export type SyncPhase = "checking" | "transferring" | "finalizing" | "done";
+
+/** Live progress payload of the `sync-progress` Tauri event. */
+export interface SyncProgress {
+  gameId: string;
+  phase: SyncPhase;
+  filesDone: number;
+  filesTotal: number;
+  bytesDone: number;
+  bytesTotal: number;
+  uploads: number;
+  downloads: number;
+  currentFile: string | null;
+}
+
 /** Startup cloud check result for one game (see `get_cloud_statuses`). */
 export type CloudState = "upToDate" | "noCloud" | "cloudNewer" | "needsReview" | "pulled";
 

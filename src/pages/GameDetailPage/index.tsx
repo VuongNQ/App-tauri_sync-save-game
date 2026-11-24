@@ -91,6 +91,7 @@ export function GameDetailPage() {
         {/* ── Sync progress modal ── */}
         {showSyncModal && (
           <SyncProgressModal
+            gameId={game.id}
             isSyncing={isSyncing}
             result={syncResult}
             onClose={() => setShowSyncModal(false)}

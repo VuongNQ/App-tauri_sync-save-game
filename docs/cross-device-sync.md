@@ -153,6 +153,37 @@ Firestore read per game (two if it deletes), and zero Firestore writes.
   the game's Status tab runs it on demand, still two-phase.
 - Not touched: legacy (pre-v2) files, `.sync-meta.json`, library/settings data.
 
+## Transfers and progress
+
+Each sync plans all network transfers before touching Drive, then runs them on
+up to 4 worker threads (largest first). Identical content is uploaded once and
+objects already stored are reused. Every download is still SHA-256/size
+verified into a staging file, and nothing is published or applied locally
+until every transfer has succeeded, so a failed worker aborts the sync with no
+cloud revision published and no live save changed (orphan uploads are left for
+storage cleanup).
+
+`drive_transfer.rs` handles the object traffic: files over 5 MiB use Drive's
+resumable upload in 8 MiB chunks (a dropped connection resumes from the last
+acknowledged byte), smaller files use one multipart request, and 401s refresh
+the token while 408/429/5xx and rate-limit 403s retry with exponential backoff
+and jitter. `http_client::make_agent()` returns one shared ureq agent so
+requests reuse keep-alive TLS connections, and the objects folder ID is
+resolved once per sync instead of per uploaded file.
+
+Progress is reported through the `sync-progress` Tauri event
+(`sync_progress::Reporter`): `{gameId, phase, filesDone, filesTotal, bytesDone,
+bytesTotal, uploads, downloads, currentFile}` with phase `checking` →
+`transferring` → `finalizing` → `done`. `execute_context` drives it, so manual
+sync, push/restore, watcher, play-shortcut and startup pulls all report
+progress. The UI shows it in the game list row and the game detail sync modal
+(`SyncProgressBar`).
+
+Not applied on purpose: compressing objects (save files are often already
+compressed, and stored bytes must hash to the manifest's SHA-256) and
+byte-level deltas (Drive objects are immutable whole files; the per-file hash
+plan already skips unchanged files).
+
 ## Upgrade and compatibility
 
 1. Back up disposable/test saves and upgrade ALL participating devices together.

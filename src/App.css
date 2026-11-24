@@ -30,3 +30,13 @@ body,
 body {
   min-height: 100vh;
 }
+
+/* Indeterminate sync progress bar (SyncProgressBar). */
+@keyframes sync-indeterminate {
+  0% {
+    left: -35%;
+  }
+  100% {
+    left: 100%;
+  }
+}

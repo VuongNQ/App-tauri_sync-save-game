@@ -43,6 +43,41 @@ impl Manager for AppHandle {
     }
 }
 
+/// Production code emits UI events; the harness drops them.
+pub trait Emitter {
+    fn emit<S: serde::Serialize + Clone>(&self, _event: &str, _payload: S) -> Result<(), String> {
+        Ok(())
+    }
+}
+impl Emitter for AppHandle {}
+
+/// Transfers go through the deterministic Drive adapter below.
+pub mod drive_transfer {
+    use super::*;
+    use crate::sync_progress::Reporter;
+    use std::path::Path;
+    pub fn upload_object(
+        app: &AppHandle,
+        folder: &str,
+        path: &Path,
+        progress: &Reporter,
+    ) -> Result<String, String> {
+        let file = super::gdrive::upload_file(app, folder, path, None)?;
+        progress.add_bytes(file.size.unwrap_or(0));
+        Ok(file.id)
+    }
+    pub fn download_object(
+        app: &AppHandle,
+        id: &str,
+        target: &Path,
+        progress: &Reporter,
+    ) -> Result<(), String> {
+        super::gdrive::download_file(app, id, target)?;
+        progress.add_bytes(fs::metadata(target).map(|m| m.len()).unwrap_or(0));
+        Ok(())
+    }
+}
+
 pub mod watcher {
     pub fn ensure_game_stopped(_: &super::AppHandle, _: &str) -> Result<(), String> {
         Ok(())
@@ -297,6 +332,43 @@ mod tests {
         cross_device as sync,
         sync_v2::{self, Mode},
     };
+
+    #[test]
+    fn parallel_transfers_round_trip_many_files_intact() {
+        let d = Devices::new();
+        for i in 0..23u32 {
+            let body = vec![(i % 251) as u8; (i as usize + 1) * 97];
+            Devices::write(&d.a, (i % 2) as usize, &format!("dir{}/slot{i}", i % 3), &body);
+        }
+        let pushed = sync::execute(&d.a, "game-a", Mode::Merge).unwrap();
+        assert_eq!(pushed.uploaded, 23);
+        let pulled = sync::execute(&d.b, "game-a", Mode::Merge).unwrap();
+        assert_eq!(pulled.downloaded, 23);
+        for i in 0..23u32 {
+            let path = Devices::file(&d.b, (i % 2) as usize, &format!("dir{}/slot{i}", i % 3));
+            assert_eq!(
+                fs::read(path).unwrap(),
+                vec![(i % 251) as u8; (i as usize + 1) * 97]
+            );
+        }
+    }
+
+    #[test]
+    fn failed_parallel_download_changes_no_local_file() {
+        let d = Devices::new();
+        for i in 0..6 {
+            Devices::write(&d.a, 0, &format!("slot{i}"), format!("v{i}").as_bytes());
+        }
+        sync::execute(&d.a, "game-a", Mode::Merge).unwrap();
+        d.b.cloud.lock().unwrap().fail_download = true;
+        assert!(sync::execute(&d.b, "game-a", Mode::Merge).is_err());
+        for i in 0..6 {
+            assert!(!Devices::file(&d.b, 0, &format!("slot{i}")).exists());
+        }
+        d.b.cloud.lock().unwrap().fail_download = false;
+        sync::execute(&d.b, "game-a", Mode::Merge).unwrap();
+        assert_eq!(fs::read(Devices::file(&d.b, 0, "slot5")).unwrap(), b"v5");
+    }
 
     #[test]
     fn explicit_restore_can_recreate_a_missing_save_folder() {

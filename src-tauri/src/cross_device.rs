@@ -1,7 +1,7 @@
 //! V2 orchestration: immutable Drive blobs + one Firestore CAS per whole game.
 use crate::{
     drive_gc::{self, PendingSweep, Policy},
-    firestore, gdrive, gdrive_auth,
+    drive_transfer, firestore, gdrive, gdrive_auth,
     models::{
         BackupMeta, CloudState, DriveCleanupReport, DriveFileFlatItem, DriveVersionBackup, GameEntry,
         SyncResult, SyncStructureDiff,
@@ -9,6 +9,7 @@ use crate::{
     safe_files,
     save_transaction::{self, Change},
     settings,
+    sync_progress::{Phase, Reporter},
     sync_v2::{self, Action, Baseline, BaselineFile, Entry, Key, Manifest, Mode, PROTOCOL},
 };
 use chrono::{DateTime, Utc};
@@ -16,6 +17,10 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Mutex, OnceLock,
+    },
 };
 use tauri::{AppHandle, Manager};
 
@@ -27,6 +32,10 @@ const BACKUPS: &str = "backups";
 const DEDUP_SNAPSHOT_LIMIT: usize = 30;
 /// (hash, object ID, size) of each live file pinned by an immutable snapshot.
 type SnapshotRefs = Vec<(String, String, u64)>;
+/// Concurrent object transfers per sync. Save sets are often many small files
+/// where latency, not bandwidth, dominates; a few parallel requests hide most
+/// of it while staying well inside Drive's per-user rate limits.
+const TRANSFER_WORKERS: usize = 4;
 fn operation_id() -> String {
     format!("{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..))
 }
@@ -51,6 +60,10 @@ struct Context<'a> {
     scope: String,
     store: PathBuf,
     work: Working,
+    /// Drive folder holding immutable objects, resolved once per operation
+    /// instead of 2-3 lookup requests per uploaded file.
+    objects_folder: OnceLock<String>,
+    progress: Reporter,
     _lock: File,
 }
 
@@ -139,6 +152,8 @@ impl<'a> Context<'a> {
             scope,
             store,
             work,
+            objects_folder: OnceLock::new(),
+            progress: Reporter::new(app, game_id),
             _lock: lock,
         })
     }
@@ -306,9 +321,16 @@ impl<'a> Context<'a> {
         }
         Ok(())
     }
-    fn upload_verified(&self, source: &Path, expected: &str) -> Result<String, String> {
+    fn objects_folder(&self) -> Result<&str, String> {
+        if let Some(id) = self.objects_folder.get() {
+            return Ok(id);
+        }
         let (_, folder) = gdrive::ensure_game_folders(self.app, &self.game.id)?;
-        let objects = gdrive::ensure_subfolder(self.app, &folder, OBJECTS)?;
+        let id = gdrive::ensure_subfolder(self.app, &folder, OBJECTS)?;
+        Ok(self.objects_folder.get_or_init(|| id))
+    }
+    fn upload_verified(&self, source: &Path, expected: &str) -> Result<String, String> {
+        let objects = self.objects_folder()?;
         let staged = self.work.0.join(format!("blob-{}", operation_id()));
         let mut input = File::open(source).map_err(|e| e.to_string())?;
         safe_files::replace_from_reader(&staged, &mut input, None, None)?;
@@ -316,18 +338,18 @@ impl<'a> Context<'a> {
             return Err("Save changed while staging upload; retry after closing the game".into());
         }
         // No existing_file_id: shared published blobs are NEVER overwritten.
-        let uploaded = gdrive::upload_file(self.app, &objects, &staged, None)?;
-        Ok(uploaded.id)
+        drive_transfer::upload_object(self.app, objects, &staged, &self.progress)
     }
     fn download_verified(&self, entry: &Entry) -> Result<PathBuf, String> {
         let target = self.work.0.join(format!("download-{}", operation_id()));
-        gdrive::download_file(
+        drive_transfer::download_object(
             self.app,
             entry
                 .object_id
                 .as_deref()
                 .ok_or("Cloud object ID missing")?,
             &target,
+            &self.progress,
         )?;
         let (hash, size) = sync_v2::hash_file(&target)?;
         if Some(hash.as_str()) != entry.content() || size != entry.size {
@@ -479,11 +501,88 @@ pub fn execute(app: &AppHandle, game_id: &str, mode: Mode) -> Result<SyncResult,
     execute_context(&context, mode, None)
 }
 
+/// Marks the progress bar finished however the operation ends.
+struct FinishProgress<'a>(&'a Reporter);
+impl Drop for FinishProgress<'_> {
+    fn drop(&mut self) {
+        self.0.finish();
+    }
+}
+
+/// One network transfer planned for the parallel phase.
+enum Transfer<'a> {
+    Upload(&'a Key, &'a Local),
+    Download(&'a Key, Entry),
+}
+impl Transfer<'_> {
+    fn size(&self) -> u64 {
+        match self {
+            Transfer::Upload(_, f) => f.size,
+            Transfer::Download(_, e) => e.size,
+        }
+    }
+}
+enum Transferred {
+    Uploaded(String),
+    Downloaded(PathBuf),
+}
+
+/// Run `f` over `items` on at most `workers` threads, preserving order.
+/// Stops handing out new work after the first error and returns it.
+fn run_parallel<T: Sync, R: Send>(
+    items: &[T],
+    workers: usize,
+    f: impl Fn(&T) -> Result<R, String> + Sync,
+) -> Result<Vec<R>, String> {
+    let next = AtomicUsize::new(0);
+    let failed = AtomicBool::new(false);
+    let results: Mutex<Vec<Option<R>>> = Mutex::new((0..items.len()).map(|_| None).collect());
+    let first_error: Mutex<Option<String>> = Mutex::new(None);
+    std::thread::scope(|scope| {
+        for _ in 0..workers.min(items.len()) {
+            scope.spawn(|| {
+                while !failed.load(Ordering::Relaxed) {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(item) = items.get(i) else { break };
+                    match f(item) {
+                        Ok(r) => {
+                            if let Ok(mut all) = results.lock() {
+                                all[i] = Some(r);
+                            }
+                        }
+                        Err(e) => {
+                            failed.store(true, Ordering::Relaxed);
+                            if let Ok(mut first) = first_error.lock() {
+                                first.get_or_insert(e);
+                            }
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+    });
+    if let Some(e) = first_error
+        .into_inner()
+        .map_err(|_| "Transfer worker failed")?
+    {
+        return Err(e);
+    }
+    results
+        .into_inner()
+        .map_err(|_| "Transfer worker failed")?
+        .into_iter()
+        .map(|r| r.ok_or_else(|| "Transfer did not complete".to_string()))
+        .collect()
+}
+
 fn execute_context(
     context: &Context<'_>,
     mode: Mode,
     snapshot: Option<Manifest>,
 ) -> Result<SyncResult, String> {
+    context.progress.phase(Phase::Checking);
+    let _finish = FinishProgress(&context.progress);
     if context.roots.iter().all(Option::is_none) {
         return Err("Save path is not set for this game".into());
     }
@@ -607,6 +706,73 @@ fn execute_context(
     } else {
         BTreeMap::new()
     };
+    // Plan every network transfer first, then run them in parallel. Identical
+    // content is uploaded once; objects already stored are reused (dedup).
+    let mut transfers = Vec::new();
+    let mut planned_hashes = BTreeSet::new();
+    for (key, action) in &actions {
+        match action {
+            Action::Upload => {
+                let file = local.get(key).ok_or("Local upload disappeared")?;
+                let stored = reusable
+                    .get(&file.hash)
+                    .is_some_and(|(_, size)| *size == file.size);
+                if !stored && planned_hashes.insert(file.hash.clone()) {
+                    transfers.push(Transfer::Upload(key, file));
+                }
+            }
+            Action::Download => {
+                let entry = next
+                    .files
+                    .iter()
+                    .find(|e| e.key == *key)
+                    .ok_or("Missing cloud entry")?;
+                transfers.push(Transfer::Download(key, entry.clone()));
+            }
+            _ => {}
+        }
+    }
+    // Largest first keeps all workers busy until the end.
+    transfers.sort_by_key(|t| std::cmp::Reverse(t.size()));
+    let count = |upload: bool| {
+        transfers
+            .iter()
+            .filter(|t| matches!(t, Transfer::Upload(..)) == upload)
+            .count() as u32
+    };
+    context.progress.begin_transfer(
+        count(true),
+        count(false),
+        transfers.iter().map(Transfer::size).sum(),
+    );
+    let results = run_parallel(&transfers, TRANSFER_WORKERS, |transfer| {
+        let (key, done) = match transfer {
+            Transfer::Upload(key, file) => (
+                key,
+                Transferred::Uploaded(context.upload_verified(&file.path, &file.hash)?),
+            ),
+            Transfer::Download(key, entry) => (
+                key,
+                Transferred::Downloaded(context.download_verified(entry)?),
+            ),
+        };
+        context.progress.file_done(&key.relative_path);
+        Ok(done)
+    })?;
+    let mut downloaded_files = BTreeMap::new();
+    for (transfer, result) in transfers.iter().zip(results) {
+        match (transfer, result) {
+            (Transfer::Upload(_, file), Transferred::Uploaded(id)) => {
+                reusable.insert(file.hash.clone(), (id, file.size));
+            }
+            (Transfer::Download(key, _), Transferred::Downloaded(path)) => {
+                downloaded_files.insert((*key).clone(), path);
+            }
+            _ => return Err("Transfer result mismatch".into()),
+        }
+    }
+    context.progress.phase(Phase::Finalizing);
+
     let mut changes = Vec::new();
     let mut uploaded = 0;
     let mut downloaded = 0;
@@ -615,14 +781,10 @@ fn execute_context(
         match action {
             Action::Upload => {
                 let file = local.get(key).ok_or("Local upload disappeared")?;
-                // Identical bytes already stored as an immutable object: reuse it.
+                // Uploaded above, or identical bytes already stored: reuse it.
                 let id = match reusable.get(&file.hash) {
                     Some((id, size)) if *size == file.size => id.clone(),
-                    _ => {
-                        let id = context.upload_verified(&file.path, &file.hash)?;
-                        reusable.insert(file.hash.clone(), (id.clone(), file.size));
-                        id
-                    }
+                    _ => return Err("Upload result missing".into()),
                 };
                 next.files.retain(|e| e.key != *key);
                 next.files.push(Entry {
@@ -652,12 +814,11 @@ fn execute_context(
                     .as_ref()
                     .ok_or("Save folder not configured")?;
                 let source = if *action == Action::Download {
-                    let entry = next
-                        .files
-                        .iter()
-                        .find(|e| e.key == *key)
-                        .ok_or("Missing cloud entry")?;
-                    Some(context.download_verified(entry)?)
+                    Some(
+                        downloaded_files
+                            .remove(key)
+                            .ok_or("Download result missing")?,
+                    )
                 } else {
                     None
                 };

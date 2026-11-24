@@ -1,8 +1,10 @@
 import { useEffect } from "react";
 import type { SyncResult } from "@/types/dashboard";
 import { GHOST_BTN } from "@/components/styles";
+import { SyncProgressBar } from "@/components/SyncProgressBar";
 
 interface Props {
+  gameId: string;
   /** True while a sync operation is in progress. */
   isSyncing: boolean;
   /** The most recent SyncResult, or null if no sync has run this session. */
@@ -16,11 +18,11 @@ interface Props {
  * The parent controls visibility — this component is only rendered when visible.
  *
  * States:
- *  - syncing  — spinner + "Syncing save data…"
+ *  - syncing  — spinner + "Syncing save data…" + live progress bar
  *  - success  — green checkmark + counts, auto-dismisses after 3 s
  *  - error    — red X + error message, requires manual close
  */
-export function SyncProgressModal({ isSyncing, result, onClose }: Props) {
+export function SyncProgressModal({ gameId, isSyncing, result, onClose }: Props) {
   // Auto-dismiss successful syncs after 3 s.
   useEffect(() => {
     if (!isSyncing && result && !result.error) {
@@ -60,7 +62,7 @@ export function SyncProgressModal({ isSyncing, result, onClose }: Props) {
               />
             </svg>
             <p className="m-0 text-base font-semibold text-white">Syncing save data…</p>
-            <p className="m-0 text-sm text-[#9aa8c7]">Comparing local and cloud saves</p>
+            <SyncProgressBar gameId={gameId} />
           </div>
         )}
 
