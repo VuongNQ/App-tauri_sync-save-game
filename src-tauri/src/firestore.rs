@@ -9,14 +9,11 @@ use crate::{
     },
 };
 
-const PROJECT_ID: &str = match option_env!("GOOGLE_CLOUD_PROJECT_ID") {
-    Some(v) => v,
-    None => "",
-};
+use crate::firebase_auth::{DATABASE_ID, PROJECT_ID};
 
 fn base_url() -> String {
     format!(
-        "https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
+        "https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents"
     )
 }
 
@@ -46,7 +43,7 @@ pub fn commit_v2_manifest(app: &AppHandle, user_id: &str, game_id: &str, expecte
         Some(version) => json!({"updateTime": version}),
         None => json!({"exists": false}),
     };
-    let name = format!("projects/{PROJECT_ID}/databases/(default)/documents/users/{user_id}/syncMeta/v2-{}", crate::sync_v2::hash_bytes(game_id.as_bytes()));
+    let name = format!("projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents/users/{user_id}/syncMeta/v2-{}", crate::sync_v2::hash_bytes(game_id.as_bytes()));
     let body = json!({"writes": [{"update": {"name": name, "fields": {"data": {"stringValue": data}, "gameId": {"stringValue": game_id}, "protocol": {"integerValue": "2"}}}, "currentDocument": condition}]}).to_string();
     let response = http_client::authed_post_json(app, &format!("{}:commit", base_url()), &body);
     match response {
@@ -402,10 +399,10 @@ pub fn increment_game_play_time(
     let delta_i64 = i64::try_from(delta_seconds)
         .map_err(|_| format!("Playtime delta too large: {delta_seconds}"))?;
     let commit_url = format!(
-        "https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents:commit"
+        "https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents:commit"
     );
     let doc_name = format!(
-        "projects/{PROJECT_ID}/databases/(default)/documents/users/{user_id}/games/{game_id}"
+        "projects/{PROJECT_ID}/databases/{DATABASE_ID}/documents/users/{user_id}/games/{game_id}"
     );
     let body = json!({
         "writes": [

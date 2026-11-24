@@ -1,8 +1,22 @@
 {
-  "firestore": { "rules": "security/firestore.rules" },
+  "firestore": [
+    {
+      "database": "(default)",
+      "rules": "security/firestore.rules"
+    },
+    {
+      "database": "savegame",
+      "rules": "security/firestore.rules"
+    }
+  ],
   "emulators": {
-    "firestore": { "host": "127.0.0.1", "port": 8080 },
-    "ui": { "enabled": false },
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 8080
+    },
+    "ui": {
+      "enabled": false
+    },
     "singleProjectMode": true
   }
 }

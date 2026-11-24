@@ -10,8 +10,9 @@ fn request(
 ) -> Result<(u16, String), String> {
     let _lease = session::current(app)?;
     let expected = format!(
-        "https://firestore.googleapis.com/v1/projects/{}/databases/(default)/",
-        firebase_auth::PROJECT_ID
+        "https://firestore.googleapis.com/v1/projects/{}/databases/{}/",
+        firebase_auth::PROJECT_ID,
+        firebase_auth::DATABASE_ID
     );
     if !url.starts_with(&expected) {
         return Err("Refusing Firebase credentials for an unexpected endpoint".into());

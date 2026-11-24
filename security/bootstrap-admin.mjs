@@ -8,17 +8,17 @@ import { rolePlan } from './admin-policy.mjs';
 
 const { values } = parseArgs({ options: {
   project: { type:'string' }, uid: { type:'string' }, 'google-id': { type:'string' },
-  role: { type:'string' }, apply: { type:'boolean', default:false },
+  role: { type:'string' }, database: { type:'string', default:'(default)' }, apply: { type:'boolean', default:false },
 } });
 if (!values.project || !values.uid || !values['google-id'] || !values.role) {
-  throw new Error('Usage: node bootstrap-admin.mjs --project PROJECT --uid FIREBASE_UID --google-id GOOGLE_ID --role admin|user [--apply]');
+  throw new Error('Usage: node bootstrap-admin.mjs --project PROJECT [--database DATABASE_ID] --uid FIREBASE_UID --google-id GOOGLE_ID --role admin|user [--apply]');
 }
 const app = initializeApp({ credential:applicationDefault(), projectId:values.project });
 const user = await getAuth(app).getUser(values.uid);
 const plan = rolePlan({ project:values.project, uid:values.uid, googleId:values['google-id'], role:values.role, user, apply:values.apply });
-console.log(JSON.stringify(plan,null,2));
+console.log(JSON.stringify({ ...plan, database: values.database },null,2));
 if (plan.apply) {
-  await getFirestore(app).doc(plan.path).set(plan.data);
+  await getFirestore(app, values.database).doc(plan.path).set(plan.data);
   console.log('Protected role updated. Reconnect or refresh the desktop app to read it.');
 } else {
   console.log('Dry run only. No role was changed.');

@@ -9,6 +9,12 @@ pub const PROJECT_ID: &str = match option_env!("GOOGLE_CLOUD_PROJECT_ID") {
     Some(v) => v,
     None => "",
 };
+/// Firestore database id. Unset or empty keeps the project's `(default)`
+/// database so existing builds and data are unchanged.
+pub const DATABASE_ID: &str = match option_env!("FIRESTORE_DATABASE_ID") {
+    Some(v) if !v.is_empty() => v,
+    _ => "(default)",
+};
 const API_KEY: &str = match option_env!("FIREBASE_WEB_API_KEY") {
     Some(v) => v,
     None => "",
@@ -18,7 +24,25 @@ pub fn ensure_config() -> Result<(), String> {
     if PROJECT_ID.is_empty() || API_KEY.is_empty() {
         return Err("Firebase account security is not configured. Set GOOGLE_CLOUD_PROJECT_ID and FIREBASE_WEB_API_KEY for this app's Firebase project before building.".into());
     }
+    if !is_valid_database_id(DATABASE_ID) {
+        return Err("FIRESTORE_DATABASE_ID is invalid. Use (default) or 4-63 lowercase letters, digits and hyphens, starting with a letter.".into());
+    }
     Ok(())
+}
+
+/// Firestore database ids: `(default)`, or 4-63 chars of `[a-z0-9-]`,
+/// starting with a letter and not ending with a hyphen.
+pub fn is_valid_database_id(id: &str) -> bool {
+    if id == "(default)" {
+        return true;
+    }
+    let bytes = id.as_bytes();
+    (4..=63).contains(&bytes.len())
+        && bytes[0].is_ascii_lowercase()
+        && bytes[bytes.len() - 1] != b'-'
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-')
 }
 
 fn now() -> u64 {
@@ -148,4 +172,24 @@ pub fn get_id_token(app: &AppHandle, force_refresh: bool) -> Result<String, Stri
     }
     gdrive_auth::save_tokens(app, &session)?;
     Ok(session.firebase.ok_or("Missing Firebase session")?.id_token)
+}
+
+#[cfg(test)]
+mod database_id_tests {
+    use super::is_valid_database_id;
+
+    #[test]
+    fn accepts_default_and_named_ids() {
+        assert!(is_valid_database_id("(default)"));
+        assert!(is_valid_database_id("savegame"));
+        assert!(is_valid_database_id("save-game-2"));
+    }
+
+    #[test]
+    fn rejects_malformed_ids() {
+        for id in ["", "abc", "Savegame", "1save", "save-", "save/game", "save game", "(other)"] {
+            assert!(!is_valid_database_id(id), "{id} should be rejected");
+        }
+        assert!(!is_valid_database_id(&"a".repeat(64)));
+    }
 }
