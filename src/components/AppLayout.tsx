@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router";
 
+import { useT } from "../i18n";
 import { useAppUpdateQuery, useAuthStatusQuery } from "../queries";
 import { NAV_LINK, NAV_LINK_ACTIVE } from "./styles";
 
@@ -8,6 +9,7 @@ export function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const { data: authStatus } = useAuthStatusQuery();
   const { data: updateInfo } = useAppUpdateQuery();
+  const t = useT();
 
   const iconNavLink = "flex items-center justify-center p-3 rounded-2xl text-[#c7d3f7] transition-colors hover:bg-[rgba(86,133,255,0.12)]";
   const iconNavLinkActive = "flex items-center justify-center p-3 rounded-2xl text-white bg-[rgba(86,133,255,0.18)]";
@@ -29,7 +31,8 @@ export function AppLayout() {
           <button
             onClick={() => setCollapsed((c) => !c)}
             className="rounded-xl p-1.5 text-[#9aa8c7] hover:bg-white/10 hover:text-white transition-colors"
-            title={collapsed ? "Expand menu" : "Collapse menu"}
+            title={collapsed ? t("nav.expand") : t("nav.collapse")}
+            aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}
           >
             <ChevronIcon collapsed={collapsed} />
           </button>
@@ -40,35 +43,35 @@ export function AppLayout() {
             to="/"
             end
             className={({ isActive }) => (collapsed ? (isActive ? iconNavLinkActive : iconNavLink) : isActive ? NAV_LINK_ACTIVE : NAV_LINK)}
-            title={collapsed ? "Dashboard" : undefined}
+            title={collapsed ? t("nav.dashboard") : undefined}
           >
             <DashboardIcon />
-            {!collapsed && "Dashboard"}
+            {!collapsed && t("nav.dashboard")}
           </NavLink>
           <NavLink
             to="/devices"
             className={({ isActive }) => (collapsed ? (isActive ? iconNavLinkActive : iconNavLink) : isActive ? NAV_LINK_ACTIVE : NAV_LINK)}
-            title={collapsed ? "Devices" : undefined}
+            title={collapsed ? t("nav.devices") : undefined}
           >
             <DevicesIcon />
-            {!collapsed && "Devices"}
+            {!collapsed && t("nav.devices")}
           </NavLink>
           <NavLink
             to="/settings"
             className={({ isActive }) => (collapsed ? (isActive ? iconNavLinkActive : iconNavLink) : isActive ? NAV_LINK_ACTIVE : NAV_LINK)}
-            title={collapsed ? "Settings" : undefined}
+            title={collapsed ? t("nav.settings") : undefined}
           >
             <SettingsIcon />
-            {!collapsed && "Settings"}
+            {!collapsed && t("nav.settings")}
           </NavLink>
           {authStatus?.role === "admin" && (
             <NavLink
               to="/admin"
               className={({ isActive }) => (collapsed ? (isActive ? iconNavLinkActive : iconNavLink) : isActive ? NAV_LINK_ACTIVE : NAV_LINK)}
-              title={collapsed ? "Admin" : undefined}
+              title={collapsed ? t("nav.admin") : undefined}
             >
               <AdminIcon />
-              {!collapsed && "Admin"}
+              {!collapsed && t("nav.admin")}
             </NavLink>
           )}
         </nav>
@@ -80,14 +83,14 @@ export function AppLayout() {
           <div className="rounded-2xl border border-[rgba(104,132,255,0.22)] bg-[rgba(87,109,255,0.12)] px-4 py-3 text-sm text-[#dbe3ff]">
             <div className="flex items-center justify-between gap-3 max-[560px]:flex-col max-[560px]:items-start">
               <div>
-                <p className="m-0 font-semibold text-[#9effc3]">Update available: v{updateInfo.update.version}</p>
-                <p className="m-0 mt-0.5 text-xs text-[#c7d3f7]">Open Settings to download and install the latest release.</p>
+                <p className="m-0 font-semibold text-[#9effc3]">{t("update.bannerTitle", { version: updateInfo.update.version })}</p>
+                <p className="m-0 mt-0.5 text-xs text-[#c7d3f7]">{t("update.bannerBody")}</p>
               </div>
               <NavLink
                 to="/settings"
                 className="rounded-xl bg-white/10 px-4 py-2 text-xs font-medium text-[#eef4ff] transition-colors hover:bg-white/15"
               >
-                Open Settings
+                {t("update.openSettings")}
               </NavLink>
             </div>
           </div>

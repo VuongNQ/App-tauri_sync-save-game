@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 
+import { useT } from "../i18n";
+
 interface ToastProps {
   message: string;
   type: "success" | "error";
@@ -8,6 +10,7 @@ interface ToastProps {
 }
 
 export function Toast({ message, type, onDismiss, duration = 3500 }: ToastProps) {
+  const t = useT();
   useEffect(() => {
     const timer = setTimeout(onDismiss, duration);
     return () => clearTimeout(timer);
@@ -32,7 +35,7 @@ export function Toast({ message, type, onDismiss, duration = 3500 }: ToastProps)
         type="button"
         className="ml-2 opacity-50 hover:opacity-100 transition-opacity leading-none"
         onClick={onDismiss}
-        aria-label="Dismiss notification"
+        aria-label={t("common.dismiss")}
       >
         ✕
       </button>

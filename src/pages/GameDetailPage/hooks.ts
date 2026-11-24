@@ -3,12 +3,14 @@
 import { useState } from "react";
 import { useCheckSyncDiffMutation, usePushToCloudMutation, useRestoreFromCloudMutation, useSyncGameMutation } from "../../queries";
 import { SyncStructureDiff } from "../../types/dashboard";
+import { useT } from "../../i18n";
 import { msg } from "../../utils";
 
 export type SyncMethod = "auto" | "restore" | "push";
 
 export function useRestoreFromDriveFlow(gameId: string, setToast: (t: { message: string; type: "success" | "error" } | null) => void) {
   const [showModal, setShowModal] = useState(false);
+  const t = useT();
   const [syncDiff, setSyncDiff] = useState<SyncStructureDiff | null>(null);
 
   const checkDiffMutation = useCheckSyncDiffMutation();
@@ -24,14 +26,14 @@ export function useRestoreFromDriveFlow(gameId: string, setToast: (t: { message:
       onSuccess: (diff) => {
         if (!diff.cloudHasData) {
           setToast({
-            message: "No cloud saves found. Sync to Drive first.",
+            message: t("restore.noCloud"),
             type: "error",
           });
           return;
         }
         if (!diff.hasDiff) {
           setToast({
-            message: "Drive and local are already identical — nothing to restore.",
+            message: t("restore.identical"),
             type: "success",
           });
           return;
@@ -41,7 +43,7 @@ export function useRestoreFromDriveFlow(gameId: string, setToast: (t: { message:
       },
       onError: (err) => {
         setToast({
-          message: msg(err, "Failed to check sync status."),
+          message: msg(err, t("restore.errorCheck")),
           type: "error",
         });
       },
@@ -60,11 +62,11 @@ export function useRestoreFromDriveFlow(gameId: string, setToast: (t: { message:
           if (data.error) setToast({ message: data.error, type: "error" });
           else
             setToast({
-              message: `Sync complete — ↑${data.uploaded} ↓${data.downloaded} file(s)`,
+              message: t("sync.completeToast", { up: data.uploaded, down: data.downloaded }),
               type: "success",
             });
         },
-        onError: (err) => setToast({ message: msg(err, "Sync failed."), type: "error" }),
+        onError: (err) => setToast({ message: msg(err, t("sync.failed")), type: "error" }),
       });
     } else if (method === "restore") {
       restoreMutation.mutate(gameId, {
@@ -72,11 +74,11 @@ export function useRestoreFromDriveFlow(gameId: string, setToast: (t: { message:
           if (data.error) setToast({ message: data.error, type: "error" });
           else
             setToast({
-              message: `Restore complete — ↓${data.downloaded} file(s) downloaded`,
+              message: t("restore.complete", { down: data.downloaded }),
               type: "success",
             });
         },
-        onError: (err) => setToast({ message: msg(err, "Restore failed."), type: "error" }),
+        onError: (err) => setToast({ message: msg(err, t("restore.failed")), type: "error" }),
       });
     } else {
       pushMutation.mutate(gameId, {
@@ -84,13 +86,13 @@ export function useRestoreFromDriveFlow(gameId: string, setToast: (t: { message:
           if (data.error) setToast({ message: data.error, type: "error" });
           else
             setToast({
-              message: `Push complete — ↑${data.uploaded} file(s) uploaded`,
+              message: t("push.complete", { up: data.uploaded }),
               type: "success",
             });
         },
         onError: (err) =>
           setToast({
-            message: msg(err, "Push to Drive failed."),
+            message: msg(err, t("push.failed")),
             type: "error",
           }),
       });

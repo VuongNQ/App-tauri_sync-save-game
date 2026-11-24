@@ -2,6 +2,7 @@
 
 import { CARD, TOGGLE_THUMB_OFF, TOGGLE_THUMB_ON, TOGGLE_TRACK_OFF, TOGGLE_TRACK_ON } from "@/components/styles";
 import { useToggleAutoSyncMutation, useToggleTrackChangesMutation } from "@/queries";
+import { useT } from "@/i18n";
 import { msg } from "@/utils";
 
 interface TrackingSyncCardProps {
@@ -17,15 +18,16 @@ interface TrackingSyncCardProps {
 
 function TrackingSyncCard({ gameId, savePath, trackChanges, autoSync, isSyncing, exeName, isGamePlaying, onError }: TrackingSyncCardProps) {
   const toggleTrack = useToggleTrackChangesMutation();
+  const t = useT();
 
   const toggleAuto = useToggleAutoSyncMutation();
 
   function handleTrackChanges(enabled: boolean) {
-    toggleTrack.mutate({ gameId, enabled }, { onError: (err) => onError(msg(err, "Failed to toggle tracking.")) });
+    toggleTrack.mutate({ gameId, enabled }, { onError: (err) => onError(msg(err, t("tracking.errorTrack"))) });
   }
 
   function handleAutoSync(enabled: boolean) {
-    toggleAuto.mutate({ gameId, enabled }, { onError: (err) => onError(msg(err, "Failed to toggle auto-sync.")) });
+    toggleAuto.mutate({ gameId, enabled }, { onError: (err) => onError(msg(err, t("tracking.errorAuto"))) });
   }
 
   const trackDisabled = isSyncing || toggleTrack.isPending || toggleAuto.isPending;
@@ -33,7 +35,7 @@ function TrackingSyncCard({ gameId, savePath, trackChanges, autoSync, isSyncing,
 
   return (
     <div className={CARD}>
-      <h3 className="m-0 mb-4 font-semibold">Tracking &amp; Sync</h3>
+      <h3 className="m-0 mb-4 font-semibold">{t("tracking.title")}</h3>
 
       {/* Game running status banner */}
       {trackChanges && isGamePlaying && (
@@ -45,21 +47,21 @@ function TrackingSyncCard({ gameId, savePath, trackChanges, autoSync, isSyncing,
           }`}
         >
           <span>🎮</span>
-          {autoSync ? "Game is running — will sync on close" : "Game is running — Sync pending..."}
+          {autoSync ? t("tracking.runningAuto") : t("tracking.runningPending")}
         </div>
       )}
 
-      {!savePath && <p className="m-0 mb-4 text-sm text-[#ffd5a0]">Set a save folder path so synced files have a destination.</p>}
+      {!savePath && <p className="m-0 mb-4 text-sm text-[#ffd5a0]">{t("tracking.noSavePath")}</p>}
 
       <div className="grid gap-4">
         {/* Track process */}
         <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-2xl border border-[rgba(165,185,255,0.08)] bg-[rgba(9,14,28,0.55)]">
           <div className="grid gap-0.5">
-            <span className="font-semibold text-sm text-[#c7d3f7]">Track process</span>
-            <span className="text-xs text-[#9aa8c7]">Detect process exit by executable name and trigger sync. Executable path is optional.</span>
+            <span id={`track-label-${gameId}`} className="font-semibold text-sm text-[#c7d3f7]">{t("tracking.track")}</span>
+            <span className="text-xs text-[#9aa8c7]">{t("tracking.trackHint")}</span>
             {trackChanges && !exeName && (
               <span className="text-xs text-[#ffd5a0] mt-1">
-                Open settings and enter the game&apos;s .exe name to activate process tracking.
+                {t("tracking.trackNeedsExe")}
               </span>
             )}
           </div>
@@ -67,6 +69,7 @@ function TrackingSyncCard({ gameId, savePath, trackChanges, autoSync, isSyncing,
             type="button"
             role="switch"
             aria-checked={trackChanges}
+            aria-labelledby={`track-label-${gameId}`}
             disabled={trackDisabled}
             onClick={() => handleTrackChanges(!trackChanges)}
             className={`relative inline-flex shrink-0 h-6 w-11 rounded-full transition-colors duration-200 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -84,13 +87,14 @@ function TrackingSyncCard({ gameId, savePath, trackChanges, autoSync, isSyncing,
         {/* Auto-sync */}
         <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-2xl border border-[rgba(165,185,255,0.08)] bg-[rgba(9,14,28,0.55)]">
           <div className="grid gap-0.5">
-            <span className="font-semibold text-sm text-[#c7d3f7]">Auto-sync</span>
-            <span className="text-xs text-[#9aa8c7]">Automatically sync saves on process exit: download newer files from Drive and upload newer local changes.</span>
+            <span id={`auto-label-${gameId}`} className="font-semibold text-sm text-[#c7d3f7]">{t("tracking.auto")}</span>
+            <span className="text-xs text-[#9aa8c7]">{t("tracking.autoHint")}</span>
           </div>
           <button
             type="button"
             role="switch"
             aria-checked={autoSync}
+            aria-labelledby={`auto-label-${gameId}`}
             disabled={autoDisabled}
             onClick={() => handleAutoSync(!autoSync)}
             className={`relative inline-flex shrink-0 h-6 w-11 rounded-full transition-colors duration-200 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${

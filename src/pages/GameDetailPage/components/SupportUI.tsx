@@ -2,6 +2,7 @@
 
 import { SaveFileTree } from "@/components/SaveFileTree";
 import { EYEBROW, MUTED } from "@/components/styles";
+import { useT } from "@/i18n";
 import { PathSaveInfo, SaveInfo } from "@/types/dashboard";
 import { formatBytes, formatLocalTime } from "@/utils";
 
@@ -32,6 +33,7 @@ function PathInfoSection({
   entry: PathSaveInfo;
   onOpenFolder?: () => void;
 }) {
+  const t = useT();
   // Build a SaveInfo-compatible object so SaveFileTree can render it unchanged.
   const treeInfo: SaveInfo = {
     gameId: "",
@@ -58,7 +60,8 @@ function PathInfoSection({
           {onOpenFolder && (
             <button
               onClick={onOpenFolder}
-              title={`Open ${entry.label} folder`}
+              title={t("saveInfo.openNamedFolder", { name: entry.label })}
+              aria-label={t("saveInfo.openNamedFolder", { name: entry.label })}
               className="p-1 rounded-lg cursor-pointer text-[#9aa8c7] hover:text-white hover:bg-white/10 transition-colors"
             >
               <FolderIcon />
@@ -87,17 +90,19 @@ export function SaveInfoPanel({
   onOpenFolderForPath?: (rawPath: string) => void;
 }) {
   const isMultiPath = info.pathInfos.length > 1;
+  const t = useT();
 
   return (
     <div className="mt-4 p-4 rounded-[18px] bg-[rgba(9,14,28,0.75)] border border-[rgba(165,185,255,0.08)]">
       <div className="flex items-center justify-between mb-1">
-        <p className={`${EYEBROW} mb-0`}>Local save info</p>
+        <p className={`${EYEBROW} mb-0`}>{t("saveInfo.title")}</p>
         <div className="flex items-center gap-1">
           {/* In single-path mode show the global open-folder button */}
           {!isMultiPath && onOpenFolder && (
             <button
               onClick={onOpenFolder}
-              title="Open save folder"
+              title={t("saveInfo.openFolder")}
+              aria-label={t("saveInfo.openFolder")}
               className="p-1 rounded-lg cursor-pointer text-[#9aa8c7] hover:text-white hover:bg-white/10 transition-colors"
             >
               <FolderIcon />
@@ -107,7 +112,8 @@ export function SaveInfoPanel({
             <button
               onClick={onRefresh}
               disabled={isRefreshing}
-              title="Refresh local save info"
+              title={t("saveInfo.refresh")}
+              aria-label={t("saveInfo.refresh")}
               className="p-1 rounded-lg cursor-pointer text-[#9aa8c7] hover:text-white hover:bg-white/10 transition-colors disabled:opacity-40"
             >
               <svg
@@ -135,15 +141,15 @@ export function SaveInfoPanel({
       {/* Aggregate stats */}
       <dl className="grid gap-2 grid-cols-3 m-0 mt-2 max-[720px]:grid-cols-1">
         <div>
-          <dt className="text-[#c7d3f7] text-sm">Total files</dt>
+          <dt className="text-[#c7d3f7] text-sm">{t("saveInfo.totalFiles")}</dt>
           <dd className={`${MUTED} m-0`}>{info.totalFiles}</dd>
         </div>
         <div>
-          <dt className="text-[#c7d3f7] text-sm">Total size</dt>
+          <dt className="text-[#c7d3f7] text-sm">{t("saveInfo.totalSize")}</dt>
           <dd className={`${MUTED} m-0`}>{formatBytes(info.totalSize)}</dd>
         </div>
         <div>
-          <dt className="text-[#c7d3f7] text-sm">Last modified</dt>
+          <dt className="text-[#c7d3f7] text-sm">{t("saveInfo.lastModified")}</dt>
           <dd className={`${MUTED} m-0`}>{formatLocalTime(info.lastModified)}</dd>
         </div>
       </dl>
@@ -176,25 +182,26 @@ export function SyncResultPanel({
     error: string | null;
   };
 }) {
+  const t = useT();
   return (
     <div
       className={`mt-4 p-4 rounded-[18px] border ${result.error ? "bg-[rgba(40,10,10,0.75)] border-[rgba(255,120,120,0.2)]" : "bg-[rgba(9,14,28,0.75)] border-[rgba(165,185,255,0.08)]"}`}
     >
-      <p className={EYEBROW}>{result.error ? "Sync error" : "Sync complete"}</p>
+      <p className={EYEBROW}>{result.error ? t("syncResult.error") : t("syncModal.complete")}</p>
       {result.error ? (
         <p className="m-0 text-sm text-[#ffd5d5]">{result.error}</p>
       ) : (
         <dl className="grid gap-2 grid-cols-3 m-0">
           <div>
-            <dt className="text-[#c7d3f7] text-sm">Uploaded</dt>
+            <dt className="text-[#c7d3f7] text-sm">{t("sync.uploaded")}</dt>
             <dd className={`${MUTED} m-0`}>{result.uploaded}</dd>
           </div>
           <div>
-            <dt className="text-[#c7d3f7] text-sm">Downloaded</dt>
+            <dt className="text-[#c7d3f7] text-sm">{t("sync.downloaded")}</dt>
             <dd className={`${MUTED} m-0`}>{result.downloaded}</dd>
           </div>
           <div>
-            <dt className="text-[#c7d3f7] text-sm">Skipped</dt>
+            <dt className="text-[#c7d3f7] text-sm">{t("sync.skipped")}</dt>
             <dd className={`${MUTED} m-0`}>{result.skipped}</dd>
           </div>
         </dl>

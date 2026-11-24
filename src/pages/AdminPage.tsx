@@ -4,6 +4,7 @@ import { useAdminConfigQuery, useAdminUsersQuery, useUpdateAdminConfigMutation, 
 import { DEFAULT_DRIVE_QUOTA_BYTES } from "../types/dashboard";
 import type { UserProfile, UserRole } from "../types/dashboard";
 import { BTN, CARD, EYEBROW, MUTED } from "../components/styles";
+import { useT } from "../i18n";
 import { formatLocalTime } from "../utils";
 
 export function AdminPage() {
@@ -11,22 +12,23 @@ export function AdminPage() {
   const configQuery = useAdminConfigQuery();
   const updateConfig = useUpdateAdminConfigMutation();
   const updateRole = useUpdateUserRoleMutation();
+  const t = useT();
 
   return (
     <>
       <div>
-        <p className={EYEBROW}>Administration</p>
-        <h2 className="m-0">Admin</h2>
-        <p className={`mt-1 text-sm ${MUTED}`}>Manage user roles and the global Drive quota.</p>
+        <p className={EYEBROW}>{t("admin.eyebrow")}</p>
+        <h2 className="m-0">{t("nav.admin")}</h2>
+        <p className={`mt-1 text-sm ${MUTED}`}>{t("admin.intro")}</p>
       </div>
 
       <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold">Drive quota</h3>
+        <h3 className="m-0 mb-4 font-semibold">{t("admin.quota")}</h3>
         {configQuery.isLoading ? (
           <div className="h-10 w-56 animate-pulse rounded-xl bg-[rgba(165,185,255,0.08)]" />
         ) : configQuery.error ? (
           <p className="m-0 text-sm text-[#ffd5d5]">
-            Failed to load quota: {configQuery.error instanceof Error ? configQuery.error.message : String(configQuery.error)}
+            {t("admin.errorQuota", { error: configQuery.error instanceof Error ? configQuery.error.message : String(configQuery.error) })}
           </p>
         ) : (
           <QuotaEditor
@@ -39,15 +41,15 @@ export function AdminPage() {
       </div>
 
       <div className={CARD}>
-        <h3 className="m-0 mb-4 font-semibold">Users</h3>
+        <h3 className="m-0 mb-4 font-semibold">{t("admin.users")}</h3>
         {usersQuery.isLoading ? (
           <UserListSkeleton />
         ) : usersQuery.error ? (
           <p className="m-0 text-sm text-[#ffd5d5]">
-            Failed to load users: {usersQuery.error instanceof Error ? usersQuery.error.message : String(usersQuery.error)}
+            {t("admin.errorUsers", { error: usersQuery.error instanceof Error ? usersQuery.error.message : String(usersQuery.error) })}
           </p>
         ) : !usersQuery.data || usersQuery.data.length === 0 ? (
-          <p className={`m-0 text-sm ${MUTED}`}>No users found yet.</p>
+          <p className={`m-0 text-sm ${MUTED}`}>{t("admin.noUsers")}</p>
         ) : (
           <div className="grid gap-3">
             {usersQuery.data.map((user) => (
@@ -75,6 +77,7 @@ function UserRow({
   pending: boolean;
 }) {
   const [role, setRole] = useState<UserRole>(user.role);
+  const t = useT();
 
   return (
     <div className="rounded-2xl border border-[rgba(140,165,241,0.12)] bg-[rgba(7,12,23,0.35)] p-4">
@@ -84,7 +87,7 @@ function UserRow({
           <p className={`m-0 text-xs ${MUTED}`}>{user.email}</p>
         </div>
         <div className="flex items-center gap-2">
-          <span className={`text-xs ${MUTED}`}>Role</span>
+          <span className={`text-xs ${MUTED}`}>{t("admin.role")}</span>
           <select
             value={role}
             onChange={(e) => setRole(e.target.value as UserRole)}
@@ -99,13 +102,13 @@ function UserRow({
             disabled={pending || role === user.role}
             onClick={() => onChangeRole(role)}
           >
-            Save
+            {t("common.save")}
           </button>
         </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-xs">
-        <span className={MUTED}>Registered: {formatLocalTime(user.registeredAt)}</span>
-        <span className={MUTED}>Last seen: {formatLocalTime(user.lastSeenAt)}</span>
+        <span className={MUTED}>{t("admin.registered", { date: formatLocalTime(user.registeredAt) })}</span>
+        <span className={MUTED}>{t("admin.lastSeen", { date: formatLocalTime(user.lastSeenAt) })}</span>
         <span className={MUTED}>ID: {user.userId}</span>
       </div>
     </div>
@@ -121,6 +124,7 @@ function QuotaEditor({
   isSaving: boolean;
   onSave: (driveQuotaBytes: number) => void;
 }) {
+  const t = useT();
   const [quotaMb, setQuotaMb] = useState(() => String(Math.max(1, Math.round(driveQuotaBytes / 1024 / 1024))));
 
   return (
@@ -133,7 +137,7 @@ function QuotaEditor({
       }}
     >
       <label className="grid gap-1">
-        <span className={`text-xs ${MUTED}`}>Global limit (MB)</span>
+        <span className={`text-xs ${MUTED}`}>{t("admin.globalLimit")}</span>
         <input
           type="number"
           min={1}
@@ -147,9 +151,9 @@ function QuotaEditor({
         className={`${BTN} rounded-xl bg-indigo-500/20 px-4 py-2 text-sm font-medium text-indigo-300 hover:bg-indigo-500/30 disabled:opacity-50`}
         disabled={isSaving}
       >
-        {isSaving ? "Saving…" : "Save quota"}
+        {isSaving ? t("common.saving") : t("admin.saveQuota")}
       </button>
-      <p className={`m-0 text-xs ${MUTED}`}>Current limit: {formatBytes(driveQuotaBytes)}</p>
+      <p className={`m-0 text-xs ${MUTED}`}>{t("admin.currentLimit", { size: formatBytes(driveQuotaBytes) })}</p>
     </form>
   );
 }

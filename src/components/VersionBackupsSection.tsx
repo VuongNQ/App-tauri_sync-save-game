@@ -7,6 +7,7 @@ import {
   useVersionBackupsQuery,
 } from "../queries";
 import type { DriveVersionBackup } from "../types/dashboard";
+import { getLocale, useT } from "../i18n";
 import { msg } from "../utils";
 import { ConfirmModal } from "./ConfirmModal";
 import { CARD, DANGER_BTN, EYEBROW, GHOST_BTN, INPUT_CLS, MUTED, PRIMARY_BTN, SECONDARY_BTN } from "./styles";
@@ -17,6 +18,7 @@ interface Props {
 
 export function VersionBackupsSection({ gameId }: Props) {
   const [isOpen, setIsOpen] = useState(false);
+  const t = useT();
 
   const { data: backups, isLoading, isError, error, refetch } = useVersionBackupsQuery(gameId, isOpen);
 
@@ -35,7 +37,7 @@ export function VersionBackupsSection({ gameId }: Props) {
           setShowCreateForm(false);
           setLabelInput("");
         },
-        onError: (err) => setCreateError(msg(err, "Failed to create backup.")),
+        onError: (err) => setCreateError(msg(err, t("backups.errorCreate"))),
       }
     );
   }
@@ -49,8 +51,8 @@ export function VersionBackupsSection({ gameId }: Props) {
         aria-expanded={isOpen}
       >
         <div>
-          <p className={EYEBROW}>Version backups</p>
-          <h3 className="m-0 font-semibold">Save snapshots</h3>
+          <p className={EYEBROW}>{t("backups.eyebrow")}</p>
+          <h3 className="m-0 font-semibold">{t("backups.title")}</h3>
         </div>
         <span className="text-[#7dc9ff] text-lg shrink-0">{isOpen ? "▲" : "▼"}</span>
       </button>
@@ -58,8 +60,7 @@ export function VersionBackupsSection({ gameId }: Props) {
       {isOpen && (
         <div className="mt-5 grid gap-4">
           <p className={`m-0 text-xs ${MUTED}`}>
-            New snapshots include nested files and every save path. Previous versions remain available for recovery. Legacy snapshots have
-            limited coverage.
+            {t("backups.intro")}
           </p>
           {/* Create backup area */}
           {!showCreateForm ? (
@@ -72,19 +73,19 @@ export function VersionBackupsSection({ gameId }: Props) {
                 setShowCreateForm(true);
               }}
             >
-              + Create backup
+              + {t("backups.create")}
             </button>
           ) : (
             <div className="rounded-2xl border border-[rgba(165,185,255,0.12)] bg-[rgba(9,14,28,0.75)] p-4 grid gap-3">
-              <p className="m-0 text-sm font-medium text-[#c7d3f7]">New version backup</p>
+              <p className="m-0 text-sm font-medium text-[#c7d3f7]">{t("backups.newTitle")}</p>
               <div>
                 <label htmlFor="backup-label" className="block text-xs text-[#9aa8c7] mb-1">
-                  Label <span className="italic">(optional)</span>
+                  {t("backups.label")} <span className="italic">({t("common.optional")})</span>
                 </label>
                 <input
                   id="backup-label"
                   className={`${INPUT_CLS} text-sm`}
-                  placeholder="e.g. before final boss"
+                  placeholder={t("backups.labelPlaceholder")}
                   value={labelInput}
                   maxLength={80}
                   onChange={(e) => setLabelInput(e.target.value)}
@@ -103,22 +104,22 @@ export function VersionBackupsSection({ gameId }: Props) {
                   onClick={handleCreate}
                   disabled={createMutation.isPending}
                 >
-                  {createMutation.isPending ? "Creating…" : "Create snapshot"}
+                  {createMutation.isPending ? t("backups.creating") : t("backups.createSnapshot")}
                 </button>
                 <button type="button" className={`${GHOST_BTN} flex-1 text-sm`} onClick={() => setShowCreateForm(false)}>
-                  Cancel
+                  {t("common.cancel")}
                 </button>
               </div>
             </div>
           )}
 
           {/* Backup list */}
-          {isLoading && <p className={`${MUTED} text-sm`}>Loading backups…</p>}
-          {isError && <p className="text-sm text-[#ff9e9e]">{msg(error, "Failed to load backups.")}</p>}
+          {isLoading && <p className={`${MUTED} text-sm`}>{t("backups.loading")}</p>}
+          {isError && <p className="text-sm text-[#ff9e9e]">{msg(error, t("backups.errorLoad"))}</p>}
           {!isLoading && !isError && backups && (
             <>
               {backups.length === 0 ? (
-                <p className={`${MUTED} text-sm`}>No version backups yet.</p>
+                <p className={`${MUTED} text-sm`}>{t("backups.empty")}</p>
               ) : (
                 <ul className="list-none p-0 grid gap-2">
                   {backups.map((backup) => (
@@ -127,7 +128,7 @@ export function VersionBackupsSection({ gameId }: Props) {
                 </ul>
               )}
               <button type="button" className={`${SECONDARY_BTN} self-start text-sm`} onClick={() => refetch()}>
-                Refresh
+                {t("common.refresh")}
               </button>
             </>
           )}
@@ -146,6 +147,8 @@ interface BackupRowProps {
 
 function BackupRow({ backup, gameId }: BackupRowProps) {
   const [showRestoreModal, setShowRestoreModal] = useState(false);
+  const t = useT();
+  const createdAt = new Date(backup.createdTime).toLocaleString(getLocale());
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   const restoreMutation = useRestoreVersionBackupMutation();
@@ -188,16 +191,16 @@ function BackupRow({ backup, gameId }: BackupRowProps) {
 
         <div className="flex-1 min-w-0">
           {/* Timestamp */}
-          <p className="m-0 text-sm font-medium text-[#eef4ff] truncate">{new Date(backup.createdTime).toLocaleString()}</p>
+          <p className="m-0 text-sm font-medium text-[#eef4ff] truncate">{createdAt}</p>
           {/* Label */}
           {labelPart && <p className="m-0 mt-0.5 text-xs text-[#9aa8c7] truncate italic">{labelPart.description}</p>}
           {/* Stats */}
           <p className="m-0 mt-1 text-xs text-[#7a8baa]">
-            {backup.totalFiles} {backup.totalFiles === 1 ? "file" : "files"} · {formatBytes(backup.totalSize)}
+            {t(backup.totalFiles === 1 ? "backups.fileOne" : "backups.fileOther", { count: backup.totalFiles })} · {formatBytes(backup.totalSize)}
           </p>
 
           {(restoreMutation.isError || deleteMutation.isError) && (
-            <p className="m-0 mt-1 text-xs text-[#ff9e9e]">{msg(restoreMutation.error ?? deleteMutation.error, "Operation failed.")}</p>
+            <p className="m-0 mt-1 text-xs text-[#ff9e9e]">{msg(restoreMutation.error ?? deleteMutation.error, t("drive.operationFailed"))}</p>
           )}
         </div>
 
@@ -205,23 +208,23 @@ function BackupRow({ backup, gameId }: BackupRowProps) {
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            title="Restore this backup"
-            aria-label={`Restore backup from ${backup.createdTime}`}
+            title={t("backups.restoreHint")}
+            aria-label={t("backups.restoreAria", { date: createdAt })}
             disabled={isBusy}
             className={`${SECONDARY_BTN} text-xs px-3 disabled:opacity-40`}
             onClick={() => setShowRestoreModal(true)}
           >
-            {restoreMutation.isPending ? "Restoring…" : "Restore"}
+            {restoreMutation.isPending ? t("backups.restoring") : t("backups.restore")}
           </button>
           <button
             type="button"
-            title="Delete this backup"
-            aria-label={`Delete backup from ${backup.createdTime}`}
+            title={t("backups.deleteHint")}
+            aria-label={t("backups.deleteAria", { date: createdAt })}
             disabled={isBusy}
             className={`${DANGER_BTN} text-xs px-3 disabled:opacity-40`}
             onClick={() => setShowDeleteModal(true)}
           >
-            {deleteMutation.isPending ? "Deleting…" : "Delete"}
+            {deleteMutation.isPending ? t("backups.deleting") : t("common.delete")}
           </button>
         </div>
       </div>
@@ -229,12 +232,9 @@ function BackupRow({ backup, gameId }: BackupRowProps) {
       {/* Restore confirm */}
       <ConfirmModal
         open={showRestoreModal}
-        title="Restore this backup?"
-        message={
-          `Restore this snapshot to the configured save folders and cloud? A complete snapshot can also remove tracked files added after it was created.\n\n` +
-          `Previous save versions are retained for recovery. Unconfigured folders and excluded files are preserved.`
-        }
-        confirmLabel="Restore"
+        title={t("backups.restoreTitle")}
+        message={t("backups.restoreMessage")}
+        confirmLabel={t("backups.restore")}
         onConfirm={handleRestoreConfirm}
         onCancel={() => setShowRestoreModal(false)}
       />
@@ -242,9 +242,9 @@ function BackupRow({ backup, gameId }: BackupRowProps) {
       {/* Delete confirm */}
       <ConfirmModal
         open={showDeleteModal}
-        title="Delete this backup?"
-        message={`Permanently delete the snapshot from "${new Date(backup.createdTime).toLocaleString()}" from Google Drive? This cannot be undone.`}
-        confirmLabel="Delete"
+        title={t("backups.deleteTitle")}
+        message={t("backups.deleteMessage", { date: createdAt })}
+        confirmLabel={t("common.delete")}
         onConfirm={handleDeleteConfirm}
         onCancel={() => setShowDeleteModal(false)}
       />

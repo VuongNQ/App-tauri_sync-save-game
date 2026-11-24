@@ -4,19 +4,20 @@ import { useDevicesQuery, useRemoveDeviceMutation, useRenameDeviceMutation } fro
 import { ConfirmModal } from "../components/ConfirmModal";
 import { BTN, CARD, EYEBROW, MUTED } from "../components/styles";
 import type { DeviceInfo } from "../types/dashboard";
+import { useT } from "../i18n";
 import { formatLocalTime } from "../utils";
 
 export function DevicesPage() {
   const { data: devices, isLoading, error } = useDevicesQuery();
+  const t = useT();
 
   return (
     <>
       <div>
-        <p className={EYEBROW}>Management</p>
-        <h2 className="m-0">My Devices</h2>
+        <p className={EYEBROW}>{t("devices.eyebrow")}</p>
+        <h2 className="m-0">{t("devices.title")}</h2>
         <p className={`mt-1 text-sm ${MUTED}`}>
-          All Windows machines that have signed in with your Google account. The app registers each
-          device automatically on startup.
+          {t("devices.intro")}
         </p>
       </div>
 
@@ -25,7 +26,7 @@ export function DevicesPage() {
       {error && (
         <div className={CARD}>
           <p className={`m-0 text-sm ${MUTED}`}>
-            Failed to load devices: {error instanceof Error ? error.message : String(error)}
+            {t("devices.errorLoad", { error: error instanceof Error ? error.message : String(error) })}
           </p>
         </div>
       )}
@@ -33,7 +34,7 @@ export function DevicesPage() {
       {!isLoading && !error && devices && devices.length === 0 && (
         <div className={CARD}>
           <p className={`m-0 text-sm ${MUTED}`}>
-            No devices registered yet. They will appear here after you sign in on a machine.
+            {t("devices.empty")}
           </p>
         </div>
       )}
@@ -52,6 +53,7 @@ interface DeviceCardProps {
 
 function DeviceCard({ device }: DeviceCardProps) {
   const [renaming, setRenaming] = useState(false);
+  const t = useT();
   const [nameInput, setNameInput] = useState(device.name);
   const [showRemoveModal, setShowRemoveModal] = useState(false);
 
@@ -91,6 +93,7 @@ function DeviceCard({ device }: DeviceCardProps) {
                 <input
                   autoFocus
                   type="text"
+                  aria-label={t("devices.nameLabel")}
                   value={nameInput}
                   onChange={(e) => setNameInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -105,14 +108,14 @@ function DeviceCard({ device }: DeviceCardProps) {
                   disabled={renameMutation.isPending}
                   onClick={handleRenameSubmit}
                 >
-                  {renameMutation.isPending ? "Saving…" : "Save"}
+                  {renameMutation.isPending ? t("common.saving") : t("common.save")}
                 </button>
                 <button
                   type="button"
                   className={`${BTN} rounded-lg bg-white/8 px-3 py-1.5 text-xs font-semibold text-[#c7d3f7] hover:bg-white/12`}
                   onClick={handleRenameCancel}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
               </div>
             ) : (
@@ -122,7 +125,7 @@ function DeviceCard({ device }: DeviceCardProps) {
                 </h3>
                 {device.isCurrent && (
                   <span className="inline-flex items-center rounded-full bg-[rgba(109,125,255,0.18)] px-2.5 py-0.5 text-[0.72rem] font-medium text-[#a3b0ff]">
-                    this device
+                    {t("devices.thisDevice")}
                   </span>
                 )}
                 {device.name !== device.hostname && (
@@ -143,16 +146,16 @@ function DeviceCard({ device }: DeviceCardProps) {
                   setRenaming(true);
                 }}
               >
-                Rename
+                {t("drive.rename")}
               </button>
               <button
                 type="button"
                 className={`${BTN} rounded-xl bg-red-500/12 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/22 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none`}
                 disabled={!!device.isCurrent}
-                title={device.isCurrent ? "Cannot remove the device you are currently using" : undefined}
+                title={device.isCurrent ? t("devices.cannotRemoveCurrent") : undefined}
                 onClick={() => setShowRemoveModal(true)}
               >
-                Remove
+                {t("common.remove")}
               </button>
             </div>
           )}
@@ -160,20 +163,20 @@ function DeviceCard({ device }: DeviceCardProps) {
 
         {/* ── Info grid ── */}
         <dl className="grid grid-cols-2 gap-x-6 gap-y-2 max-[560px]:grid-cols-1">
-          <DeviceInfoRow label="OS" value={`${device.osName} ${device.osVersion}`.trim()} />
-          <DeviceInfoRow label="CPU" value={`${device.cpuName} (${device.cpuCores} cores)`} />
+          <DeviceInfoRow label={t("devices.os")} value={`${device.osName} ${device.osVersion}`.trim()} />
+          <DeviceInfoRow label="CPU" value={t("devices.cpuValue", { name: device.cpuName, cores: device.cpuCores })} />
           <DeviceInfoRow label="RAM" value={`${ramGb} GB`} />
-          <DeviceInfoRow label="Hostname" value={device.hostname} />
-          <DeviceInfoRow label="Registered" value={formatLocalTime(device.registeredAt)} />
-          <DeviceInfoRow label="Last seen" value={formatLocalTime(device.lastSeenAt)} />
+          <DeviceInfoRow label={t("devices.hostname")} value={device.hostname} />
+          <DeviceInfoRow label={t("devices.registered")} value={formatLocalTime(device.registeredAt)} />
+          <DeviceInfoRow label={t("devices.lastSeen")} value={formatLocalTime(device.lastSeenAt)} />
         </dl>
       </div>
 
       <ConfirmModal
         open={showRemoveModal}
-        title="Remove device"
-        message={`Remove "${device.name}" from your device list? This only removes the registration record — it does not affect any save files.`}
-        confirmLabel="Remove device"
+        title={t("devices.removeTitle")}
+        message={t("devices.removeMessage", { name: device.name })}
+        confirmLabel={t("devices.removeTitle")}
         onConfirm={() => {
           setShowRemoveModal(false);
           removeMutation.mutate(device.id);

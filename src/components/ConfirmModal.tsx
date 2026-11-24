@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 
+import { useT } from "../i18n";
 import { DANGER_BTN, GHOST_BTN } from "./styles";
 
 interface Props {
@@ -11,7 +12,8 @@ interface Props {
   onCancel: () => void;
 }
 
-export function ConfirmModal({ open, title, message, confirmLabel = "Remove", onConfirm, onCancel }: Props) {
+export function ConfirmModal({ open, title, message, confirmLabel, onConfirm, onCancel }: Props) {
+  const t = useT();
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -33,10 +35,10 @@ export function ConfirmModal({ open, title, message, confirmLabel = "Remove", on
       <p className="m-0 mb-6 text-sm text-[#9aa8c7] leading-relaxed">{message}</p>
       <div className="flex items-center gap-3">
         <button type="button" className={GHOST_BTN + " flex-1"} onClick={onCancel}>
-          Cancel
+          {t("common.cancel")}
         </button>
         <button type="button" className={DANGER_BTN + " flex-1"} onClick={onConfirm}>
-          {confirmLabel}
+          {confirmLabel ?? t("common.remove")}
         </button>
       </div>
     </dialog>

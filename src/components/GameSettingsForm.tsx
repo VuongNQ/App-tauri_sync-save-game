@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { Controller, FormProvider, useFieldArray, useForm, useFormContext, useWatch } from "react-hook-form";
 import { z } from "zod";
+import { richText, useI18n, useT } from "../i18n";
 import { DASHBOARD_KEY, useUpdateGameMutation } from "../queries";
 import { contractPath, expandSavePath, getBrowseDefaultPath, getFileSize, getSaveInfo, uploadGameLogo } from "../services/tauri";
 import type { DashboardData, GameEntry, SaveInfo } from "../types/dashboard";
@@ -28,7 +29,7 @@ import {
 // ── Unified settings schema ───────────────────────────────────────────────────
 
 const savePathEntrySchema = z.object({
-  label: z.string().min(1, "Label is required"),
+  label: z.string().min(1, "form.errorLabelRequired"),
   path: z.string(),
   gdriveFolderId: z.string().nullable().optional(),
   syncIncludes: z.array(z.string()),
@@ -45,10 +46,10 @@ const gameSettingsSchema = z.object({
         v.startsWith("drive-file:") ||
         v.startsWith("gdrive-img://") ||
         /^[A-Za-z]:[\\/]/.test(v),
-      "Enter a valid image URL (https://…) or browse a local file."
+      "form.errorThumbnailInvalid"
     ),
-  description: z.string().max(1000, "Description must be 1000 characters or fewer."),  pathMode: z.enum(["auto", "per_device"]),  savePaths: z.array(savePathEntrySchema),
-  exeName: z.string().max(260, "Executable name must be 260 characters or fewer."),
+  description: z.string().max(1000, "form.errorDescriptionMax"),  pathMode: z.enum(["auto", "per_device"]),  savePaths: z.array(savePathEntrySchema),
+  exeName: z.string().max(260, "form.errorExeNameMax"),
   exePath: z.string().optional().nullable(),
   trackChanges: z.boolean(),
   autoSync: z.boolean(),
@@ -66,6 +67,7 @@ interface GameSettingsFormProps {
 
 export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProps) {
   const updateMutation = useUpdateGameMutation();
+  const t = useT();
 
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
@@ -120,7 +122,7 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
     const src = norm(values.thumbnail);
 
     if (!gameSettings) {
-      setLogoUploadError("Game not found in cache.");
+      setLogoUploadError(t("form.errorGameNotFound"));
       return;
     }
 
@@ -139,7 +141,7 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
         const driveUrl = await uploadGameLogo(gameSettings.id, src);
         thumbnailToSave = driveUrl;
       } catch (err) {
-        setLogoUploadError(msg(err, "Logo upload failed. Other settings were saved."));
+        setLogoUploadError(msg(err, t("form.errorLogoUpload")));
         thumbnailToSave = gameSettings.thumbnail ?? null; // keep previous thumbnail
       } finally {
         setIsUploadingLogo(false);
@@ -166,13 +168,13 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
   }
 
   const isSaving = isUploadingLogo || updateMutation.isPending;
-  const saveError = updateMutation.isError ? msg(updateMutation.error, "Unable to save.") : null;
+  const saveError = updateMutation.isError ? msg(updateMutation.error, t("form.errorSave")) : null;
 
   return (
     <FormProvider {...methods}>
       <form onSubmit={handleSubmit(onSaveSettings)}>
         <div className="flex items-center gap-3 justify-between">
-          <h3 className="m-0 font-semibold">Edit settings</h3>
+          <h3 className="m-0 font-semibold">{t("form.title")}</h3>
           <div className="flex items-center gap-5 justify-end-safe">
             {isDirty && (
               <>
@@ -184,10 +186,10 @@ export function GameSettingsForm({ isOpen, isSyncing, id }: GameSettingsFormProp
                   }}
                   disabled={isSaving}
                 >
-                  Discard
+                  {t("form.discard")}
                 </button>
                 <button type="submit" className={PRIMARY_BTN} disabled={isSaving}>
-                  {isSaving ? "Saving…" : "Save"}
+                  {isSaving ? t("common.saving") : t("common.save")}
                 </button>
               </>
             )}
@@ -231,13 +233,14 @@ function ThumbnailSection({ isSyncing, sizeError, uploadError, onSizeError }: Th
     watch,
     formState: { errors },
   } = useFormContext<GameSettingsFormValues>();
+  const { t, tx } = useI18n();
   const thumbnailValue = watch("thumbnail");
 
   async function handleBrowse() {
     const p = await open({
       multiple: false,
-      title: "Choose a thumbnail image",
-      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+      title: t("dialog.chooseThumbnail"),
+      filters: [{ name: t("dialog.imagesFilter"), extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
     });
     if (typeof p === "string") {
       setValue("thumbnail", p, { shouldValidate: true, shouldDirty: true });
@@ -245,7 +248,7 @@ function ThumbnailSection({ isSyncing, sizeError, uploadError, onSizeError }: Th
       try {
         const bytes = await getFileSize(p);
         if (bytes > 2 * 1024 * 1024) {
-          onSizeError(`Image is ${(bytes / 1_048_576).toFixed(1)} MB — must be 2 MB or smaller.`);
+          onSizeError(t("form.errorImageSize", { size: (bytes / 1_048_576).toFixed(1) }));
         }
       } catch {
         // size check failed silently — backend will enforce the limit on upload
@@ -255,14 +258,14 @@ function ThumbnailSection({ isSyncing, sizeError, uploadError, onSizeError }: Th
 
   return (
     <div className={CARD}>
-      <h3 className="m-0 mb-4 font-semibold">Logo / Thumbnail</h3>
+      <h3 className="m-0 mb-4 font-semibold">{t("form.thumbnailTitle")}</h3>
 
       <div className={FORM_GRID}>
         {thumbnailValue && !sizeError && (
           <div className="w-20 h-20 rounded-2xl border border-[rgba(165,185,255,0.1)] bg-[rgba(9,14,28,0.75)] overflow-hidden">
             <GameThumbnail
               src={thumbnailValue}
-              alt="Thumbnail preview"
+              alt={t("form.thumbnailPreview")}
               className="w-full h-full object-cover"
             />
           </div>
@@ -273,14 +276,14 @@ function ThumbnailSection({ isSyncing, sizeError, uploadError, onSizeError }: Th
           control={control}
           render={({ field }) => (
             <label className={FORM_LABEL}>
-              <span className={LABEL_SPAN}>URL or local file path</span>
+              <span className={LABEL_SPAN}>{t("form.thumbnailLabel")}</span>
               <div className={INPUT_ROW}>
-                <input className={INPUT_CLS} {...field} placeholder="https://… or browse a local file" />
+                <input className={INPUT_CLS} {...field} placeholder={t("form.thumbnailPlaceholder")} />
                 <button type="button" className={SECONDARY_BTN} onClick={handleBrowse} disabled={isSyncing}>
-                  Browse
+                  {t("common.browse")}
                 </button>
               </div>
-              {errors.thumbnail && <span className={FIELD_ERROR}>{errors.thumbnail.message}</span>}
+              {errors.thumbnail && <span className={FIELD_ERROR}>{tx(errors.thumbnail.message)}</span>}
               {sizeError && <span className={FIELD_ERROR}>{sizeError}</span>}
               {uploadError && <span className={FIELD_ERROR}>{uploadError}</span>}
             </label>
@@ -294,6 +297,7 @@ function ThumbnailSection({ isSyncing, sizeError, uploadError, onSizeError }: Th
 // ── Description section ───────────────────────────────────────────────────────
 
 function DescriptionSection() {
+  const { t, tx } = useI18n();
   const {
     control,
     formState: { errors },
@@ -301,23 +305,23 @@ function DescriptionSection() {
 
   return (
     <div className={CARD}>
-      <h3 className="m-0 mb-4 font-semibold">Description</h3>
+      <h3 className="m-0 mb-4 font-semibold">{t("form.descriptionTitle")}</h3>
       <div className={FORM_GRID}>
         <Controller
           name="description"
           control={control}
           render={({ field }) => (
             <label className={FORM_LABEL}>
-              <span className={LABEL_SPAN}>Game description (max 1000 characters)</span>
+              <span className={LABEL_SPAN}>{t("form.descriptionLabel")}</span>
               <textarea
                 className={`${INPUT_CLS} resize-y min-h-15`}
                 {...field}
                 maxLength={1000}
                 rows={4}
-                placeholder="Brief description of the game…"
+                placeholder={t("form.descriptionPlaceholder")}
               />
               <span className={MUTED + " text-xs mt-1"}>{field.value.length}/1000</span>
-              {errors.description && <span className={FIELD_ERROR}>{errors.description.message}</span>}
+              {errors.description && <span className={FIELD_ERROR}>{tx(errors.description.message)}</span>}
             </label>
           )}
         />
@@ -338,9 +342,10 @@ function SavePathsSection({ game, isSyncing, isPathInvalid }: SavePathsSectionPr
   const { control, setValue } = useFormContext<GameSettingsFormValues>();
   const { fields, append, remove } = useFieldArray({ control, name: "savePaths" });
   const pathMode = useWatch({ control, name: "pathMode" });
+  const t = useT();
 
   function handleAdd() {
-    append({ label: `Save Folder ${fields.length + 1}`, path: "", gdriveFolderId: null, syncIncludes: [] });
+    append({ label: t("form.defaultPathLabel", { n: fields.length + 1 }), path: "", gdriveFolderId: null, syncIncludes: [] });
   }
 
   function handleModeChange(newMode: "auto" | "per_device") {
@@ -355,15 +360,15 @@ function SavePathsSection({ game, isSyncing, isPathInvalid }: SavePathsSectionPr
   return (
     <div className={CARD}>
       <div className="flex items-center justify-between mb-4">
-        <h3 className="m-0 font-semibold">Save folder mapping</h3>
+        <h3 className="m-0 font-semibold">{t("form.pathsTitle")}</h3>
         <button type="button" className={SECONDARY_BTN} onClick={handleAdd} disabled={isSyncing}>
-          + Add save path
+          + {t("form.addPath")}
         </button>
       </div>
 
       {/* Path mode selector */}
       <div className="mb-4 flex flex-col gap-2">
-        <span className="text-xs font-medium text-[#9aa8c7]">Path storage mode</span>
+        <span className="text-xs font-medium text-[#9aa8c7]">{t("form.pathMode")}</span>
         <div className="flex rounded-xl bg-[rgba(255,255,255,0.05)] border border-[rgba(165,185,255,0.1)] p-1 gap-1 w-fit">
           <button
             type="button"
@@ -375,7 +380,7 @@ function SavePathsSection({ game, isSyncing, isPathInvalid }: SavePathsSectionPr
                 : "text-[#9aa8c7] hover:text-[#c7d3f7]"
             }`}
           >
-            Automatic
+            {t("form.pathModeAuto")}
           </button>
           <button
             type="button"
@@ -387,13 +392,13 @@ function SavePathsSection({ game, isSyncing, isPathInvalid }: SavePathsSectionPr
                 : "text-[#9aa8c7] hover:text-[#c7d3f7]"
             }`}
           >
-            Per device
+            {t("form.pathModePerDevice")}
           </button>
         </div>
         <p className="m-0 text-xs text-[#9aa8c7]">
           {pathMode === "per_device"
-            ? "Each device sets its own path locally — paths are not shared across machines."
-            : "Paths use portable tokens (e.g. %USERPROFILE%) and are shared across all devices."}
+            ? t("form.pathModePerDeviceHint")
+            : t("form.pathModeAutoHint")}
         </p>
       </div>
 
@@ -401,14 +406,14 @@ function SavePathsSection({ game, isSyncing, isPathInvalid }: SavePathsSectionPr
         <div className="mb-4 p-3 rounded-2xl border border-[rgba(100,180,255,0.25)] bg-[rgba(9,40,80,0.45)] text-[#7dc9ff] text-sm flex items-start gap-2">
           <span className="mt-0.5 shrink-0">ℹ</span>
           <span>
-            No save paths configured. Click <strong>+ Add save path</strong> to add a folder.
+            {richText(t("form.noPaths"), { button: <strong>+ {t("form.addPath")}</strong> })}
           </span>
         </div>
       )}
 
       {isPathInvalid && fields.length > 0 && (
         <div className="mb-4 p-3 rounded-2xl border border-[rgba(255,100,100,0.3)] bg-[rgba(62,18,22,0.5)] text-[#ff9e9e] text-sm flex items-center gap-2">
-          <span>⚠</span> One or more configured save paths do not exist on this machine.
+          <span>⚠</span> {t("form.pathsInvalid")}
         </div>
       )}
 
@@ -444,6 +449,7 @@ function SavePathCard({ index, game, pathMode, isSyncing, onRemove, canRemove }:
   const { control, setValue } = useFormContext<GameSettingsFormValues>();
   const currentPath = useWatch({ control, name: `savePaths.${index}.path` });
   const isPathEmpty = !currentPath;
+  const t = useT();
 
   async function handleBrowse() {
     let defaultPath: string | undefined;
@@ -460,7 +466,7 @@ function SavePathCard({ index, game, pathMode, isSyncing, onRemove, canRemove }:
     const p = await open({
       directory: true,
       multiple: false,
-      title: "Choose the save game folder",
+      title: t("dialog.chooseSaveFolder"),
       defaultPath,
     });
     if (typeof p === "string") setValue(`savePaths.${index}.path`, p, { shouldDirty: true });
@@ -476,7 +482,7 @@ function SavePathCard({ index, game, pathMode, isSyncing, onRemove, canRemove }:
             <input
               className={INPUT_CLS + " font-medium flex-1"}
               {...field}
-              placeholder="Label (e.g. Save Folder, Save States…)"
+              placeholder={t("form.labelPlaceholder")}
             />
           )}
         />
@@ -486,9 +492,9 @@ function SavePathCard({ index, game, pathMode, isSyncing, onRemove, canRemove }:
             className="shrink-0 text-sm text-[#ffd5d5] hover:text-white px-2 py-1"
             onClick={onRemove}
             disabled={isSyncing}
-            title="Remove this save path"
+            title={t("form.removePath")}
           >
-            Remove
+            {t("common.remove")}
           </button>
         )}
       </div>
@@ -497,7 +503,7 @@ function SavePathCard({ index, game, pathMode, isSyncing, onRemove, canRemove }:
         <div className="p-2 rounded-xl border border-[rgba(100,180,255,0.2)] bg-[rgba(9,40,80,0.35)] text-[#7dc9ff] text-xs flex items-start gap-2">
           <span className="mt-0.5 shrink-0">ℹ</span>
           <span>
-            No path configured for this device. Use <strong>Browse</strong> to select the folder.
+            {richText(t("form.noPathForDevice"), { button: <strong>{t("common.browse")}</strong> })}
           </span>
         </div>
       )}
@@ -508,17 +514,17 @@ function SavePathCard({ index, game, pathMode, isSyncing, onRemove, canRemove }:
         render={({ field }) => (
           <label className={FORM_LABEL}>
             <span className="text-[#c7d3f7] text-[0.92rem] flex items-center gap-2">
-              Folder path
+              {t("form.folderPath")}
               {pathMode === "per_device" && (
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.72rem] bg-[rgba(109,125,255,0.15)] text-[#9daeff] border border-[rgba(109,125,255,0.22)]">
-                  Device path
+                  {t("form.devicePath")}
                 </span>
               )}
             </span>
             <div className={INPUT_ROW}>
-              <input className={INPUT_CLS} {...field} placeholder="Choose or enter the save folder path" />
+              <input className={INPUT_CLS} {...field} placeholder={t("form.folderPathPlaceholder")} />
               <button type="button" className={SECONDARY_BTN} onClick={handleBrowse} disabled={isSyncing}>
-                Browse
+                {t("common.browse")}
               </button>
             </div>
           </label>
@@ -543,6 +549,7 @@ function SavePathInclusionsSection({ index, game }: SavePathInclusionsSectionPro
   const currentPath = useWatch({ control, name: `savePaths.${index}.path` });
 
   const [saveInfo, setSaveInfo] = useState<SaveInfo | null>(null);
+  const t = useT();
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -584,17 +591,17 @@ function SavePathInclusionsSection({ index, game }: SavePathInclusionsSectionPro
 
   return (
     <div className="mt-1">
-      <p className="m-0 mb-2 text-xs font-medium text-[#9aa8c7]">Sync filter <span className="font-normal text-[#6a7a9a]">(optional)</span></p>
+      <p className="m-0 mb-2 text-xs font-medium text-[#9aa8c7]">{t("form.filterTitle")} <span className="font-normal text-[#6a7a9a]">({t("common.optional")})</span></p>
 
       {included.length === 0 ? (
         <div className="mb-3 p-2.5 rounded-xl border border-[rgba(100,180,255,0.2)] bg-[rgba(9,40,80,0.3)] text-[#7dc9ff] text-xs flex items-start gap-2">
           <span className="mt-0.5 shrink-0">ℹ</span>
-          <span>No filter — all files in this folder will be synced.</span>
+          <span>{t("form.filterNone")}</span>
         </div>
       ) : (
         <>
           <div className="mb-2 p-2 rounded-xl border border-[rgba(100,180,255,0.15)] bg-[rgba(9,40,80,0.2)] text-[#7dc9ff] text-xs">
-            Only the selected files and folders will be synced.
+            {t("form.filterActive")}
           </div>
           <div className="flex flex-wrap gap-2 mb-3">
             {included.map((inc) => (
@@ -607,7 +614,8 @@ function SavePathInclusionsSection({ index, game }: SavePathInclusionsSectionPro
                   type="button"
                   className="shrink-0 text-[#a0d4ff] hover:text-white leading-none"
                   onClick={() => handleRemove(inc)}
-                  title="Remove from filter"
+                  title={t("form.filterRemove")}
+                  aria-label={`${t("form.filterRemove")}: ${inc}`}
                 >
                   ×
                 </button>
@@ -623,9 +631,9 @@ function SavePathInclusionsSection({ index, game }: SavePathInclusionsSectionPro
           className={SECONDARY_BTN}
           onClick={handleLoadFiles}
           disabled={isLoadingFiles || !currentPath}
-          title={!currentPath ? "Set a save folder first" : undefined}
+          title={!currentPath ? t("form.setFolderFirst") : undefined}
         >
-          {isLoadingFiles ? "Loading…" : "Load save files"}
+          {isLoadingFiles ? t("common.loading") : t("form.loadFiles")}
         </button>
       )}
       {loadError && <p className="mt-2 text-xs text-[#ffd5d5]">{loadError}</p>}
@@ -633,9 +641,9 @@ function SavePathInclusionsSection({ index, game }: SavePathInclusionsSectionPro
       {saveInfo && (
         <>
           <div className="flex items-center justify-between mb-1">
-            <p className="m-0 text-xs text-[#9aa8c7]">Check files or folders to include in sync.</p>
+            <p className="m-0 text-xs text-[#9aa8c7]">{t("form.filterHelp")}</p>
             <button type="button" className="text-xs text-[#7dc9ff] hover:underline" onClick={() => setSaveInfo(null)}>
-              Hide
+              {t("common.hide")}
             </button>
           </div>
           <SaveFileTree info={saveInfo} checkable included={included} onToggle={handleToggle} />
@@ -659,6 +667,7 @@ function GameExecutableSection({ game, exePathValid }: GameExecutableSectionProp
   } = useFormContext<GameSettingsFormValues>();
 
   const watchedExeName = useWatch({ control, name: "exeName" });
+  const { t, tx } = useI18n();
 
   async function handleBrowse() {
     let defaultPath: string | undefined;
@@ -669,9 +678,9 @@ function GameExecutableSection({ game, exePathValid }: GameExecutableSectionProp
     }
     const p = await open({
       multiple: false,
-      title: "Choose the game executable",
+      title: t("dialog.chooseExe"),
       defaultPath,
-      filters: [{ name: "Executable or Shortcut", extensions: ["exe", "lnk"] }],
+      filters: [{ name: t("dialog.exeFilter"), extensions: ["exe", "lnk"] }],
     });
     if (typeof p === "string") {
       // Tokenize the absolute path for portability (e.g. C:\Program Files\... → %PROGRAMFILES%\...).
@@ -687,45 +696,46 @@ function GameExecutableSection({ game, exePathValid }: GameExecutableSectionProp
 
   return (
     <div className={CARD}>
-      <h3 className="m-0 mb-4 font-semibold">Game Executable</h3>
+      <h3 className="m-0 mb-4 font-semibold">{t("form.exeTitle")}</h3>
 
       {exePathValid === false && (
         <div className="mb-4 p-3 rounded-2xl border border-[rgba(255,100,100,0.3)] bg-[rgba(62,18,22,0.5)] text-[#ff9e9e] text-sm flex items-center gap-2">
-          <span>⚠</span> The configured executable was not found on this machine. Update the path below to enable the ▶ Play button.
+          <span>⚠</span> {t("form.exeMissing")}
         </div>
       )}
 
       <div className={FORM_GRID}>
         {/* Row 1 — launch path */}
         <label className={FORM_LABEL}>
-          <span className={LABEL_SPAN}>Executable path</span>
+          <span className={LABEL_SPAN}>{t("form.exePath")}</span>
           <div className={INPUT_ROW}>
-            <input className={INPUT_CLS} {...register("exePath")} placeholder="e.g. %PROGRAMFILES%\Steam\steamapps\common\Game\Game.exe" />
+            <input className={INPUT_CLS} {...register("exePath")} placeholder={t("form.exePathPlaceholder")} />
             <button type="button" className={SECONDARY_BTN} onClick={handleBrowse}>
-              Browse
+              {t("common.browse")}
             </button>
           </div>
           <span className={MUTED + " text-xs mt-1"}>
-            Full path to the .exe or .lnk used to launch the game. Enables the ▶ Play button. Stored with env-var tokens (e.g.{" "}
-            <code>%PROGRAMFILES%</code>) for portability. <strong className="text-amber-400/80">Saved locally only</strong> — not synced to
-            the cloud, since paths differ between devices.
+            {richText(t("form.exePathHelp"), {
+              example: <code>%PROGRAMFILES%</code>,
+              localOnly: <strong className="text-amber-400/80">{t("form.exeLocalOnly")}</strong>,
+            })}
           </span>
         </label>
 
         {/* Row 2 — process name (auto-filled, user-editable) */}
         <label className={FORM_LABEL}>
-          <span className={LABEL_SPAN}>Process name</span>
-          <input className={INPUT_CLS} {...register("exeName")} placeholder="e.g. Game.exe" />
+          <span className={LABEL_SPAN}>{t("form.processName")}</span>
+          <input className={INPUT_CLS} {...register("exeName")} placeholder={t("form.processNamePlaceholder")} />
           <span className={MUTED + " text-xs mt-1"}>
             {watchedExeName ? (
               <>
-                Watcher will track: <strong className="text-white/80">{watchedExeName}</strong>
+                {richText(t("form.watcherTracks"), { name: <strong className="text-white/80">{watchedExeName}</strong> })}
               </>
             ) : (
-              "If empty, it is inferred from executable path on Save (supports .exe and .lnk). Edit if launcher and game process differ."
+              t("form.processNameHelp")
             )}
           </span>
-          {errors.exeName && <span className={FIELD_ERROR}>{errors.exeName.message}</span>}
+          {errors.exeName && <span className={FIELD_ERROR}>{tx(errors.exeName.message)}</span>}
         </label>
       </div>
     </div>

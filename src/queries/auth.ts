@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { signIn, signOut } from "@choochmeque/tauri-plugin-google-auth-api";
 
+import { getLanguage, translate } from "../i18n";
 import { checkAuthStatus, getGoogleUserInfo, getOAuthCredentials, logout, saveAuthTokens } from "../services/tauri";
 import type { AuthStatus } from "../types/dashboard";
 import { AUTH_STATUS_KEY, GOOGLE_USER_INFO_KEY } from "./keys";
@@ -37,11 +38,11 @@ export function useLoginMutation() {
         clientSecret: creds.clientSecret || undefined,
         scopes: SCOPES,
         successHtmlResponse: `<!DOCTYPE html>
-<html lang="en">
+<html lang="${getLanguage()}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Save Game Sync — Connected</title>
+  <title>${translate("oauth.pageTitle")}</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -77,8 +78,8 @@ export function useLoginMutation() {
 <body>
   <div class="card">
     <div class="icon">✓</div>
-    <h1>Google account connected</h1>
-    <p>You can close this tab and return to Save Game Sync.</p>
+    <h1>${translate("oauth.title")}</h1>
+    <p>${translate("oauth.body")}</p>
   </div>
 </body>
 </html>`,
