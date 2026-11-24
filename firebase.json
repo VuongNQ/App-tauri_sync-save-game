@@ -1,10 +1,6 @@
 {
   "firestore": [
     {
-      "database": "(default)",
-      "rules": "security/firestore.rules"
-    },
-    {
       "database": "savegame",
       "rules": "security/firestore.rules"
     }

@@ -74,15 +74,15 @@ gcloud firestore databases create --database=savegame --location=LOCATION --type
 
 ### 5. Deploy the security rules to it
 
-`firebase.json` lists both `(default)` and `savegame`. Deploy only the new one:
+`firebase.json` lists rules for `savegame` (this repo went with Path B):
 
 ```bash
 npm ci --prefix security
 security/node_modules/.bin/firebase deploy --only firestore:savegame --project PROJECT
 ```
 
-For Path B, remove the `(default)` entry from `firebase.json` afterwards so a
-plain `--only firestore:rules` deploy does not fail on a missing database.
+For Path A, add a `{"database": "(default)", ...}` entry back to `firebase.json`
+so `(default)` keeps receiving rule updates.
 **Never leave a database without rules deployed**: a new database starts locked
 in production mode, but check in the Firebase console that the rules match
 `security/firestore.rules`.
