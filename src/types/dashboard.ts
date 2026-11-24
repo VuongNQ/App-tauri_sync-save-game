@@ -140,6 +140,8 @@ export interface AppSettings {
   syncIntervalMinutes: number;
   startMinimised: boolean;
   runOnStartup: boolean;
+  /** Pull newer cloud saves shortly after startup when this device has no unsynced edits. Default on. */
+  autoPullOnStartup: boolean;
   /** Device-specific save-path overrides keyed by game id. Local-only — never synced to Firestore. */
   pathOverrides: Record<string, string>;
   /** Device-specific save-path overrides for extra paths keyed by "{gameId}:{index}". Local-only. */
@@ -212,6 +214,14 @@ export interface SyncProgress {
   uploads: number;
   downloads: number;
   currentFile: string | null;
+}
+
+/** Startup cloud check result for one game (see `get_cloud_statuses`). */
+export type CloudState = "upToDate" | "noCloud" | "cloudNewer" | "needsReview" | "pulled";
+
+export interface CloudStatus {
+  gameId: string;
+  state: CloudState;
 }
 
 export interface SyncResult {

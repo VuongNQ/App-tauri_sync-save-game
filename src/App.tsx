@@ -6,7 +6,7 @@ import { HashRouter, Routes, Route, Navigate } from "react-router";
 import { AppLayout } from "./components/AppLayout";
 import { AdminGuard } from "./components/AdminGuard";
 import { AuthGuard } from "./components/AuthGuard";
-import { DASHBOARD_KEY, DEVICES_KEY, gamePlayingKey, gameSyncingKey, gameSyncProgressKey, gameSyncResultKey } from "./queries/keys";
+import { CLOUD_STATUS_KEY, DASHBOARD_KEY, DEVICES_KEY, gamePlayingKey, gameSyncingKey, gameSyncProgressKey, gameSyncResultKey } from "./queries/keys";
 import { applyAuthStatus } from "./queries/authCache";
 import { useAppUpdateQuery } from "./queries";
 import type { SyncProgress, SyncResult } from "./types/dashboard";
@@ -114,6 +114,12 @@ function useAuthStatusCallbacks() {
       queryClient.setQueryData(gameSyncProgressKey(payload.gameId), null);
       queryClient.setQueryData(gameSyncResultKey(payload.gameId), payload);
       void queryClient.invalidateQueries({ queryKey: DASHBOARD_KEY });
+      void queryClient.invalidateQueries({ queryKey: CLOUD_STATUS_KEY });
+    });
+
+    // Startup cloud check finished: refresh "Cloud newer" / "Needs review" badges.
+    const unlistenCloudStatusPromise = listen("cloud-status-changed", () => {
+      void queryClient.invalidateQueries({ queryKey: CLOUD_STATUS_KEY });
     });
 
     // On sync error, clear the syncing flag and store the error result.
@@ -132,6 +138,7 @@ function useAuthStatusCallbacks() {
       void unlistenSyncProgressPromise.then((unlisten) => unlisten());
       void unlistenSyncCompletedPromise.then((unlisten) => unlisten());
       void unlistenSyncErrorPromise.then((unlisten) => unlisten());
+      void unlistenCloudStatusPromise.then((unlisten) => unlisten());
       void unlistenGameStatusPromise.then((unlisten) => unlisten());
     };
   }, [queryClient]);

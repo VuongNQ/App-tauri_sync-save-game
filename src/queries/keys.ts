@@ -43,5 +43,8 @@ export const gameSyncingKey = (gameId: string) => ["game-syncing", gameId] as co
 /** Live transfer progress for a game — set by the sync-progress Tauri event, cleared when the sync ends. */
 export const gameSyncProgressKey = (gameId: string) => ["game-sync-progress", gameId] as const;
 
+/** Startup cloud check states for all games (get_cloud_statuses). */
+export const CLOUD_STATUS_KEY = ["cloud-status"] as const;
+
 /** Last SyncResult for a game — set by sync-completed and sync-error Tauri events. */
 export const gameSyncResultKey = (gameId: string) => ["game-sync-result", gameId] as const;

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { useRemoveGameMutation } from "../queries";
-import { useGameSyncingQuery } from "../queries/sync";
+import { useCloudStateQuery, useGameSyncingQuery } from "../queries/sync";
 import { SyncProgressBar } from "./SyncProgressBar";
 import { useGamePlaying, useSyncAndLaunchFlow } from "../queries/detail";
 import type { GameEntry } from "../types/dashboard";
@@ -94,6 +94,7 @@ function GameCard({
   onRemove: () => void;
 }) {
   const isSyncing = useGameSyncingQuery(g.id);
+  const cloudState = useCloudStateQuery(g.id);
   const { data: isGamePlaying = false } = useGamePlaying(g.id);
   const badge = SOURCE_BADGE[g.source] ?? SOFT_BADGE;
 
@@ -164,6 +165,16 @@ function GameCard({
           {g.trackChanges && !g.exeName && (
             <p className="m-0 text-xs text-[#ffd5a0] flex items-center gap-1">
               <span>⚠</span> No executable set — process tracking inactive
+            </p>
+          )}
+          {!isSyncing && cloudState === "cloudNewer" && (
+            <p className="m-0 text-xs text-[#7dc9ff] flex items-center gap-1" title="Another device saved newer progress. Sync or press Play to pull it.">
+              <span>⬇</span> Newer save in cloud
+            </p>
+          )}
+          {!isSyncing && cloudState === "needsReview" && (
+            <p className="m-0 text-xs text-[#ffd5a0] flex items-center gap-1" title="Both this PC and the cloud changed. Open the game to choose which copy to keep.">
+              <span>⚠</span> Needs review: both copies changed
             </p>
           )}
           {isSyncing ? (
