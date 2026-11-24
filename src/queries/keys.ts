@@ -40,5 +40,8 @@ export const gamePlayingKey = (gameId: string) => ["game-playing", gameId] as co
 /** Live syncing indicator set by the sync-started / sync-completed / sync-error Tauri events. */
 export const gameSyncingKey = (gameId: string) => ["game-syncing", gameId] as const;
 
+/** Startup cloud check states for all games (get_cloud_statuses). */
+export const CLOUD_STATUS_KEY = ["cloud-status"] as const;
+
 /** Last SyncResult for a game — set by sync-completed and sync-error Tauri events. */
 export const gameSyncResultKey = (gameId: string) => ["game-sync-result", gameId] as const;

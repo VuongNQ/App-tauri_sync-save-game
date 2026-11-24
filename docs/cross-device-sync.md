@@ -21,6 +21,20 @@ a changed filter remain in cloud until the user invokes cleanup. Changing a
 local folder/filter resets baseline trust; an unavailable previously synced
 folder fails closed instead of publishing mass deletions.
 
+### Startup cloud check
+
+About 20 seconds after the app starts with a signed-in account, each game is
+checked once, one at a time. If this device's baseline revision equals the cloud
+manifest revision the game is up to date: one Firestore read, no hashing and no
+Drive calls. Otherwise local files are hashed and planned with the same Merge
+plan as a normal sync. Only a pure fast-forward (downloads and tombstone
+deletes, no local edits and no conflicts) is applied automatically, through the
+normal engine, when the `autoPullOnStartup` setting is on (default) and the
+device is not on battery. Anything with local edits or conflicts is only
+flagged ("Needs review"); legacy layouts are left to a normal sync. Running or
+busy games are skipped. Results are exposed through `get_cloud_statuses` and the
+`cloud-status-changed` event for the game list badges.
+
 ## Cloud publication
 
 The authoritative document is:

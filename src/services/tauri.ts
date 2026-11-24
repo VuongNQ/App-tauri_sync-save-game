@@ -5,6 +5,7 @@ import type {
   AdminConfig,
   AppSettings,
   AuthStatus,
+  CloudStatus,
   DashboardData,
   DeviceInfo,
   DriveCleanupReport,
@@ -107,6 +108,11 @@ export async function syncGame(gameId: string): Promise<SyncResult> {
 
 export async function syncAllGames(): Promise<SyncResult[]> {
   return invoke<SyncResult[]>("sync_all_games");
+}
+
+/** Cloud state per game from the startup check (and later syncs) in this app run. */
+export async function getCloudStatuses(): Promise<CloudStatus[]> {
+  return invoke<CloudStatus[]>("get_cloud_statuses");
 }
 
 /** Check the diff between local saves and Drive without transferring files. */

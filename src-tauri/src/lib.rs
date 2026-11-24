@@ -15,6 +15,7 @@ mod safe_files;
 mod sync_policy;
 mod http_client;
 mod models;
+mod power;
 mod settings;
 mod sync;
 mod sync_v2;
@@ -29,11 +30,14 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 use models::{
-    AddGamePayload, AdminConfig, AppSettings, AuthStatus, DashboardData, DeviceInfo,
+    AddGamePayload, AdminConfig, AppSettings, AuthStatus, CloudStatus, DashboardData, DeviceInfo,
     DriveFileFlatItem, DriveFileItem, DriveVersionBackup, GoogleUserInfo, OAuthCredentials,
     PathValidation, SaveInfo, SaveTokensPayload, SyncResult, SyncStructureDiff, UpdateGamePayload,
     UserProfile, UserRole,
 };
+
+/// Delay before the startup cloud check so it does not compete with sign-in and boot.
+const STARTUP_CHECK_DELAY_SECS: u64 = 20;
 
 #[tauri::command]
 fn load_dashboard(app: tauri::AppHandle) -> Result<DashboardData, String> {
@@ -582,6 +586,12 @@ async fn sync_game(app: tauri::AppHandle, game_id: String) -> Result<SyncResult,
         .map_err(|e| format!("Sync task failed: {e}"))?
 }
 
+/// Cloud state per game from the startup check (and later syncs) in this app run.
+#[tauri::command]
+fn get_cloud_statuses() -> Vec<CloudStatus> {
+    sync::cloud_statuses()
+}
+
 #[tauri::command]
 async fn sync_all_games(app: tauri::AppHandle) -> Result<Vec<SyncResult>, String> {
     session::spawn_blocking(app.clone(), move || sync::sync_all_games(&app))
@@ -829,6 +839,19 @@ pub fn run() {
                 });
             }
 
+            // Startup cloud check: once signed in, wait for the desktop to settle, then
+            // compare each game's cloud revision with this device and fast-forward
+            // safe ones (setting `auto_pull_on_startup`, skipped on battery).
+            let app_for_check = app.handle().clone();
+            if session::capture(&app_for_check).is_some() {
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(STARTUP_CHECK_DELAY_SECS));
+                    let Some(expected) = session::capture(&app_for_check) else { return };
+                    let Ok(_lease) = session::lease(&app_for_check, &expected) else { return };
+                    sync::startup_check_all(&app_for_check);
+                });
+            }
+
             // Set up system tray icon and context menu
             tray::setup_tray(app).map_err(|e| e.to_string())?;
 
@@ -877,6 +900,7 @@ pub fn run() {
             get_save_info,
             sync_game,
             sync_all_games,
+            get_cloud_statuses,
             check_sync_structure_diff,
             restore_from_cloud,
             push_to_cloud,

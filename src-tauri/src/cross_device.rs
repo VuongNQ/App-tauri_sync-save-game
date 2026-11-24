@@ -3,7 +3,7 @@ use crate::{
     drive_gc::{self, PendingSweep, Policy},
     firestore, gdrive, gdrive_auth,
     models::{
-        BackupMeta, DriveCleanupReport, DriveFileFlatItem, DriveVersionBackup, GameEntry,
+        BackupMeta, CloudState, DriveCleanupReport, DriveFileFlatItem, DriveVersionBackup, GameEntry,
         SyncResult, SyncStructureDiff,
     },
     safe_files,
@@ -779,6 +779,74 @@ fn execute_context(
     })
 }
 
+/// Startup check: compare the cloud manifest revision with this device's baseline.
+///
+/// Cheap when nothing changed (one Firestore read, no hashing, no Drive calls).
+/// When the cloud is newer, local files are hashed and planned with the normal
+/// three-way merge. Only a pure fast-forward (downloads / tombstone deletes, no
+/// local edits, no conflicts) is applied, and only when `auto_pull` is set. It
+/// runs the regular engine, so it never uploads blobs or writes a snapshot.
+pub fn startup_check(
+    app: &AppHandle,
+    game_id: &str,
+    auto_pull: bool,
+) -> Result<(CloudState, Option<SyncResult>), String> {
+    let context = Context::new(app, game_id)?;
+    if context.roots.iter().all(Option::is_none) {
+        return Err("Save path is not set for this game".into());
+    }
+    // Never import legacy layouts here: that downloads files. Plain sync handles it.
+    let Some((cloud, _)) = firestore::load_v2_manifest(app, &context.user, game_id)? else {
+        return Ok((CloudState::NoCloud, None));
+    };
+    sync_v2::validate(&cloud, game_id, &context.labels)?;
+    let baseline = context.baseline()?;
+    match &baseline {
+        Some(b) if b.revision == cloud.revision => return Ok((CloudState::UpToDate, None)),
+        Some(b) if b.revision > cloud.revision => return Ok((CloudState::NeedsReview, None)),
+        _ => {}
+    }
+    let local = context.collect(baseline.as_ref())?;
+    let mut active = cloud.clone();
+    active.files.retain(|e| context.active(&e.key));
+    let hashes = local
+        .iter()
+        .map(|(k, f)| (k.clone(), f.hash.clone()))
+        .collect();
+    let actions = sync_v2::coherent_plan(
+        sync_v2::plan(&hashes, &active, baseline.as_ref(), Mode::Merge)
+            .into_iter()
+            .filter(|(k, _)| context.active(k))
+            .collect(),
+        Mode::Merge,
+    );
+    let state = classify_startup(actions.iter().map(|(_, a)| *a));
+    if state != CloudState::CloudNewer || !auto_pull {
+        return Ok((state, None));
+    }
+    let result = execute_context(&context, Mode::Merge, None)?;
+    Ok((CloudState::Pulled, Some(result)))
+}
+
+/// Fast-forward only when every action moves cloud content onto this device.
+fn classify_startup(actions: impl Iterator<Item = Action>) -> CloudState {
+    let mut incoming = false;
+    for action in actions {
+        match action {
+            Action::Upload | Action::DeleteCloud | Action::Conflict => {
+                return CloudState::NeedsReview
+            }
+            Action::Download | Action::DeleteLocal => incoming = true,
+            Action::Keep => {}
+        }
+    }
+    if incoming {
+        CloudState::CloudNewer
+    } else {
+        CloudState::UpToDate
+    }
+}
+
 pub fn diff(app: &AppHandle, game_id: &str) -> Result<SyncStructureDiff, String> {
     let context = Context::new(app, game_id)?;
     let baseline = context.baseline()?;
@@ -1188,4 +1256,20 @@ fn run_gc(
         report.snapshots_pruned, report.objects_deleted, report.objects_pending
     );
     Ok(report)
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+
+    #[test]
+    fn startup_pulls_only_pure_fast_forward() {
+        use Action::*;
+        assert_eq!(classify_startup([Keep, Keep].into_iter()), CloudState::UpToDate);
+        assert_eq!(classify_startup([Keep, Download].into_iter()), CloudState::CloudNewer);
+        assert_eq!(classify_startup([DeleteLocal].into_iter()), CloudState::CloudNewer);
+        assert_eq!(classify_startup([Download, Upload].into_iter()), CloudState::NeedsReview);
+        assert_eq!(classify_startup([Download, DeleteCloud].into_iter()), CloudState::NeedsReview);
+        assert_eq!(classify_startup([Conflict, Download].into_iter()), CloudState::NeedsReview);
+    }
 }

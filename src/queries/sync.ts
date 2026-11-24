@@ -7,6 +7,7 @@ import {
   createVersionBackup,
   deleteGameDriveFile,
   deleteVersionBackup,
+  getCloudStatuses,
   getSaveInfo,
   listGameDriveFiles,
   listGameDriveFilesFlat,
@@ -21,8 +22,9 @@ import {
   toggleAutoSync,
   toggleTrackChanges,
 } from "../services/tauri";
-import type { DashboardData, SyncResult } from "../types/dashboard";
+import type { CloudState, DashboardData, SyncResult } from "../types/dashboard";
 import {
+  CLOUD_STATUS_KEY,
   DASHBOARD_KEY,
   VALIDATE_PATHS_KEY,
   driveFilesKey,
@@ -267,4 +269,14 @@ export function useGameSyncResultQuery(gameId: string): SyncResult | null {
     staleTime: Infinity,
   });
   return data ?? null;
+}
+
+/** Startup cloud check state for one game, or `null` before the check has run. */
+export function useCloudStateQuery(gameId: string): CloudState | null {
+  const { data } = useQuery({
+    queryKey: CLOUD_STATUS_KEY,
+    queryFn: getCloudStatuses,
+    staleTime: Infinity,
+  });
+  return data?.find((s) => s.gameId === gameId)?.state ?? null;
 }
