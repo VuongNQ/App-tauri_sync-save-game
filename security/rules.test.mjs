@@ -11,7 +11,13 @@ function db(id, uid=`firebase-${id}`) {
 }
 const game={id:'game-a',name:'Test game',totalPlayTimeSeconds:10};
 function profile(id,role='user'){return {userId:id,email:`${id}@example.com`,name:'Player',picture:null,role,registeredAt:'old-time',lastSeenAt:'now'};}
-before(async()=>{env=await initializeTestEnvironment({projectId:'demo-save-game-sync',firestore:{host:'127.0.0.1',port:8080,rules:await readFile(new URL('./firestore.rules',import.meta.url),'utf8')}});});
+before(async()=>{
+  const rules = await readFile(new URL('./firestore.rules',import.meta.url),'utf8');
+  env=await initializeTestEnvironment({projectId:'demo-save-game-sync',firestore:{host:'127.0.0.1',port:8080,rules}});
+  // initializeTestEnvironment only loads (default); load the same rules into the named database.
+  const loaded = await fetch('http://127.0.0.1:8080/emulator/v1/projects/demo-save-game-sync/databases/savegame:securityRules',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rules:{files:[{content:rules}]}})});
+  assert.equal(loaded.status,200,await loaded.text());
+});
 after(async()=>{await env?.cleanup();});
 beforeEach(async()=>{await env.clearFirestore();await env.withSecurityRulesDisabled(async c=>{
   const d=c.firestore();
@@ -88,9 +94,9 @@ function restToken(id) {
   const now = Math.floor(Date.now()/1000);
   return `${encode({alg:'none',typ:'JWT'})}.${encode({sub:`firebase-${id}`,user_id:`firebase-${id}`,aud:'demo-save-game-sync',iss:'https://securetoken.google.com/demo-save-game-sync',iat:now,exp:now+3600,auth_time:now,email:`${id}@example.com`,firebase:{sign_in_provider:'google.com',identities:{'google.com':[id]}}})}.`;
 }
-async function restManifest(owner, identity, condition, value) {
-  const url = 'http://127.0.0.1:8080/v1/projects/demo-save-game-sync/databases/(default)/documents:commit';
-  const name = `projects/demo-save-game-sync/databases/(default)/documents/users/${owner}/syncMeta/v2-test`;
+async function restManifest(owner, identity, condition, value, database = '(default)') {
+  const url = `http://127.0.0.1:8080/v1/projects/demo-save-game-sync/databases/${database}/documents:commit`;
+  const name = `projects/demo-save-game-sync/databases/${database}/documents/users/${owner}/syncMeta/v2-test`;
   const response = await fetch(url, {method:'POST', headers:{Authorization:`Bearer ${restToken(identity)}`,'Content-Type':'application/json'}, body:JSON.stringify({writes:[{update:{name,fields:{data:{stringValue:value},gameId:{stringValue:'game-a'},protocol:{integerValue:'2'}}},currentDocument:condition}]})});
   const body = await response.json();
   return {status:response.status,body,updateTime:body.writeResults?.[0]?.updateTime};
@@ -111,4 +117,8 @@ test('REST stale updateTime cannot overwrite another device publication',async()
 });
 test('REST versioned manifests remain account-isolated',async()=>{
   assert.equal((await restManifest(B,A,{exists:false},'forged')).status,403);
+});
+test('REST named database enforces the same owner rules',async()=>{
+  assert.equal((await restManifest(A,A,{exists:false},'named','savegame')).status,200);
+  assert.equal((await restManifest(B,A,{exists:false},'forged','savegame')).status,403);
 });

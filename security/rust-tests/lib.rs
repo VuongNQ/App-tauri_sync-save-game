@@ -38,3 +38,9 @@ mod models;
 #[cfg(test)]
 #[path = "../../src-tauri/src/firestore.rs"]
 mod production_firestore;
+// firestore.rs reads its build-time project/database ids from firebase_auth.
+#[cfg(test)]
+mod firebase_auth {
+    pub const PROJECT_ID: &str = "demo-save-game-sync";
+    pub const DATABASE_ID: &str = "(default)";
+}

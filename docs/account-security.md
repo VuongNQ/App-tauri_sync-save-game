@@ -103,6 +103,8 @@ Google plugin is asked to sign out; a busy backend does not clear plugin state.
 5. Deploy the reviewed rules manually from the repo root:
    `security/node_modules/.bin/firebase deploy --only firestore:rules --project YOUR_PROJECT`
    Verify the project argument; do not use the demo test project for deployment.
+   For a named database (`FIRESTORE_DATABASE_ID`), deploy with
+   `--only firestore:DATABASE_ID`; see `docs/firestore-named-database.md`.
 6. Sign in once with the intended administrator to create/link its Firebase user.
    On a trusted workstation, configure Application Default Credentials for that
    explicit project. Run the role tool as a **dry run**:
